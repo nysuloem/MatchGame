@@ -560,7 +560,7 @@ function DisplayView({ room, roomCode }) {
         {phase==='superMatch_answering' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
         {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room} roomCode={roomCode}/>}
         {['finalMatch_pickCeleb','finalMatch_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
-        {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room}/>}
+        {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room} roomCode={roomCode}/>}
         {phase==='gameOver' && (
           <div className="mg-display-center-msg">
             <div className="mg-bigsymbol" style={{fontSize:60}}>🎉</div>
@@ -812,32 +812,93 @@ function DisplayFinalMatchActive({ room }) {
   );
 }
 
-function DisplayFinalMatchReveal({ room }) {
+function DisplayFinalMatchReveal({ room, roomCode }) {
   const won = room.finalMatchResult === 'win';
+  const celeb = room.panel[room.finalMatchCelebIndex];
+  const [stage, setStage] = useState('thinking'); // thinking | reveal | result
+  const ranRef = useRef(false);
+
+  useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
+    let cancelled = false;
+    (async () => {
+      await delay(500);
+      playAudience('applause');
+      await speakTTS({
+        text: `Now, let's see if ${celeb?.name || 'our star'} can match ${room.players[room.activeSlot]}.`,
+        isAnnouncer: true,
+        fallbackProfile: ANNOUNCER_PROFILE,
+      });
+      if (cancelled) return;
+      await delay(450);
+      await speakTTS({
+        text: `${celeb?.name || 'Our star'} looks nervous... thinking hard...`,
+        isAnnouncer: true,
+        fallbackProfile: ANNOUNCER_PROFILE,
+      });
+      if (cancelled) return;
+      await delay(650);
+      setStage('reveal');
+      await speakTTS({
+        text: room.finalMatchCelebAnswer || '',
+        code: roomCode,
+        slot: room.finalMatchCelebIndex,
+        fallbackProfile: VOICE_PROFILES[(room.finalMatchCelebIndex || 0) % VOICE_PROFILES.length],
+      });
+      if (cancelled) return;
+      await delay(250);
+      setStage('result');
+      if (won) {
+        playAudience('win');
+        await speakTTS({
+          text: `It's a match! ${room.players[room.activeSlot]} wins ${fmt$(room.finalMatchWinnings)}!`,
+          isAnnouncer: true,
+          fallbackProfile: ANNOUNCER_PROFILE,
+        });
+      } else {
+        playAudience('laugh');
+        await speakTTS({
+          text: `No match. So close!`,
+          isAnnouncer: true,
+          fallbackProfile: ANNOUNCER_PROFILE,
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div className="mg-display-center-msg">
+      {stage === 'result' && won && <Confetti />}
       <div className="mg-display-round final" style={{fontSize:28,marginBottom:12}}>★★ Final Match ★★</div>
       <div className="mg-prompt">{room.finalMatchPrompt}</div>
-      <div style={{display:'flex',gap:32,justifyContent:'center',margin:'24px 0',flexWrap:'wrap'}}>
-        <div className="mg-super-celeb-card revealed">
-          <div className="mg-panelist-name">{room.players[room.activeSlot]}</div>
-          <div className="mg-panelist-answer" style={{fontSize:28}}>{room.finalMatchContestantAnswer}</div>
+      <p className="mg-status" style={{fontSize:22,marginTop:16}}>
+        {room.players[room.activeSlot]} said: <strong>"{room.finalMatchContestantAnswer}"</strong>
+      </p>
+
+      <div className={`mg-final-celeb-focus ${stage === 'thinking' ? 'stressed' : ''} ${stage !== 'thinking' ? 'revealed' : ''}`}>
+        <div style={{width:150,height:150,margin:'0 auto 10px'}}>
+          <CelebAvatar type={celeb?.avatarType} />
         </div>
-        <div className="mg-super-celeb-card revealed" style={{border: won ? '4px solid var(--tri-green)' : undefined}}>
-          <div className="mg-panelist-name">{room.panel[room.finalMatchCelebIndex]?.name}</div>
-          <div className="mg-panelist-answer" style={{fontSize:28}}>{room.finalMatchCelebAnswer}</div>
+        <div className="mg-panelist-name" style={{fontSize:30}}>{celeb?.name}</div>
+        <div className="mg-panelist-tag">{stage === 'thinking' ? 'thinking hard…' : 'reveals:'}</div>
+        <div className="mg-panelist-answer" style={{fontSize: stage === 'thinking' ? 34 : 48, minHeight:64}}>
+          {stage === 'thinking' ? '???' : room.finalMatchCelebAnswer}
         </div>
       </div>
-      {won
+
+      {stage === 'result' ? (won
         ? <div style={{textAlign:'center'}}>
-            <div className="mg-bigsymbol" style={{fontSize:60,color:'var(--tri-green)'}}>✓ MATCH!</div>
+            <div className="mg-bigsymbol" style={{fontSize:60,color:'var(--tri-green)',textShadow:'0 0 20px currentColor'}}>✓ MATCH!</div>
             <div style={{fontFamily:'Bowlby One,sans-serif',fontSize:48,color:'var(--orange-deep)'}}>
               {fmt$(room.finalMatchWinnings)}!!!
             </div>
           </div>
         : <div style={{textAlign:'center',fontFamily:'Bowlby One,sans-serif',fontSize:32,color:'var(--cir-red)'}}>
             No match — so close!
-          </div>}
+          </div>)
+        : <p className="mg-status" style={{fontSize:20}}>The star is thinking...</p>}
     </div>
   );
 }

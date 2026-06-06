@@ -92,6 +92,47 @@ const CHARACTER_ARCHETYPES = [
   'Judge Judy-Ann','Mailman Morris'
 ];
 
+
+
+const PROMPT_CATEGORIES = [
+  'awkward family moments', 'teen and adult dating', 'phones and group chats',
+  'streaming and reality TV', 'school and campus life', 'workplace embarrassment',
+  'gym and body comedy', 'food delivery and restaurants', 'vacations and hotels',
+  'weddings and parties', 'pets behaving badly', 'shopping and money',
+  'cars and driving', 'doctors and health mishaps', 'sports and games'
+];
+
+const FALLBACK_ROUND_PROMPTS = [
+  { prompt: "Grandma Ethel's dating profile said she was looking for a man with a big ___.", answers: ['wallet','heart','truck'], category: 'dating' },
+  { prompt: "Rookie Randy got nervous at the gym and dropped a ___ on his foot.", answers: ['weight','dumbbell','barbell'], category: 'gym' },
+  { prompt: "Tiny Tina's phone autocorrected 'love you' to 'send ___.", answers: ['money','cash','pizza'], category: 'phones' },
+  { prompt: "Chef Rodriguez's secret ingredient turned out to be ___.", answers: ['beer','garlic','ketchup'], category: 'food' },
+  { prompt: "Professor Bumbleworth's Zoom background accidentally showed his ___.", answers: ['underwear','bed','cat'], category: 'work' },
+  { prompt: "Cowboy Pete tried to impress his date by riding a ___.", answers: ['horse','bull','scooter'], category: 'dating' },
+  { prompt: "Nurse Nancy told the doctor the patient needed less stress and more ___.", answers: ['sleep','wine','vacation'], category: 'health' },
+  { prompt: "Tourist Tim packed sunscreen, a swimsuit, and one giant ___.", answers: ['hat','towel','camera'], category: 'vacation' },
+  { prompt: "Librarian Louise shushed everyone, then loudly dropped her ___.", answers: ['phone','book','purse'], category: 'work' },
+  { prompt: "Millionaire Mortimer surprised everyone by arriving at the wedding in a ___.", answers: ['limo','helicopter','taxi'], category: 'wedding' },
+  { prompt: "Yoga Instructor Yasmine said the secret to inner peace is a good ___.", answers: ['nap','stretch','snack'], category: 'gym' },
+  { prompt: "Plumber Phil said the bathroom smelled like ___.", answers: ['toilet','fish','garbage'], category: 'home' },
+  { prompt: "Detective Drake knew the suspect was guilty when he found the missing ___.", answers: ['phone','wallet','shoe'], category: 'mystery' },
+  { prompt: "Astronaut Al's space suit was fine until he sat on a ___.", answers: ['button','rock','taco'], category: 'work' },
+  { prompt: "Grandma Ethel went viral after posting a selfie with her ___.", answers: ['cat','dentures','boyfriend'], category: 'social media' }
+];
+
+const FALLBACK_SUPER_PROMPTS = [
+  { prompt:'Television ___', topAnswers:[{rank:1,answer:'Show',value:500},{rank:2,answer:'Set',value:250},{rank:3,answer:'Remote',value:100}] },
+  { prompt:'Birthday ___', topAnswers:[{rank:1,answer:'Cake',value:500},{rank:2,answer:'Party',value:250},{rank:3,answer:'Gift',value:100}] },
+  { prompt:'___ Dog', topAnswers:[{rank:1,answer:'Hot',value:500},{rank:2,answer:'Guard',value:250},{rank:3,answer:'Big',value:100}] },
+  { prompt:'Phone ___', topAnswers:[{rank:1,answer:'Call',value:500},{rank:2,answer:'Case',value:250},{rank:3,answer:'Number',value:100}] },
+  { prompt:'Hot ___', topAnswers:[{rank:1,answer:'Dog',value:500},{rank:2,answer:'Tub',value:250},{rank:3,answer:'Sauce',value:100}] },
+  { prompt:'Movie ___', topAnswers:[{rank:1,answer:'Star',value:500},{rank:2,answer:'Night',value:250},{rank:3,answer:'Theater',value:100}] },
+  { prompt:'___ Party', topAnswers:[{rank:1,answer:'Birthday',value:500},{rank:2,answer:'House',value:250},{rank:3,answer:'Pool',value:100}] },
+  { prompt:'Gym ___', topAnswers:[{rank:1,answer:'Rat',value:500},{rank:2,answer:'Bag',value:250},{rank:3,answer:'Class',value:100}] },
+  { prompt:'___ Chat', topAnswers:[{rank:1,answer:'Group',value:500},{rank:2,answer:'Video',value:250},{rank:3,answer:'Snap',value:100}] },
+  { prompt:'First ___', topAnswers:[{rank:1,answer:'Date',value:500},{rank:2,answer:'Kiss',value:250},{rank:3,answer:'Love',value:100}] }
+];
+
 const generatePanel = async () => {
   const classic = CLASSIC_MATCH_GAMERS[Math.floor(Math.random() * CLASSIC_MATCH_GAMERS.length)];
   const varietySeed = Math.random().toString(36).slice(2, 8);
@@ -188,133 +229,164 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
   }));
 };
 
-const generateRoundPrompts = async (usedCharacters = []) => {
-  const available = CHARACTER_ARCHETYPES.filter(c => !usedCharacters.includes(c));
-  const shuffled = available.sort(() => Math.random() - 0.5);
+const generateRoundPrompts = async (usedCharacters = [], usedCategories = []) => {
+  const availableChars = CHARACTER_ARCHETYPES.filter(c => !usedCharacters.includes(c));
+  const shuffled = availableChars.sort(() => Math.random() - 0.5);
   const charA = shuffled[0] || 'Old Timer Terry';
   const charB = shuffled[1] || 'Newcomer Nick';
+  const availableCategories = PROMPT_CATEGORIES.filter(c => !usedCategories.includes(c));
+  const cats = (availableCategories.length ? availableCategories : PROMPT_CATEGORIES).sort(() => Math.random() - 0.5).slice(0, 2);
+  const seed = Math.random().toString(36).slice(2, 8);
 
   const text = await callLLM(
-    `Generate exactly 2 Match Game style fill-in-the-blank prompts. Use character names "${charA}" and "${charB}" (one per prompt).
+    `Generate exactly 2 highly matchable Match Game fill-in-the-blank prompts.
 
-WHAT MAKES A GREAT MATCH GAME PROMPT:
-1. The blank has ONE obvious intended meaning — no ambiguity about what is being described.
-2. The blank invites funny, surprising, cheeky, or mildly risqué 1-2 word answers.
-3. The setup gives enough context that everyone immediately understands the situation.
-4. A family audience of adults and 17+ teenagers would naturally converge on 2-3 common answers.
-5. The best answer should be a normal noun or short phrase, not a complicated sentence.
+Use character names "${charA}" and "${charB}" — one per prompt.
+Use two DIFFERENT comedy categories: "${cats[0]}" and "${cats[1]}".
+Variety seed: ${seed}
 
-STYLE TARGET:
-- Mostly classic 1970s Match Game setups, but updated with phones, streaming, dating apps, group chats, gyms, TikTok, DoorDash, gaming, school, work, parents, vacations, weddings, and awkward family moments.
-- Funny and PG-13 is good; crude, hateful, political, or mean-spirited is bad.
+CRITICAL OUTPUT REQUIREMENT:
+For each prompt, include an "answers" array containing the 3 most likely short answers that normal contestants would give. These answer keys will be used to guide the celebrity panel.
 
-BAD PROMPT (avoid): "Nurse Nancy gave a shot but missed and hit ___"
-WHY IT'S BAD: Unclear what she was aiming at. "Arm" is confusing — was that the target or not?
+WHAT MAKES A GREAT PROMPT:
+- The blank has ONE obvious intended meaning.
+- The top answer should feel obvious and concrete, not abstract.
+- Most people should converge on 2-3 answers, not 10 scattered answers.
+- The setup should be funny, classic Match Game-ish, and PG-13/family 17+.
+- Use varied topics: phones, dating apps, group chats, streaming, gyms, food delivery, school, work, driving, pets, hotels, weddings, family, bathrooms, money, parties.
+- Avoid repeating old sentence patterns such as "secret ingredient" or "Zoom background" unless the category really fits.
+- Avoid clues where the answer creates an awkward phrase or repeats the clue.
+- 10-22 words per prompt.
+- Answers must be 1-2 words each.
 
-GOOD PROMPTS (this style):
-- "Tiny Tina's phone autocorrected 'love you' to 'send ___." (clear: what got sent)
-- "Chef Rodriguez's secret ingredient was ___." (clear: what's IN the food)
-- "Grandma Ethel joined a dating app and listed ___ as her hobby." (clear: hobby)
-- "Rookie Randy got nervous at the gym and dropped a ___ on his foot." (clear: object)
-- "Professor Bumbleworth's Zoom background accidentally showed his ___." (clear: embarrassing item/person)
-- "Cowboy Pete tried to impress his date by riding a ___." (clear: thing ridden)
+GOOD EXAMPLE JSON:
+{
+  "promptA": "Tiny Tina's phone autocorrected 'love you' to 'send ___.",
+  "answersA": ["money", "cash", "pizza"],
+  "categoryA": "phones and group chats",
+  "promptB": "Rookie Randy got nervous at the gym and dropped a ___ on his foot.",
+  "answersB": ["weight", "dumbbell", "barbell"],
+  "categoryB": "gym and body comedy",
+  "charA": "Tiny Tina",
+  "charB": "Rookie Randy"
+}
 
-SELF-AUDIT BEFORE RETURNING:
-For each prompt, silently identify the 3 most likely answers. Reject the prompt and make a new one if the top answers would be scattered, abstract, or hard to spell.
-
-STRUCTURE RULES:
-- Vary the structure — don't use the same sentence pattern for both prompts.
-- The blank must be at the END or clearly defined in the middle.
-- Keep it PG-13 — cheeky is fine, crude is not.
-- 10-20 words total per prompt.
-
-Return JSON: {"promptA": "...", "promptB": "...", "charA": "${charA}", "charB": "${charB}"}`,
-    500, true
+Return JSON exactly with keys: promptA, answersA, categoryA, promptB, answersB, categoryB, charA, charB`,
+    800, true
   );
   const parsed = extractJSON(text);
+  const fallbackA = FALLBACK_ROUND_PROMPTS[Math.floor(Math.random() * FALLBACK_ROUND_PROMPTS.length)];
+  const fallbackB = FALLBACK_ROUND_PROMPTS.filter(p => p.prompt !== fallbackA.prompt)[Math.floor(Math.random() * Math.max(1, FALLBACK_ROUND_PROMPTS.length - 1))] || fallbackA;
+  const cleanAnswers = (arr, fb) => (Array.isArray(arr) ? arr : fb.answers).map(a => String(a || '').trim()).filter(Boolean).slice(0, 3);
   return {
-    promptA: parsed.promptA || `${charA} forgot to bring ___ to the party.`,
-    promptB: parsed.promptB || `${charB}'s doctor said they needed more ___ in their life.`,
+    promptA: parsed.promptA || fallbackA.prompt,
+    promptB: parsed.promptB || fallbackB.prompt,
+    answersA: cleanAnswers(parsed.answersA, fallbackA),
+    answersB: cleanAnswers(parsed.answersB, fallbackB),
+    categoryA: parsed.categoryA || fallbackA.category,
+    categoryB: parsed.categoryB || fallbackB.category,
     charA, charB,
   };
 };
 
-const generatePanelAnswers = async (panel, promptText, contestantName, roundNum = 1) => {
+const generatePanelAnswers = async (panel, promptText, contestantName, roundNum = 1, answerKey = []) => {
   const panelStr = panel.map((p, i) => `${i+1}. ${p.name} (${p.tag}; style=${p.answerStyle || 'obvious'}; matchBias=${p.matchBias ?? 0.8})`).join('\n');
-  const targetCommonCount = roundNum === 1 ? 3 : 6;
-  const targetCreativeCount = 6 - targetCommonCount;
+  const key = (answerKey || []).filter(Boolean).slice(0, 3);
+  const targetCommonCount = roundNum === 1 ? 4 : 6;
+  const targetTopAnswerCount = roundNum === 1 ? 2 : 4;
+  const targetCreativeCount = Math.max(0, 6 - targetCommonCount);
   const text = await callLLM(
-    `You are running a Match Game. The prompt is: "${promptText}"
+    `You are writing celebrity panel answers for Match Game.
 
-STEP 1 — Identify the 2-3 most obvious, common answers most people would give for this blank. Think of what a general audience would say most often.
+Prompt: "${promptText}"
+Contestant: ${contestantName}
+Round: ${roundNum}
+Known most-likely audience answers: ${key.length ? key.join(', ') : 'infer the obvious answers'}
 
-STEP 2 — Each celebrity below gives their answer. IMPORTANT RULES:
-- This is regular Round ${roundNum}. Round 1 should be harder; Round 2 should be easier, like classic Match Game.
-- EXACTLY ${targetCommonCount} of the 6 celebrities should choose one of the 2 most obvious answers or a very close synonym.
-- Round 2 should feel easier: celebrities should strongly converge on the same obvious answer rather than all giving different answers.
-- The remaining ${targetCreativeCount} can be more creative/in-character, but still plausible.
-- Each answer reflects the celebrity's personality in HOW they'd say it, but most still aim for the obvious answer.
-- 1-2 WORDS MAXIMUM per answer, no exceptions.
-- Celebrities are trying to match ${contestantName}'s answer, so they lean toward common, concrete responses.
-- Prefer answer words that are easy to match by synonyms: TV/television, beer/drink, abs/muscles, car/vehicle, phone/cell.
+CRITICAL GAMEPLAY GOAL:
+The game is currently too hard. The panel must be funny, but they are mainly trying to MATCH the contestant.
+
+ANSWER RULES:
+- 1-2 WORDS MAXIMUM per celebrity.
+- Use simple concrete words, not explanations.
+- Round 1: at least ${targetCommonCount} of 6 celebrities must choose one of the known obvious answers or a close synonym. At least ${targetTopAnswerCount} should choose the #1 answer.
+- Round 2: all eligible celebrities should be strongly clustered. At least ${targetTopAnswerCount} of 6 should choose the #1 answer exactly or a very close synonym, and the rest should choose #2/#3 unless their persona absolutely demands a joke.
+- Do NOT make every celebrity different. That ruins the game.
+- Prefer matchable synonyms over cleverness. "TV" and "television" are fine; "streaming platform" is too fussy.
+- Keep in-character flavour subtle; the answer itself should remain obvious.
 
 Panel:
 ${panelStr}
 
-Return JSON: {"answers": ["word","word","word","word","word","word"]}`,
-    400, true
+Return JSON: {"answers": ["answer1","answer2","answer3","answer4","answer5","answer6"]}`,
+    500, true
   );
   const parsed = extractJSON(text);
-  const answers = Array.isArray(parsed) ? parsed : (parsed.answers || []);
-  return answers.map(a => (a || '???').split(/\s+/).slice(0, 2).join(' '));
+  let answers = Array.isArray(parsed) ? parsed : (parsed.answers || []);
+  answers = answers.map(a => (a || '???').split(/\s+/).slice(0, 2).join(' '));
+
+  // Safety net: force enough convergence even if the model got too creative.
+  if (key.length) {
+    const top = key[0];
+    const second = key[1] || key[0];
+    const requiredTop = roundNum === 1 ? 2 : 4;
+    for (let i = 0; i < Math.min(requiredTop, 6); i++) answers[i] = answers[i] && answers[i] !== '???' ? (i < requiredTop ? top : answers[i]) : top;
+    if (roundNum >= 2) {
+      for (let i = requiredTop; i < 6; i++) answers[i] = answers[i] && answers[i] !== '???' ? (i % 2 ? second : top) : second;
+    }
+  }
+  return answers.slice(0, 6);
 };
 
 const generateSuperMatchPrompt = async () => {
+  const fallback = FALLBACK_SUPER_PROMPTS[Math.floor(Math.random() * FALLBACK_SUPER_PROMPTS.length)];
   const text = await callLLM(
-    `Generate ONE Super Match fill-in-the-blank phrase. 
+    `Generate ONE Super Match fill-in-the-blank phrase.
 
 STRICT FORMAT: A single short phrase with exactly one blank marked as ___
-STRICT LENGTH: 2-5 words total (including the blank)
-NO character names, NO sentences, NO punctuation at end
-Return ONLY the phrase — nothing else, no explanation, no options, no numbering
+STRICT LENGTH: 2-5 words total including the blank
+The phrase must have three obvious survey answers and a clear #1 answer.
+Avoid weird/awkward compounds and avoid repeating the same noun on both sides.
+NO character names, NO full sentences, NO punctuation at end.
 
-GOOD examples (return exactly this style):
+Good examples:
 Television ___
-___ Dog  
 Birthday ___
-___ Party
-Hot ___
-Baby ___
-Rock ___
-Christmas ___
-___ Star
-Netflix ___
+___ Dog
 Phone ___
-___ Chat
+Hot ___
+Movie ___
+___ Party
 Gym ___
-___ Selfie
+___ Chat
+First ___
 
-Return one phrase only:`,
+Return only the phrase.`,
     60
   );
-  // Take only the first line to prevent multi-prompt responses
-  const firstLine = text.trim().split('\n')[0].trim();
-  return firstLine.replace(/^["'\d.\-\s]+|["']+$/g, '').trim();
+  const firstLine = text.trim().split('\n')[0].trim().replace(/^["'\d.\-\s]+|["']+$/g, '').trim();
+  return firstLine.includes('___') ? firstLine : fallback.prompt;
 };
 
 const generateSuperMatchAnswers = async (prompt, celebNames) => {
-  // Generate the 3 canonical "best" answers AND the celeb suggestions
+  const fallback = FALLBACK_SUPER_PROMPTS.find(p => p.prompt.toLowerCase() === String(prompt).toLowerCase())
+    || FALLBACK_SUPER_PROMPTS[Math.floor(Math.random() * FALLBACK_SUPER_PROMPTS.length)];
   const text = await callLLM(
-    `Super Match game show round. The fill-in-the-blank prompt is: "${prompt}"
+    `Super Match game show round. Prompt: "${prompt}"
 
-Part 1: Generate the TOP 3 most popular/obvious answers that a general audience survey of adults and 17+ teenagers would give. Rank them 1st (most popular), 2nd, 3rd. Each must be 1-2 words. Use classic Match Game survey logic: obvious beats clever.
+Generate the TOP 3 most popular/obvious survey answers for adults and 17+ teenagers. Classic Match Game survey logic: obvious beats clever.
 
-Part 2: Generate suggested answers for these celebrities: ${celebNames.join(', ')}. Each celeb gives 1-2 words — they're trying to help the contestant guess the most popular answer. At least 2 of the 3 celebrities should suggest one of the top 3 answers exactly or a close synonym.
+Also generate suggested answers for these celebrities: ${celebNames.join(', ')}. They are helping the contestant, so at least 2 of the 3 celebrities should suggest one of the top 3 answers exactly.
+
+Prize values must be exactly:
+- Rank 1: 500
+- Rank 2: 250
+- Rank 3: 100
 
 Return JSON:
 {
   "topAnswers": [
-    {"rank": 1, "answer": "...", "value": 1000},
+    {"rank": 1, "answer": "...", "value": 500},
     {"rank": 2, "answer": "...", "value": 250},
     {"rank": 3, "answer": "...", "value": 100}
   ],
@@ -322,35 +394,68 @@ Return JSON:
 }`,
     500, true
   );
-  return extractJSON(text);
+  const parsed = extractJSON(text);
+  const topAnswers = (Array.isArray(parsed.topAnswers) && parsed.topAnswers.length >= 3 ? parsed.topAnswers : fallback.topAnswers)
+    .slice(0, 3)
+    .map((ta, i) => ({ rank: i + 1, answer: String(ta.answer || fallback.topAnswers[i].answer).split(/\s+/).slice(0,2).join(' '), value: [500,250,100][i] }));
+  let celebAnswers = Array.isArray(parsed.celebAnswers) ? parsed.celebAnswers : [];
+  celebAnswers = celebAnswers.slice(0, 3).map((a, i) => String(a || topAnswers[i % topAnswers.length].answer).split(/\s+/).slice(0,2).join(' '));
+  while (celebAnswers.length < 3) celebAnswers.push(topAnswers[celebAnswers.length % topAnswers.length].answer);
+  return { topAnswers, celebAnswers };
 };
+
+const FINAL_MATCH_PROMPTS = [
+  { prompt:'Birthday ___', answers:['Cake','Party','Gift'] },
+  { prompt:'Movie ___', answers:['Star','Night','Theater'] },
+  { prompt:'Phone ___', answers:['Call','Case','Number'] },
+  { prompt:'Hot ___', answers:['Dog','Tub','Sauce'] },
+  { prompt:'First ___', answers:['Date','Kiss','Love'] },
+  { prompt:'___ Dog', answers:['Hot','Guard','Big'] },
+  { prompt:'___ Party', answers:['Birthday','House','Pool'] },
+  { prompt:'Wedding ___', answers:['Cake','Ring','Dress'] },
+  { prompt:'Rock ___', answers:['Star','Music','Band'] },
+  { prompt:'Coffee ___', answers:['Cup','Shop','Break'] },
+  { prompt:'School ___', answers:['Bus','Dance','Lunch'] },
+  { prompt:'Christmas ___', answers:['Tree','Gift','Party'] }
+];
 
 const generateFinalMatchPrompt = async () => {
+  const fallback = FINAL_MATCH_PROMPTS[Math.floor(Math.random() * FINAL_MATCH_PROMPTS.length)];
   const text = await callLLM(
-    `Generate a Final Match fill-in-the-blank prompt. Similar to Super Match — short, 2-5 words total, one blank. It must have one VERY obvious most-popular answer that two people thinking alike would likely both say.
+    `Generate ONE Final Match clue as JSON.
 
-STRICT QUALITY RULES:
-- The phrase should be a familiar compound phrase or common expression.
-- Do NOT generate prompts where the obvious answer creates a redundant or awkward phrase, like "First Date ___" -> "Dinner Date".
-- The blank should be strongly constrained: "New Year's ___" -> Eve, "___ Ball" -> Beach/Base, "Rock ___" -> Star/Music, "___ Music" -> Pop/Rock, "Movie ___" -> Star, "Phone ___" -> Call, "Birthday ___" -> Cake.
-- Avoid abstract, vague, or overly clever clues.
+It must be a short, familiar phrase with exactly one blank marked ___ and one very obvious most-popular answer.
+Use clean survey-style phrases like: Birthday ___ -> Cake, Movie ___ -> Star, Phone ___ -> Call, ___ Dog -> Hot.
+Avoid awkward clues like "First Date ___" because the answer can create a redundant phrase.
+Avoid clever, abstract, or niche clues.
 
-Return just the prompt text, nothing else.`,
-    80
+Return JSON: {"prompt":"...", "answers":["most obvious", "second", "third"]}`,
+    160, true
   );
-  return text.trim().replace(/^["']|["']$/g, '');
+  try {
+    const parsed = extractJSON(text);
+    const prompt = String(parsed.prompt || '').trim();
+    const answers = Array.isArray(parsed.answers) ? parsed.answers.map(a => String(a).trim()).filter(Boolean).slice(0,3) : [];
+    if (prompt.includes('___') && answers.length) return { prompt, answers };
+  } catch {}
+  return fallback;
 };
 
-const generateFinalMatchCelebAnswer = async (prompt, celeb, contestantName) => {
+const generateFinalMatchCelebAnswer = async (prompt, celeb, contestantName, answerKey = []) => {
+  const keyText = (answerKey || []).filter(Boolean).join(', ');
   const text = await callLLM(
-    `Final Match game show. "${contestantName}" just answered the prompt: "${prompt}"
+    `Final Match game show. Prompt: "${prompt}"
+Contestant: ${contestantName}
+Celebrity: ${celeb.name} (${celeb.tag})
+Likely survey answers: ${keyText || 'infer the obvious answer'}
 
-${celeb.name} (${celeb.tag}) is TRYING VERY HARD to match exactly what ${contestantName} would say. They think carefully about what the most obvious, common answer is — the one most people would give. They want to win for the contestant.
-
-Give ${celeb.name}'s answer. 1-2 WORDS MAXIMUM. Just the answer, nothing else.`,
+${celeb.name} is under pressure and trying VERY HARD to match the contestant. The answer should almost always be the #1 obvious answer, not a joke.
+Give only the answer, 1-2 words maximum.`,
     30
   );
-  return text.trim().split(/\s+/).slice(0, 2).join(' ');
+  let ans = text.trim().replace(/^['"]|['"]$/g, '').split(/\s+/).slice(0, 2).join(' ');
+  if (!ans && answerKey?.[0]) ans = answerKey[0];
+  return ans;
 };
 
 // ─── SCORING ──────────────────────────────────────────────────
@@ -449,6 +554,8 @@ app.post('/api/room', async (req, res) => {
       promptA: null, promptB: null,
       chosenPrompt: null,
       usedCharacters: [],
+      usedCategories: [],
+      chosenAnswerKey: [],
       contestantAnswer: null,
       panelAnswers: [],
       matches: [],
@@ -460,6 +567,7 @@ app.post('/api/room', async (req, res) => {
       superMatchContestantAnswer: null,
       superMatchWinnings: 0,
       finalMatchPrompt: null,
+      finalMatchAnswerKey: [],
       finalMatchCelebIndex: null,
       finalMatchContestantAnswer: null,
       finalMatchCelebAnswer: null,
@@ -540,10 +648,13 @@ const startNewRound = async (room, roundNum) => {
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null }));
-    const { promptA, promptB, charA, charB } = await generateRoundPrompts(room.usedCharacters);
+    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || []);
     room.promptA = promptA;
     room.promptB = promptB;
+    room.promptAnswerKeys = { A: answersA, B: answersB };
+    room.chosenAnswerKey = [];
     room.usedCharacters.push(charA, charB);
+    room.usedCategories = [...(room.usedCategories || []), categoryA, categoryB].slice(-10);
 
     // Determine who picks first
     if (roundNum === 1) {
@@ -588,6 +699,7 @@ app.post('/api/room/:code/pick-prompt', async (req, res) => {
   if (slot !== room.activeSlot) return res.status(403).json({ error: 'Not your turn to pick' });
 
   room.chosenPrompt = choice === 'A' ? room.promptA : room.promptB;
+  room.chosenAnswerKey = choice === 'A' ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
   room.phase = 'answering';
   bump(room);
   res.json({ room });
@@ -611,7 +723,7 @@ app.post('/api/room/:code/answer', async (req, res) => {
     const inactiveCelebIndices = room.round === 2
       ? (room.round1Matches?.[room.activeSlot] || [])
       : [];
-    const answers = await generatePanelAnswers(room.panel, room.chosenPrompt, room.players[room.activeSlot], room.round);
+    const answers = await generatePanelAnswers(room.panel, room.chosenPrompt, room.players[room.activeSlot], room.round, room.chosenAnswerKey || []);
     room.panel = room.panel.map((p, i) => inactiveCelebIndices.includes(i)
       ? ({ ...p, answer: null, inactiveThisTurn: true })
       : ({ ...p, answer: answers[i] || '???', inactiveThisTurn: false })
@@ -655,9 +767,9 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     // The "other" prompt goes to the other contestant
     const other = otherSlot(currentActive);
     room.activeSlot = other;
-    room.chosenPrompt = currentActive === 1
-      ? (room.promptA === room.chosenPrompt ? room.promptB : room.promptA)
-      : (room.promptA === room.chosenPrompt ? room.promptB : room.promptA);
+    const remainingIsA = room.promptA !== room.chosenPrompt;
+    room.chosenPrompt = remainingIsA ? room.promptA : room.promptB;
+    room.chosenAnswerKey = remainingIsA ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
     // Actually just give them the remaining prompt — no pick for contestant 2
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
     room.contestantAnswer = null;
@@ -722,7 +834,7 @@ app.post('/api/room/:code/supermatch-pick', async (req, res) => {
     const result = await generateSuperMatchAnswers(room.superMatchPrompt, celebNames);
     room.superMatchTopAnswers = Array.isArray(result.topAnswers) ? result.topAnswers : [];
     if (room.superMatchTopAnswers.length === 0) {
-      room.superMatchTopAnswers = [{ rank: 1, answer: (result.celebAnswers || [])[0] || 'answer', value: 1000 }];
+      room.superMatchTopAnswers = [{ rank: 1, answer: (result.celebAnswers || [])[0] || 'answer', value: 500 }];
     }
     // Store celeb answers on the panel entries
     safeIndices.forEach((panelIdx, i) => {
@@ -788,8 +900,9 @@ app.post('/api/room/:code/finalmatch-start', async (req, res) => {
   res.json({ room });
 
   try {
-    const prompt = await generateFinalMatchPrompt();
-    room.finalMatchPrompt = prompt;
+    const fm = await generateFinalMatchPrompt();
+    room.finalMatchPrompt = fm.prompt;
+    room.finalMatchAnswerKey = fm.answers || [];
     room.finalMatchCelebIndex = null;
     room.finalMatchContestantAnswer = null;
     room.finalMatchCelebAnswer = null;
@@ -828,7 +941,7 @@ app.post('/api/room/:code/finalmatch-answer', async (req, res) => {
   try {
     const celeb = room.panel[room.finalMatchCelebIndex];
     const celebAnswer = await generateFinalMatchCelebAnswer(
-      room.finalMatchPrompt, celeb, room.players[room.activeSlot]
+      room.finalMatchPrompt, celeb, room.players[room.activeSlot], room.finalMatchAnswerKey || []
     );
     room.finalMatchCelebAnswer = celebAnswer;
     const matched = fuzzyMatch(room.finalMatchContestantAnswer, celebAnswer);

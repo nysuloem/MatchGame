@@ -690,3 +690,28 @@ body { margin: 0; }
   transform: scale(1.35);
   text-shadow: 0 0 22px currentColor, 0 0 44px currentColor, 0 0 70px currentColor;
 }
+
+/* Focused Final Match reveal */
+.mg-final-celeb-focus {
+  width: min(420px, 90vw);
+  margin: 22px auto;
+  padding: 22px;
+  background: var(--cream);
+  border: 5px solid var(--brown);
+  box-shadow: 8px 8px 0 var(--brown);
+  text-align: center;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+.mg-final-celeb-focus.stressed {
+  animation: mg-stressed 0.55s infinite alternate ease-in-out;
+  border-color: var(--orange-deep);
+}
+.mg-final-celeb-focus.revealed {
+  transform: scale(1.04);
+  border-color: var(--yellow);
+  box-shadow: 0 0 28px rgba(255, 210, 63, 0.8), 8px 8px 0 var(--brown);
+}
+@keyframes mg-stressed {
+  from { transform: rotate(-1deg) scale(1.01); }
+  to { transform: rotate(1deg) scale(1.04); }
+}
