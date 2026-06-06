@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -13,19 +12,22 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
 const PORT = process.env.PORT || 3001;
-const CLAUDE_MODEL = 'claude-sonnet-4-5-20250929';
+// LLM model used for panel generation, prompts, and panelist answers.
+// gpt-4o-mini is cheap, fast, and plenty smart for this task. Swap to
+// gpt-5.5-mini or gpt-5.5 if you want richer creativity (and don't mind cost).
+const LLM_MODEL = process.env.OPENAI_LLM_MODEL || 'gpt-4o-mini';
 const TTS_MODEL = 'gpt-4o-mini-tts';
 const TTS_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse'];
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+if (!process.env.OPENAI_API_KEY) {
+  console.error('FATAL: OPENAI_API_KEY environment variable is not set.');
+  console.error('Set it in Railway → Variables, then redeploy.');
+  process.exit(1);
+}
 
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
-const TTS_ENABLED = !!openai;
-console.log(`TTS: ${TTS_ENABLED ? 'ENABLED (OpenAI)' : 'DISABLED (no OPENAI_API_KEY) — clients will use browser fallback'}`);
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const TTS_ENABLED = true; // Same key powers both LLM and TTS
+console.log(`Match Game server starting. LLM model: ${LLM_MODEL}, TTS model: ${TTS_MODEL}`);
 
 // ─────────────────────────────────────────────────────────────
 // IN-MEMORY ROOM STORE
@@ -55,15 +57,19 @@ const makeRoomCode = () => {
 };
 
 // ─────────────────────────────────────────────────────────────
-// CLAUDE HELPERS
+// LLM HELPERS
 // ─────────────────────────────────────────────────────────────
-const callClaude = async (prompt, maxTokens = 1200) => {
-  const response = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
+const callLLM = async (prompt, maxTokens = 1200, jsonMode = false) => {
+  const params = {
+    model: LLM_MODEL,
     max_tokens: maxTokens,
     messages: [{ role: 'user', content: prompt }],
-  });
-  return response.content.map(b => b.text || '').join('');
+  };
+  if (jsonMode) {
+    params.response_format = { type: 'json_object' };
+  }
+  const response = await openai.chat.completions.create(params);
+  return response.choices[0]?.message?.content || '';
 };
 
 const extractJSON = (text) => {
@@ -73,7 +79,7 @@ const extractJSON = (text) => {
 };
 
 const generatePanel = async () => {
-  const text = await callClaude(
+  const text = await callLLM(
     `Generate a panel of 6 well-known public figures for a Match Game style game show. Mix actors, musicians, athletes, comedians, TV hosts, and tech figures who are widely recognizable in 2026. Make it a FUN, ECLECTIC mix — different ages, fields, and personalities. Avoid politicians.
 
 For each panelist, provide:
@@ -84,11 +90,13 @@ For each panelist, provide:
 
 IMPORTANT: assign DIFFERENT voices to different panelists when possible. Avoid using the same voice for two panelists in the same panel.
 
-Return ONLY valid JSON, no other text:
-[{"name":"...","tag":"...","voice":"...","voiceInstructions":"..."}, ...]`,
-    1500
+Return a JSON object with a single key "panel" whose value is an array of 6 panelist objects:
+{"panel": [{"name":"...","tag":"...","voice":"...","voiceInstructions":"..."}, ...]}`,
+    1500,
+    true,
   );
-  const panel = extractJSON(text);
+  const parsed = extractJSON(text);
+  const panel = Array.isArray(parsed) ? parsed : (parsed.panel || []);
   return panel.slice(0, 6).map(p => ({
     name: p.name,
     tag: p.tag,
@@ -99,7 +107,7 @@ Return ONLY valid JSON, no other text:
 };
 
 const generatePrompt = async () => {
-  const text = await callClaude(
+  const text = await callLLM(
     `Generate ONE Match Game style fill-in-the-blank prompt. Match Game prompts are short, slightly absurd, and invite funny one-word or short-phrase answers. They often start with a character name ("Dumb Dora", "Old Man Periwinkle", "Tiny Tina") doing something exaggerated.
 
 Examples of the style:
@@ -116,7 +124,7 @@ Generate ONE new prompt in this style. Use ___ as the blank. Keep it PG-13 — m
 
 const generatePanelAnswers = async (panel, promptText) => {
   const panelStr = panel.map((p, i) => `${i + 1}. ${p.name} (${p.tag})`).join('\n');
-  const text = await callClaude(
+  const text = await callLLM(
     `You are running a Match Game style game show. The fill-in-the-blank prompt is:
 
 "${promptText}"
@@ -126,11 +134,13 @@ These 6 celebrity panelists each give an answer IN CHARACTER as themselves — r
 Panel:
 ${panelStr}
 
-Return ONLY valid JSON, an array of 6 strings in the same order as the panel:
-["answer1","answer2","answer3","answer4","answer5","answer6"]`,
-    500
+Return a JSON object with a single key "answers" whose value is an array of 6 strings, in the same order as the panel:
+{"answers": ["answer1","answer2","answer3","answer4","answer5","answer6"]}`,
+    500,
+    true,
   );
-  return extractJSON(text);
+  const parsed = extractJSON(text);
+  return Array.isArray(parsed) ? parsed : (parsed.answers || []);
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -339,9 +349,6 @@ app.get('/api/config', (req, res) => {
 // Text-to-speech - returns MP3 audio
 // Body: { slot: 0-5 for panelist, OR isAnnouncer: true, text: string, code?: string }
 app.post('/api/speak', async (req, res) => {
-  if (!openai) {
-    return res.status(503).json({ error: 'TTS not configured on server' });
-  }
   const { code, slot, text, isAnnouncer } = req.body;
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ error: 'text required' });

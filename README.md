@@ -25,7 +25,7 @@ match-game/
 The server:
 - Serves the built React frontend statically
 - Provides REST endpoints for room state, polled every 1.5s by clients
-- Calls the Anthropic API to generate the celebrity panel, prompts, and in-character answers
+- Calls the OpenAI API to generate the celebrity panel, prompts, and in-character answers (LLM) and to synthesize each panelist's voice (TTS)
 - Stores rooms in memory (rooms expire after 4 hours of inactivity)
 
 ## Local development
@@ -36,7 +36,7 @@ npm run install:all
 
 # In one terminal — start the backend
 cd server
-ANTHROPIC_API_KEY=sk-ant-... OPENAI_API_KEY=sk-... npm run dev
+OPENAI_API_KEY=sk-... npm run dev
 
 # In another terminal — start the frontend with hot reload
 cd client
@@ -53,11 +53,9 @@ The Vite dev server proxies `/api/*` requests to `http://localhost:3001`, so the
 
 2. **Create a new Railway project** from that repo (Dashboard → New Project → Deploy from GitHub).
 
-3. **Add environment variables** in Railway → Variables:
-   - `ANTHROPIC_API_KEY` = your Anthropic API key (starts with `sk-ant-...`) — used for panel generation, prompts, and in-character answers
-   - `OPENAI_API_KEY` = your OpenAI API key (starts with `sk-...`) — used for text-to-speech (each celebrity gets a distinct AI voice)
-
-   If you skip `OPENAI_API_KEY`, the app still works — it falls back to the browser's built-in speech synthesis (which varies by device).
+3. **Add the environment variable** in Railway → Variables:
+   - `OPENAI_API_KEY` = your OpenAI API key (starts with `sk-...`) — used for both LLM (panel/prompts/answers) and TTS (voices)
+   - *(optional)* `OPENAI_LLM_MODEL` = override the LLM model (default: `gpt-4o-mini`). Use `gpt-5.5-mini` or `gpt-5.5` for richer creativity at higher cost.
 
 4. **Generate a public domain** in Railway → Settings → Networking → Generate Domain.
 
@@ -95,4 +93,4 @@ Cost: roughly $0.015 per minute of generated audio. A typical round has ~30 seco
 
 ## Cost notes
 
-Each round triggers two Claude API calls (prompt generation + panel answers) and 6+ OpenAI TTS calls. Total per round is roughly $0.02 (Sonnet 4.5 + gpt-4o-mini-tts). A full 10-round game is well under $0.25 total.
+Each round triggers two `gpt-4o-mini` chat completion calls (prompt generation + panel answers) plus 6+ `gpt-4o-mini-tts` TTS calls. With gpt-4o-mini at fractions of a cent per call and TTS at ~$0.015/min of audio, a typical 10-round game costs well under $0.20 total. Swapping to `gpt-5.5-mini` would raise this by maybe 10×; still cheap.
