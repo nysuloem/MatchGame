@@ -93,19 +93,20 @@ body { margin: 0; }
   align-items: stretch;
   background: var(--brown);
   border-bottom: 4px solid var(--yellow);
-  min-height: 120px;
+  height: 90px;
   flex-shrink: 0;
 }
 
 .mg-display-contestant {
   flex: 1;
-  padding: 12px 20px;
+  padding: 8px 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   background: rgba(0,0,0,0.2);
   position: relative;
+  transition: background 0.4s;
 }
 .mg-display-contestant.left { border-right: 2px solid var(--yellow); }
 .mg-display-contestant.right { border-left: 2px solid var(--yellow); }
@@ -116,12 +117,12 @@ body { margin: 0; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 12px;
+  padding: 6px;
   text-align: center;
 }
 .mg-display-show-title {
   font-family: 'Bowlby One', sans-serif;
-  font-size: clamp(20px, 3vw, 36px);
+  font-size: clamp(16px, 2.4vw, 28px);
   color: var(--yellow);
   text-shadow: 2px 2px 0 var(--orange-deep);
   line-height: 1;
@@ -130,46 +131,46 @@ body { margin: 0; }
   font-family: 'DM Serif Display', serif;
   font-style: italic;
   color: var(--cream);
-  font-size: clamp(11px, 1.4vw, 16px);
-  margin-top: 4px;
+  font-size: clamp(10px, 1.2vw, 14px);
+  margin-top: 2px;
 }
 .mg-display-round {
   font-family: 'Bowlby One', sans-serif;
-  font-size: clamp(12px, 1.8vw, 20px);
+  font-size: clamp(11px, 1.5vw, 17px);
   color: var(--orange);
-  margin-top: 2px;
+  margin-top: 1px;
   letter-spacing: 0.1em;
 }
 .mg-display-round.super { color: var(--yellow); }
 .mg-display-round.final { color: var(--pink); }
 .mg-display-code {
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--cream);
   opacity: 0.5;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .mg-contestant-symbol {
-  font-size: clamp(24px, 3vw, 36px);
+  font-size: clamp(18px, 2.5vw, 28px);
   line-height: 1;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .mg-contestant-symbol.tri { color: var(--tri-green); text-shadow: 0 0 10px var(--tri-green); }
 .mg-contestant-symbol.cir { color: var(--cir-red); text-shadow: 0 0 10px var(--cir-red); }
 .mg-contestant-name {
   font-family: 'Bowlby One', sans-serif;
-  font-size: clamp(14px, 2vw, 22px);
+  font-size: clamp(13px, 1.8vw, 20px);
   color: var(--cream);
   letter-spacing: 0.06em;
   text-align: center;
 }
 .mg-contestant-num {
   font-family: 'Bowlby One', sans-serif;
-  font-size: clamp(28px, 4vw, 48px);
+  font-size: clamp(22px, 3vw, 36px);
   color: var(--yellow);
   line-height: 1;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 .mg-your-turn {
   font-family: 'Bowlby One', sans-serif;
@@ -183,10 +184,11 @@ body { margin: 0; }
 
 .mg-display-main {
   flex: 1;
-  overflow-y: auto;
-  padding: 16px;
+  overflow: hidden;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .mg-display-waiting {
@@ -202,10 +204,11 @@ body { margin: 0; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   flex: 1;
+  min-height: 0;
   text-align: center;
-  padding: 16px;
+  padding: 4px;
 }
 
 .mg-display-round-active {
@@ -232,21 +235,30 @@ body { margin: 0; }
 .mg-panel-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   max-width: 900px;
-  margin: 12px auto;
+  margin: 8px auto;
 }
 .mg-panel-grid.display {
   max-width: 100%;
+  flex: 1;
+  min-height: 0;
+  /* Keep all 6 cards visible — 2 rows of 3 */
+  grid-template-rows: repeat(2, 1fr);
+  height: 100%;
 }
 
 .mg-panelist {
   background: white;
   border: 3px solid var(--brown);
-  padding: 10px 10px 6px;
+  padding: 6px 8px 4px;
   position: relative;
   transition: transform 0.3s, background 0.3s;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 .mg-panelist.revealed { background: var(--cream); }
 .mg-panelist.matched {
