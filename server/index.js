@@ -77,29 +77,38 @@ const CHARACTER_ARCHETYPES = [
 
 const generatePanel = async () => {
   const text = await callLLM(
-    `Generate a panel of 6 well-known public figures for a Match Game style game show. Mix actors, musicians, athletes, comedians, TV hosts, and tech figures widely recognizable in 2026. Make it FUN and ECLECTIC — different ages, fields, personalities. Avoid politicians.
+    `Generate a panel of 6 well-known public figures for a Match Game style game show. Mix actors, musicians, athletes, comedians, TV hosts, internet personalities, and tech figures widely recognizable to adults and older teenagers in 2026. Make it FUN and ECLECTIC — different ages, fields, personalities. Avoid politicians.
 
 For each panelist provide:
-- "name": full name
+- "name": the short public/stage name they are normally known by on screen. No middle names, initials, titles, suffixes, or overly formal full legal names unless that is how the public usually knows them
 - "tag": 3-5 word description of their public persona
 - "avatarType": one of these sketch styles that best fits them visually: "man_young", "man_middle", "man_older", "woman_young", "woman_middle", "woman_older", "person_athletic", "person_glamorous"
 - "voice": best matching OpenAI TTS voice from: ${TTS_VOICES.join(', ')}. (onyx=deep authoritative male, nova=bright friendly female, fable=animated British male, coral=warm expressive female, shimmer=bright female, echo=calm male, alloy=neutral)
 - "voiceInstructions": 1-2 sentences on HOW to deliver lines as this person — pace, energy, accent, mannerisms.
+- "answerStyle": one of "obvious", "literal", "punny", "wildcard", "deadpan", "chaotic". Use mostly obvious/literal/punny, with only one true wildcard.
+- "matchBias": a number from 0.65 to 0.95 describing how hard this panelist usually tries to match contestants.
 
 Assign DIFFERENT voices to different panelists.
 
-Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"...","voiceInstructions":"..."}, ...]}`,
+Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"...","voiceInstructions":"...","answerStyle":"...","matchBias":0.8}, ...]}`,
     1500, true
   );
   const parsed = extractJSON(text);
   const panel = Array.isArray(parsed) ? parsed : (parsed.panel || []);
   const validAvatarTypes = ['man_young','man_middle','man_older','woman_young','woman_middle','woman_older','person_athletic','person_glamorous'];
+  const cleanPanelName = (name = '') => String(name)
+    .replace(/\b(Mr|Mrs|Ms|Miss|Dr|Sir|Dame)\.?\s+/gi, '')
+    .replace(/\s+(Jr|Sr|II|III|IV)\.?$/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return panel.slice(0, 6).map(p => ({
-    name: p.name,
+    name: cleanPanelName(p.name),
     tag: p.tag,
     avatarType: validAvatarTypes.includes(p.avatarType) ? p.avatarType : 'man_middle',
     voice: TTS_VOICES.includes(p.voice) ? p.voice : 'alloy',
     voiceInstructions: p.voiceInstructions || '',
+    answerStyle: ['obvious','literal','punny','wildcard','deadpan','chaotic'].includes(p.answerStyle) ? p.answerStyle : 'obvious',
+    matchBias: Number.isFinite(Number(p.matchBias)) ? Math.max(0.55, Math.min(0.98, Number(p.matchBias))) : 0.8,
     answer: null,
   }));
 };
@@ -114,27 +123,35 @@ const generateRoundPrompts = async (usedCharacters = []) => {
     `Generate exactly 2 Match Game style fill-in-the-blank prompts. Use character names "${charA}" and "${charB}" (one per prompt).
 
 WHAT MAKES A GREAT MATCH GAME PROMPT:
-1. The blank has ONE obvious intended meaning — no ambiguity about what is being described
-2. The blank invites funny, surprising, or slightly risqué 1-2 word answers
-3. The setup gives enough context that everyone immediately understands the situation
-4. Multiple people would naturally think of the same funny answer
+1. The blank has ONE obvious intended meaning — no ambiguity about what is being described.
+2. The blank invites funny, surprising, cheeky, or mildly risqué 1-2 word answers.
+3. The setup gives enough context that everyone immediately understands the situation.
+4. A family audience of adults and 17+ teenagers would naturally converge on 2-3 common answers.
+5. The best answer should be a normal noun or short phrase, not a complicated sentence.
+
+STYLE TARGET:
+- Mostly classic 1970s Match Game setups, but updated with phones, streaming, dating apps, group chats, gyms, TikTok, DoorDash, gaming, school, work, parents, vacations, weddings, and awkward family moments.
+- Funny and PG-13 is good; crude, hateful, political, or mean-spirited is bad.
 
 BAD PROMPT (avoid): "Nurse Nancy gave a shot but missed and hit ___"
 WHY IT'S BAD: Unclear what she was aiming at. "Arm" is confusing — was that the target or not?
 
 GOOD PROMPTS (this style):
+- "Tiny Tina's phone autocorrected 'love you' to 'send ___." (clear: what got sent)
 - "Chef Rodriguez's secret ingredient was ___." (clear: what's IN the food)
-- "Tourist Tim was so lost, he asked a ___ for directions." (clear: who he asked)
-- "Old Man Henderson showed up to his date wearing nothing but ___." (clear: what he wore)
-- "Professor Bumbleworth forgot to wear ___ to class again." (clear: what was missing)
-- "Grandma Ethel's famous pie always had ___ in it." (clear: the secret ingredient)
-- "Rookie Randy was so nervous, he ___ right before the big game." (clear: what he did)
+- "Grandma Ethel joined a dating app and listed ___ as her hobby." (clear: hobby)
+- "Rookie Randy got nervous at the gym and dropped a ___ on his foot." (clear: object)
+- "Professor Bumbleworth's Zoom background accidentally showed his ___." (clear: embarrassing item/person)
+- "Cowboy Pete tried to impress his date by riding a ___." (clear: thing ridden)
+
+SELF-AUDIT BEFORE RETURNING:
+For each prompt, silently identify the 3 most likely answers. Reject the prompt and make a new one if the top answers would be scattered, abstract, or hard to spell.
 
 STRUCTURE RULES:
-- Vary the structure — don't use the same sentence pattern for both prompts
-- The blank must be at the END or clearly defined in the middle
-- Keep it PG-13 — cheeky is fine, crude is not
-- 10-20 words total per prompt
+- Vary the structure — don't use the same sentence pattern for both prompts.
+- The blank must be at the END or clearly defined in the middle.
+- Keep it PG-13 — cheeky is fine, crude is not.
+- 10-20 words total per prompt.
 
 Return JSON: {"promptA": "...", "promptB": "...", "charA": "${charA}", "charB": "${charB}"}`,
     500, true
@@ -147,19 +164,23 @@ Return JSON: {"promptA": "...", "promptB": "...", "charA": "${charA}", "charB": 
   };
 };
 
-const generatePanelAnswers = async (panel, promptText, contestantName) => {
-  const panelStr = panel.map((p, i) => `${i+1}. ${p.name} (${p.tag})`).join('\n');
+const generatePanelAnswers = async (panel, promptText, contestantName, roundNum = 1) => {
+  const panelStr = panel.map((p, i) => `${i+1}. ${p.name} (${p.tag}; style=${p.answerStyle || 'obvious'}; matchBias=${p.matchBias ?? 0.8})`).join('\n');
+  const targetCommonCount = roundNum === 1 ? 3 : 5;
+  const targetCreativeCount = 6 - targetCommonCount;
   const text = await callLLM(
     `You are running a Match Game. The prompt is: "${promptText}"
 
 STEP 1 — Identify the 2-3 most obvious, common answers most people would give for this blank. Think of what a general audience would say most often.
 
 STEP 2 — Each celebrity below gives their answer. IMPORTANT RULES:
-- At least 4 of the 6 celebrities MUST pick one of those 2-3 obvious answers (this is how contestants score matches)
-- The remaining 1-2 celebrities can be more creative/in-character
-- Each answer reflects the celebrity's personality in HOW they'd say it, but most still aim for the obvious answer
-- 1-2 WORDS MAXIMUM per answer, no exceptions
-- Celebrities are trying to match ${contestantName}'s answer, so they lean toward the most common response
+- This is regular Round ${roundNum}. Round 1 should be harder; Round 2 should be easier, like classic Match Game.
+- EXACTLY ${targetCommonCount} of the 6 celebrities should choose one of the 2-3 obvious answers or a very close synonym.
+- The remaining ${targetCreativeCount} can be more creative/in-character, but still plausible.
+- Each answer reflects the celebrity's personality in HOW they'd say it, but most still aim for the obvious answer.
+- 1-2 WORDS MAXIMUM per answer, no exceptions.
+- Celebrities are trying to match ${contestantName}'s answer, so they lean toward common, concrete responses.
+- Prefer answer words that are easy to match by synonyms: TV/television, beer/drink, abs/muscles, car/vehicle, phone/cell.
 
 Panel:
 ${panelStr}
@@ -191,6 +212,11 @@ Baby ___
 Rock ___
 Christmas ___
 ___ Star
+Netflix ___
+Phone ___
+___ Chat
+Gym ___
+___ Selfie
 
 Return one phrase only:`,
     60
@@ -205,9 +231,9 @@ const generateSuperMatchAnswers = async (prompt, celebNames) => {
   const text = await callLLM(
     `Super Match game show round. The fill-in-the-blank prompt is: "${prompt}"
 
-Part 1: Generate the TOP 3 most popular/obvious answers that a general audience survey would give. Rank them 1st (most popular), 2nd, 3rd. Each must be 1-2 words.
+Part 1: Generate the TOP 3 most popular/obvious answers that a general audience survey of adults and 17+ teenagers would give. Rank them 1st (most popular), 2nd, 3rd. Each must be 1-2 words. Use classic Match Game survey logic: obvious beats clever.
 
-Part 2: Generate suggested answers for these celebrities: ${celebNames.join(', ')}. Each celeb gives 1-2 words — they're trying to help the contestant guess the most popular answer.
+Part 2: Generate suggested answers for these celebrities: ${celebNames.join(', ')}. Each celeb gives 1-2 words — they're trying to help the contestant guess the most popular answer. At least 2 of the 3 celebrities should suggest one of the top 3 answers exactly or a close synonym.
 
 Return JSON:
 {
@@ -227,7 +253,8 @@ const generateFinalMatchPrompt = async () => {
   const text = await callLLM(
     `Generate a Final Match fill-in-the-blank prompt. Similar to Super Match — short, 2-5 words total, one blank. Should have one VERY obvious most-popular answer that two people thinking alike would likely both say.
 
-Examples: "New Year's ___", "___ Ball", "Rock ___", "___ Music", "___ Star"
+Use classic Match Game survey-answer logic, but modern examples are welcome.
+Examples: "New Year's ___", "___ Ball", "Rock ___", "___ Music", "___ Star", "Netflix ___", "Phone ___"
 
 Return just the prompt text, nothing else.`,
     80
@@ -248,15 +275,64 @@ Give ${celeb.name}'s answer. 1-2 WORDS MAXIMUM. Just the answer, nothing else.`,
 };
 
 // ─── SCORING ──────────────────────────────────────────────────
-const norm = (s) => (s||'').toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
+const SYNONYM_GROUPS = [
+  ['tv','television','telly','screen'],
+  ['abs','ab','muscle','muscles','sixpack','six pack','pecs','biceps','body'],
+  ['beer','drink','drinks','booze','alcohol','liquor','wine','cocktail','beverage'],
+  ['phone','cell','cellphone','mobile','iphone','smartphone'],
+  ['car','auto','automobile','vehicle','truck','ride'],
+  ['money','cash','bucks','dollars','dough'],
+  ['butt','bum','rear','behind','bottom'],
+  ['bathroom','toilet','washroom','restroom','loo'],
+  ['dog','puppy','pooch'],
+  ['cat','kitten','kitty'],
+  ['mom','mother','mum','mama'],
+  ['dad','father','papa'],
+  ['doctor','physician','doc'],
+  ['cop','police','officer'],
+  ['gym','fitness','workout'],
+  ['text','message','dm','chat'],
+  ['television show','tv show','show','series'],
+];
+
+const norm = (s) => (s||'')
+  .toLowerCase()
+  .replace(/&/g, ' and ')
+  .replace(/[^a-z0-9 ]/g,' ')
+  .replace(/\b(a|an|the|my|your|his|her|their|some)\b/g, ' ')
+  .replace(/\s+/g,' ')
+  .trim();
+
+const singularize = (w) => w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w;
+const canonToken = (token) => {
+  const t = singularize(token);
+  for (const group of SYNONYM_GROUPS) {
+    if (group.map(norm).map(singularize).includes(t)) return norm(group[0]);
+  }
+  return t;
+};
+
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const canonPhrase = (s) => {
+  let out = norm(s).replace(/six pack/g, 'sixpack');
+  for (const group of SYNONYM_GROUPS) {
+    const canonical = norm(group[0]);
+    for (const alias of group) {
+      const a = norm(alias).replace(/six pack/g, 'sixpack');
+      out = out.replace(new RegExp(`\\b${escapeRegex(a)}\\b`, 'g'), canonical);
+    }
+  }
+  return out.split(/\s+/).filter(Boolean).map(canonToken).join(' ').trim();
+};
+
 const fuzzyMatch = (a, b) => {
-  const na = norm(a), nb = norm(b);
+  const na = canonPhrase(a), nb = canonPhrase(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
   if (na.length >= 3 && nb.includes(na)) return true;
   if (nb.length >= 3 && na.includes(nb)) return true;
-  const wa = na.split(/\s+/).filter(w => w.length >= 3);
-  const wb = nb.split(/\s+/).filter(w => w.length >= 3);
+  const wa = na.split(/\s+/).filter(w => w.length >= 3).map(canonToken);
+  const wb = nb.split(/\s+/).filter(w => w.length >= 3).map(canonToken);
   return wa.some(w => wb.includes(w));
 };
 
@@ -436,7 +512,7 @@ app.post('/api/room/:code/answer', async (req, res) => {
 
   try {
     // Generate panel answers for current contestant's prompt
-    const answers = await generatePanelAnswers(room.panel, room.chosenPrompt, room.players[room.activeSlot]);
+    const answers = await generatePanelAnswers(room.panel, room.chosenPrompt, room.players[room.activeSlot], room.round);
     room.panel = room.panel.map((p, i) => ({ ...p, answer: answers[i] || '???' }));
     room.panelAnswers = answers;
     const matches = scoreAnswer(room.contestantAnswer, room.panel);
@@ -525,17 +601,23 @@ app.post('/api/room/:code/supermatch-pick', async (req, res) => {
   const { celebIndices } = req.body; // array of 3 panel indices
   if (!Array.isArray(celebIndices) || celebIndices.length !== 3) return res.status(400).json({ error: '3 celebs required' });
 
-  room.superMatchCelebIndices = celebIndices;
+  const safeIndices = celebIndices.map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < room.panel.length).slice(0, 3);
+  if (safeIndices.length !== 3) return res.status(400).json({ error: 'Invalid celebrity selection' });
+
+  room.superMatchCelebIndices = safeIndices;
   room.phase = 'superMatch_generating';
   bump(room);
   res.json({ room });
 
   try {
-    const celebNames = celebIndices.map(i => room.panel[i].name);
+    const celebNames = safeIndices.map(i => room.panel[i].name);
     const result = await generateSuperMatchAnswers(room.superMatchPrompt, celebNames);
-    room.superMatchTopAnswers = result.topAnswers || [];
+    room.superMatchTopAnswers = Array.isArray(result.topAnswers) ? result.topAnswers : [];
+    if (room.superMatchTopAnswers.length === 0) {
+      room.superMatchTopAnswers = [{ rank: 1, answer: (result.celebAnswers || [])[0] || 'answer', value: 1000 }];
+    }
     // Store celeb answers on the panel entries
-    celebIndices.forEach((panelIdx, i) => {
+    safeIndices.forEach((panelIdx, i) => {
       room.panel[panelIdx] = {
         ...room.panel[panelIdx],
         answer: (result.celebAnswers || [])[i] || '???'
@@ -566,6 +648,7 @@ app.post('/api/room/:code/supermatch-answer', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
   const { answer } = req.body;
+  if (!answer?.trim()) return res.status(400).json({ error: 'answer required' });
   room.superMatchContestantAnswer = answer.trim().slice(0, 50);
 
   // Score against top answers
@@ -610,7 +693,10 @@ app.post('/api/room/:code/finalmatch-pick', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
   const { celebIndex } = req.body;
-  room.finalMatchCelebIndex = celebIndex;
+  if (!Number.isInteger(Number(celebIndex)) || Number(celebIndex) < 0 || Number(celebIndex) >= room.panel.length) {
+    return res.status(400).json({ error: 'Invalid celebrity' });
+  }
+  room.finalMatchCelebIndex = Number(celebIndex);
   room.phase = 'finalMatch_answering';
   bump(room);
   res.json({ room });
@@ -620,6 +706,7 @@ app.post('/api/room/:code/finalmatch-answer', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
   const { answer } = req.body;
+  if (!answer?.trim()) return res.status(400).json({ error: 'answer required' });
   room.finalMatchContestantAnswer = answer.trim().slice(0, 50);
   room.phase = 'finalMatch_generating_celeb';
   bump(room);

@@ -45,6 +45,25 @@ const api = {
 
 // ─── SPEECH ───────────────────────────────────────────────────
 let currentAudio = null;
+const ttsCache = new Map();
+const ttsKey = ({ text, code, slot, isAnnouncer }) => `${code || ''}|${slot ?? ''}|${isAnnouncer ? 'announcer' : 'panel'}|${text}`;
+const prefetchTTS = (params) => {
+  if (!params?.text) return Promise.resolve(null);
+  const key = ttsKey(params);
+  if (ttsCache.has(key)) return ttsCache.get(key);
+  const promise = api.speak({
+    text: params.text,
+    code: params.code,
+    slot: params.slot,
+    isAnnouncer: params.isAnnouncer,
+  }).then(res => {
+    if (!res.ok) throw new Error('TTS failed');
+    return res.blob();
+  }).then(blob => URL.createObjectURL(blob))
+    .catch(err => { ttsCache.delete(key); throw err; });
+  ttsCache.set(key, promise);
+  return promise;
+};
 const stopAudio = () => {
   if (currentAudio) { try { currentAudio.pause(); } catch{} currentAudio = null; }
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
@@ -66,16 +85,21 @@ const speakBrowser = (text, profile) => new Promise(resolve => {
 
 const speakTTS = async (params) => {
   stopAudio();
-  const { text, code, slot, isAnnouncer, fallbackProfile } = params;
+  const { text, fallbackProfile } = params;
+  const key = ttsKey(params);
   try {
-    const res = await api.speak({ text, code, slot, isAnnouncer });
-    if (!res.ok) throw new Error('TTS failed');
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+    const url = await prefetchTTS(params);
     const audio = new Audio(url);
     currentAudio = audio;
     return new Promise(resolve => {
-      const done = () => { URL.revokeObjectURL(url); if (currentAudio===audio) currentAudio=null; resolve(); };
+      const done = () => {
+        if (currentAudio===audio) currentAudio=null;
+        if (ttsCache.get(key)) {
+          URL.revokeObjectURL(url);
+          ttsCache.delete(key);
+        }
+        resolve();
+      };
       audio.onended = done; audio.onerror = done;
       audio.play().catch(done);
     });
@@ -88,6 +112,24 @@ const speakTTS = async (params) => {
 const slotSymbol = (room, slot) => !room?.triangleSlot ? '' : slot === room.triangleSlot ? '▲' : '●';
 const slotClass  = (room, slot) => !room?.triangleSlot ? '' : slot === room.triangleSlot ? 'tri' : 'cir';
 const fmt$ = (n) => `$${n.toLocaleString()}`;
+const quickNorm = (s='') => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+const quickCanon = (s='') => {
+  let out = quickNorm(s);
+  const groups = [
+    ['tv','television','telly'], ['abs','muscles','muscle','six pack','sixpack'],
+    ['beer','drink','drinks','booze','alcohol','liquor','wine','cocktail','beverage'],
+    ['phone','cell','cellphone','mobile','iphone'], ['car','auto','vehicle','truck'],
+    ['money','cash','bucks','dollars'], ['bathroom','toilet','washroom','restroom'],
+  ];
+  for (const group of groups) {
+    for (const alias of group) out = out.replace(new RegExp(`\\b${quickNorm(alias).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'g'), group[0]);
+  }
+  return out;
+};
+const quickFuzzyMatch = (a,b) => {
+  const x = quickCanon(a), y = quickCanon(b);
+  return !!x && !!y && (x === y || x.includes(y) || y.includes(x) || x.split(' ').some(w => w.length > 2 && y.split(' ').includes(w)));
+};
 
 const PHASE_LABELS = {
   lobby: 'Waiting for players…',
@@ -247,6 +289,7 @@ function DisplayView({ room, roomCode }) {
   const [coinResult, setCoinResult] = useState(null);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [introIndex, setIntroIndex] = useState(-1);
+  const [introComplete, setIntroComplete] = useState(false);
   const introRunRef = useRef(false);
 
   const unlockAudio = () => {
@@ -300,16 +343,23 @@ function DisplayView({ room, roomCode }) {
 
   const runIntro = async (r) => {
     await delay(600);
-    await speakTTS({ text: "It's time to match the stars!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+    // Host announces the show
+    await speakTTS({ text: "Get ready to match the stars!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     await delay(500);
+    // Host announces each celebrity by name — celeb card pops in as host says their name
     for (let i = 0; i < r.panel.length; i++) {
       setIntroIndex(i);
-      await speakTTS({ text: r.panel[i].name, code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length] });
-      await delay(400);
+      await speakTTS({ text: r.panel[i].name, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      await delay(300);
     }
+    // All celebs introduced — now show the room code
+    setIntroComplete(true);
   };
 
   const runReveal = async (r) => {
+    await Promise.all((r.panel || []).map((p, i) => prefetchTTS({
+      text: p.answer, code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length],
+    }).catch(() => null)));
     for (let i = 0; i < r.panel.length; i++) {
       setRevealIndex(i);
       await speakTTS({ text: r.panel[i].answer, code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length] });
@@ -379,15 +429,21 @@ function DisplayView({ room, roomCode }) {
       <div className="mg-display-main">
         {(phase==='lobby'||phase==='intro') && (
           <div className="mg-display-center-msg">
-            {!room.players[2] && <>
-              <p className="mg-status" style={{fontSize:20}}>Both contestants: open the URL on your phone and enter this code</p>
-              <div className="mg-roomcode" style={{fontSize:80,padding:'24px 40px',letterSpacing:'0.3em'}}>{roomCode}</div>
-              <p className="mg-status">Game starts automatically once both players join</p>
-            </>}
-            {room.panel?.length>0 && <>
-              <p className="mg-label" style={{textAlign:'center',marginTop:12}}>Tonight's Panel</p>
-              <DisplayPanelGrid room={room} revealIndex={-1} introIndex={introIndex}/>
-            </>}
+            {/* Room code only appears AFTER all celebs have been introduced */}
+            {introComplete && (
+              <>
+                <p className="mg-status" style={{fontSize:20}}>Both contestants: open the URL on your phone and enter this code</p>
+                <div className="mg-roomcode" style={{fontSize:80,padding:'24px 40px',letterSpacing:'0.3em'}}>{roomCode}</div>
+                <p className="mg-status">Game starts automatically once both players join</p>
+              </>
+            )}
+            {/* Panel grid — cards start hidden, pop in as host announces each one */}
+            {room.panel?.length>0 && (
+              <>
+                {introComplete && <p className="mg-label" style={{textAlign:'center',marginTop:12}}>Tonight's Panel</p>}
+                <DisplayPanelGrid room={room} revealIndex={-1} introIndex={introIndex}/>
+              </>
+            )}
           </div>
         )}
         {phase==='cointoss' && (
@@ -413,7 +469,7 @@ function DisplayView({ room, roomCode }) {
         {['pick_prompt','answering'].includes(phase) && <DisplayRoundActive room={room}/>}
         {phase==='revealing' && <DisplayReveal room={room} revealIndex={revealIndex} roomCode={roomCode}/>}
         {phase==='superMatch_pickCelebs' && <DisplaySuperMatchPickCelebs room={room}/>}
-        {phase==='superMatch_revealing' && <DisplaySuperMatchReveal room={room} roomCode={roomCode}/>}
+        {phase==='superMatch_revealing' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
         {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room}/>}
         {['finalMatch_pickCeleb','finalMatch_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
         {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room}/>}
@@ -444,12 +500,15 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) 
         const prelit = round1MatchedByActive.includes(i);
         const litAsTriangle = (matched && activeIsTriangle) || (prelit && room?.triangleSlot === room?.activeSlot);
         const litAsCircle   = (matched && !activeIsTriangle) || (prelit && room?.triangleSlot !== room?.activeSlot);
-        // For intro: cards pop in one by one
-        const introduced = introIndex === undefined || introIndex === -1 || i <= introIndex;
+        // (opacity handled inline via introIndex prop)
         return (
           <div key={i}
             className={`mg-panelist ${shown ? 'revealed' : ''} ${matched ? 'matched' : ''} ${prelit ? 'prelit' : ''}`}
-            style={{ opacity: introduced ? 1 : 0, transform: introduced ? 'scale(1)' : 'scale(0.8)', transition: 'opacity 0.4s, transform 0.4s' }}>
+            style={{
+              opacity: introIndex === undefined ? 1 : (i <= introIndex ? 1 : 0),
+              transform: introIndex === undefined ? 'scale(1)' : (i <= introIndex ? 'scale(1)' : 'scale(0.85)'),
+              transition: 'opacity 0.35s ease-out, transform 0.35s ease-out'
+            }}>
             <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={70} />
             <div className="mg-panelist-name">{p.name}</div>
             <div className="mg-panelist-tag">{p.tag}</div>
@@ -506,7 +565,7 @@ function DisplaySuperMatchPickCelebs({ room }) {
   );
 }
 
-function DisplaySuperMatchReveal({ room, roomCode, setRevealIndex }) {
+function DisplaySuperMatchReveal({ room, roomCode, setRevealIndex = () => {} }) {
   const doneRef = useRef(false);
   useEffect(() => {
     if (doneRef.current) return;
@@ -516,6 +575,11 @@ function DisplaySuperMatchReveal({ room, roomCode, setRevealIndex }) {
 
   const runSuperReveal = async () => {
     const indices = room.superMatchCelebIndices || [];
+    await Promise.all(indices.map(panelIdx => prefetchTTS({
+      text: room.panel[panelIdx]?.answer || '',
+      code: roomCode, slot: panelIdx,
+      fallbackProfile: VOICE_PROFILES[panelIdx % VOICE_PROFILES.length],
+    }).catch(() => null)));
     for (let i = 0; i < indices.length; i++) {
       setRevealIndex(i);
       const panelIdx = indices[i];
@@ -576,8 +640,7 @@ function DisplaySuperMatchResult({ room }) {
       <p className="mg-status">{room.players[room.activeSlot]} said: <strong>"{contestantAnswer}"</strong></p>
       <div className="mg-top-answers">
         {[...topAnswers].reverse().map((ta, i) => {
-          const isMatch = contestantAnswer && ta.answer.toLowerCase().includes(contestantAnswer.toLowerCase())
-            || contestantAnswer && contestantAnswer.toLowerCase().includes(ta.answer.toLowerCase());
+          const isMatch = quickFuzzyMatch(contestantAnswer, ta.answer);
           return (
             <div key={i} className={`mg-top-answer ${isMatch ? 'matched' : ''}`}>
               <span className="mg-top-answer-value">{fmt$(ta.value)}</span>

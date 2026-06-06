@@ -2,12 +2,12 @@
   "name": "match-game",
   "version": "1.0.0",
   "description": "Match Game - retro game show, two-device sync, AI celebrity panel",
+  "workspaces": ["client", "server"],
   "scripts": {
-    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
-    "build": "cd client && npm install && npm run build && cd ../server && npm install",
-    "start": "cd server && npm start",
-    "dev:server": "cd server && npm run dev",
-    "dev:client": "cd client && npm run dev"
+    "build": "npm run build --workspace=client",
+    "start": "npm start --workspace=server",
+    "dev:server": "npm run dev --workspace=server",
+    "dev:client": "npm run dev --workspace=client"
   },
   "engines": {
     "node": ">=18.0.0"
