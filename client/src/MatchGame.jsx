@@ -28,7 +28,7 @@ const req = async (path, opts = {}) => {
 
 const api = {
   createRoom:   (playerName, playerCount=2) => req('/api/room', { method:'POST', body:{playerName, playerCount} }),
-  joinRoom:     (code, playerName) => req(`/api/room/${code}/join`, { method:'POST', body:{playerName} }),
+  joinRoom:     (code, playerName, signMessage='') => req(`/api/room/${code}/join`, { method:'POST', body:{playerName, signMessage} }),
   getRoom:      (code) => req(`/api/room/${code}`),
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
   submitAnswer: (code, slot, answer) => req(`/api/room/${code}/answer`, { method:'POST', body:{slot,answer} }),
@@ -263,6 +263,7 @@ export default function MatchGame() {
   const [mode, setMode] = useState('home'); // home | display | phone
   const [roomCode, setRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
+  const [signMessage, setSignMessage] = useState('');
   const [playerSlot, setPlayerSlot] = useState(null);
   const [room, setRoom] = useState(null);
   const [error, setError] = useState('');
@@ -328,7 +329,7 @@ export default function MatchGame() {
     try {
       const code = roomCode.toUpperCase();
       // Slot 1 is reserved for display — join as slot 2 or 3
-      const { room: r, slot } = await api.joinRoom(code, playerName.trim());
+      const { room: r, slot } = await api.joinRoom(code, playerName.trim(), signMessage.trim());
       setRoom(r); setPlayerSlot(slot);
       lastVersionRef.current = r.version;
       setRoomCode(code);
@@ -359,6 +360,10 @@ export default function MatchGame() {
               <input className="mg-input" value={playerName}
                 onChange={e=>setPlayerName(e.target.value)}
                 placeholder="e.g. Jason" maxLength={20} autoFocus />
+              <label className="mg-label">Your intro card</label>
+              <input className="mg-input" value={signMessage}
+                onChange={e=>setSignMessage(e.target.value)}
+                placeholder="e.g. Hi Mom!" maxLength={32} />
               <div className="mg-row">
                 <button className="mg-btn" onClick={joinAsContestant}
                   disabled={loading || !playerName.trim() || roomCode.length !== 4}>
@@ -397,6 +402,10 @@ export default function MatchGame() {
               <input className="mg-input" value={playerName}
                 onChange={e=>setPlayerName(e.target.value)}
                 placeholder="e.g. Gene" maxLength={20} />
+              <label className="mg-label">Your intro card</label>
+              <input className="mg-input" value={signMessage}
+                onChange={e=>setSignMessage(e.target.value)}
+                placeholder="e.g. Hi Mom!" maxLength={32} />
               <label className="mg-label">Room Code</label>
               <input className="mg-input big" value={roomCode}
                 onChange={e=>setRoomCode(e.target.value.toUpperCase().slice(0,4))}
@@ -536,6 +545,8 @@ function DisplayView({ room, roomCode }) {
   }, [audioUnlocked]);
 
   const runIntro = async (r) => {
+    setIntroComplete(false);
+    setIntroIndex(-1);
     await delay(600);
     playRetroSting();
     // Host announces the show
@@ -545,7 +556,7 @@ function DisplayView({ room, roomCode }) {
     for (let i = 0; i < r.panel.length; i++) {
       setIntroIndex(i);
       await speakTTS({ text: r.panel[i].name, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-      await delay(300);
+      await delay(700);
     }
     // All celebs introduced — now show the room code
     setIntroComplete(true);
@@ -654,13 +665,12 @@ function DisplayView({ room, roomCode }) {
                 <p className="mg-help tiny-fallback">Fallback code: {roomCode}</p>
               </>
             )}
-            {phase === 'intro' && !introComplete && <p className="mg-status" style={{fontSize:22}}>Roles are set. Meet tonight's stars!</p>}
+            {phase === 'intro' && !introComplete && <DisplayIntroSpotlight room={room} introIndex={introIndex} />}
             {phase === 'intro' && introComplete && <p className="mg-status" style={{fontSize:22}}>Here we go!</p>}
-            {/* Panel grid — cards start hidden, pop in as host announces each one */}
-            {room.panel?.length>0 && (
+            {phase === 'intro' && introComplete && room.panel?.length>0 && (
               <>
-                {introComplete && <p className="mg-label" style={{textAlign:'center',marginTop:12}}>Tonight's Panel</p>}
-                <DisplayPanelGrid room={room} revealIndex={-1} introIndex={introIndex}/>
+                <p className="mg-label" style={{textAlign:'center',marginTop:12}}>Tonight's Panel</p>
+                <DisplayPanelGrid room={room} revealIndex={-1}/>
               </>
             )}
           </div>
@@ -671,7 +681,7 @@ function DisplayView({ room, roomCode }) {
             {!coinFlipping&&coinResult&&<p className="mg-status" style={{fontSize:24}}><strong>{room.players[coinResult]}</strong> wins the toss and plays first!</p>}
           </div>
         )}
-        {['generating','generating_answers','round_end','superMatch_generating','superMatch_human_answering','finalMatch_generating','finalMatch_generating_celeb','tiebreaker'].includes(phase) && (
+        {['generating','generating_answers','round_end','superMatch_generating','finalMatch_generating','finalMatch_generating_celeb','tiebreaker'].includes(phase) && (
           <div className="mg-display-center-msg">
             <div className="mg-loading">
               {phase==='generating'&&'Preparing questions'}
@@ -707,6 +717,25 @@ function DisplayView({ room, roomCode }) {
   );
 }
 
+
+function DisplayIntroSpotlight({ room, introIndex }) {
+  const p = room?.panel?.[introIndex];
+  return (
+    <div className="mg-intro-stage">
+      <div className="mg-intro-marquee">Get Ready to Match the Stars!</div>
+      {p ? (
+        <div className="mg-intro-card" key={introIndex}>
+          <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={170} />
+          <div className="mg-intro-name">{p.name}</div>
+          <div className="mg-intro-sign">{p.signMessage || p.tag || 'Hi Mom!'}</div>
+        </div>
+      ) : (
+        <div className="mg-intro-card waiting"><div className="mg-loading">Cue the stars</div></div>
+      )}
+    </div>
+  );
+}
+
 function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) {
   const activeIsTriangle = room?.activeSlot === room?.triangleSlot;
   const round1MatchedByActive = room?.round >= 2
@@ -730,9 +759,9 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) 
               transform: introIndex === undefined ? 'scale(1)' : (i <= introIndex ? 'scale(1)' : 'scale(0.85)'),
               transition: 'opacity 0.35s ease-out, transform 0.35s ease-out'
             }}>
-            <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={70} />
+            <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={100} />
             <div className="mg-panelist-name">{p.name}</div>
-            <div className="mg-panelist-tag">{p.isHuman ? 'LIVE FAMILY STAR' : p.tag}</div>
+            <div className="mg-panelist-tag">{p.signMessage || 'Hi Mom!'}</div>
             <div className={`mg-panelist-answer ${shown ? '' : 'blank'}`}>
               {shown ? (p.answer || (prelit ? 'Matched' : '')) : ''}
             </div>
@@ -1187,15 +1216,14 @@ function PhoneView({ room, roomCode, playerSlot }) {
         )}
 
         {/* Generating */}
-        {['generating','generating_answers','round_end','superMatch_generating','superMatch_human_answering','finalMatch_generating','finalMatch_generating_celeb'].includes(phase) && (
+        {['generating','generating_answers','round_end','superMatch_generating','finalMatch_generating','finalMatch_generating_celeb'].includes(phase) && (
           <div className="mg-phone-body">
             <div className="mg-loading">
               {phase === 'generating' && 'Preparing questions'}
               {phase === 'generating_answers' && 'Panel is conferring'}
               {phase === 'round_end' && 'Scoring round'}
               {phase === 'superMatch_generating' && 'Consulting the panel'}
-              {phase === 'superMatch_human_answering' && 'Selected stars are answering'}
-              {phase === 'finalMatch_generating' && 'Preparing Final Match'}
+                            {phase === 'finalMatch_generating' && 'Preparing Final Match'}
               {phase === 'finalMatch_generating_celeb' && 'Celebrity is thinking'}
             </div>
           </div>

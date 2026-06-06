@@ -73,6 +73,13 @@ const CLASSIC_MATCH_GAMERS = [
   'Nipsey Russell','Patti Deutsch','Marcia Wallace','Joyce Bulifant','Elaine Joyce'
 ];
 
+const WACKY_SIGNS = [
+  'Hi Mom!', 'Lakers Forever!', 'I brake for blanks!', 'Send snacks!', 'Team Triangle!',
+  'I regret nothing!', 'Call me maybe!', 'I came to match!', 'Blank me gently!',
+  'Save me a seat!', 'Is this thing on?', 'No refunds!', 'Vote for Betty!', 'Ask me after dessert!'
+];
+const randomSign = () => WACKY_SIGNS[Math.floor(Math.random() * WACKY_SIGNS.length)];
+
 const MODERN_PANEL_BACKUPS = [
   { name:'Ryan Reynolds', tag:'quick-witted movie star', avatarType:'man_middle', voice:'verse', voiceInstructions:'Bright, fast, playful game-show delivery.', answerStyle:'punny', matchBias:0.86 },
   { name:'Zendaya', tag:'cool pop-culture icon', avatarType:'woman_young', voice:'nova', voiceInstructions:'Confident, warm, crisp, and amused.', answerStyle:'obvious', matchBias:0.88 },
@@ -174,7 +181,22 @@ const FALLBACK_SUPER_PROMPTS = [
   { prompt:'Dating ___', topAnswers:[{rank:1,answer:'App',value:500},{rank:2,answer:'Game',value:250},{rank:3,answer:'Profile',value:100}] },
   { prompt:'___ Room', topAnswers:[{rank:1,answer:'Living',value:500},{rank:2,answer:'Bed',value:250},{rank:3,answer:'Dining',value:100}] },
   { prompt:'___ Money', topAnswers:[{rank:1,answer:'Cash',value:500},{rank:2,answer:'Prize',value:250},{rank:3,answer:'Blood',value:100}] },
-  { prompt:'Game ___', topAnswers:[{rank:1,answer:'Show',value:500},{rank:2,answer:'Night',value:250},{rank:3,answer:'Board',value:100}] }
+  { prompt:'Game ___', topAnswers:[{rank:1,answer:'Show',value:500},{rank:2,answer:'Night',value:250},{rank:3,answer:'Board',value:100}] },
+  { prompt:'Blank ___', topAnswers:[{rank:1,answer:'Slate',value:500},{rank:2,answer:'Check',value:250},{rank:3,answer:'Page',value:100}] },
+  { prompt:'Family ___', topAnswers:[{rank:1,answer:'Feud',value:500},{rank:2,answer:'Dinner',value:250},{rank:3,answer:'Tree',value:100}] },
+  { prompt:'Ice ___', topAnswers:[{rank:1,answer:'Cream',value:500},{rank:2,answer:'Cube',value:250},{rank:3,answer:'Skate',value:100}] },
+  { prompt:'Baby ___', topAnswers:[{rank:1,answer:'Shower',value:500},{rank:2,answer:'Bottle',value:250},{rank:3,answer:'Food',value:100}] },
+  { prompt:'Bank ___', topAnswers:[{rank:1,answer:'Account',value:500},{rank:2,answer:'Robber',value:250},{rank:3,answer:'Teller',value:100}] },
+  { prompt:'___ Night', topAnswers:[{rank:1,answer:'Date',value:500},{rank:2,answer:'Game',value:250},{rank:3,answer:'Movie',value:100}] },
+  { prompt:'___ Face', topAnswers:[{rank:1,answer:'Poker',value:500},{rank:2,answer:'Baby',value:250},{rank:3,answer:'Duck',value:100}] },
+  { prompt:'Magic ___', topAnswers:[{rank:1,answer:'Trick',value:500},{rank:2,answer:'Wand',value:250},{rank:3,answer:'Show',value:100}] },
+  { prompt:'Love ___', topAnswers:[{rank:1,answer:'Letter',value:500},{rank:2,answer:'Song',value:250},{rank:3,answer:'Boat',value:100}] },
+  { prompt:'Dinner ___', topAnswers:[{rank:1,answer:'Table',value:500},{rank:2,answer:'Date',value:250},{rank:3,answer:'Party',value:100}] },
+  { prompt:'___ School', topAnswers:[{rank:1,answer:'High',value:500},{rank:2,answer:'Old',value:250},{rank:3,answer:'Night',value:100}] },
+  { prompt:'___ Check', topAnswers:[{rank:1,answer:'Rain',value:500},{rank:2,answer:'Blank',value:250},{rank:3,answer:'Pay',value:100}] },
+  { prompt:'Kitchen ___', topAnswers:[{rank:1,answer:'Sink',value:500},{rank:2,answer:'Table',value:250},{rank:3,answer:'Knife',value:100}] },
+  { prompt:'Party ___', topAnswers:[{rank:1,answer:'Animal',value:500},{rank:2,answer:'Hat',value:250},{rank:3,answer:'Favor',value:100}] },
+  { prompt:'___ Bag', topAnswers:[{rank:1,answer:'Garbage',value:500},{rank:2,answer:'Gym',value:250},{rank:3,answer:'Tea',value:100}] }
 ];
 
 const generatePanel = async () => {
@@ -193,7 +215,8 @@ CRITICAL PANEL RULES:
 
 For each panelist provide:
 - "name": the short public/stage name they are normally known by on screen. No middle names, initials, titles, suffixes, or overly formal full legal names unless that is how the public usually knows them
-- "tag": 3-5 word description of their public persona
+- "signMessage": a short silly 1970s-style card/sign message they might hold up during the intro, like "Hi Mom!", "Send snacks!", or "Lakers Forever!". 2-5 words, not a description.
+- "tag": keep this short internally, but it will not be shown on screen
 - "avatarType": one of these sketch styles that best fits them visually: "man_young", "man_middle", "man_older", "woman_young", "woman_middle", "woman_older", "person_athletic", "person_glamorous"
 - "voice": best matching OpenAI TTS voice from: ${TTS_VOICES.join(', ')}. Prefer louder/brighter voices when possible: verse, ash, coral, nova, shimmer, fable. Use onyx only for very deep voices.
 - "voiceInstructions": 1-2 sentences on HOW to deliver lines as this person — energetic, crisp, theatrical, easy to hear. Do not imitate a real voice exactly.
@@ -202,7 +225,7 @@ For each panelist provide:
 
 Assign DIFFERENT voices to different panelists.
 
-Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"...","voiceInstructions":"...","answerStyle":"...","matchBias":0.85}, ...]}`,
+Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"...","voiceInstructions":"...","answerStyle":"...","matchBias":0.85,"signMessage":"Hi Mom!"}, ...]}`,
     1500, true
   );
   const parsed = extractJSON(text);
@@ -233,7 +256,8 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
       voice: classic === 'Richard Dawson' ? 'fable' : 'coral',
       voiceInstructions: 'Deliver with warm, witty, classic game-show timing. Clear, upbeat, and a little mischievous.',
       answerStyle: 'obvious',
-      matchBias: 0.92
+      matchBias: 0.92,
+      signMessage: randomSign()
     }, ...panel.filter(p => !CLASSIC_MATCH_GAMERS.map(x => x.toLowerCase()).includes(cleanPanelName(p.name).toLowerCase()))];
   } else {
     // If more than one classic appears, keep the requested one if possible and remove extras.
@@ -264,6 +288,7 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
   return panel.slice(0, 6).map(p => ({
     name: cleanPanelName(p.name),
     tag: p.tag,
+    signMessage: String(p.signMessage || p.tag || randomSign()).slice(0, 32),
     avatarType: uniqueAvatarType(p.avatarType),
     voice: TTS_VOICES.includes(p.voice) ? p.voice : 'verse',
     voiceInstructions: p.voiceInstructions || 'Speak clearly, energetically, and loud enough to carry in a game-show room.',
@@ -419,34 +444,12 @@ Return JSON: {"answers": ["answer1","answer2","answer3","answer4","answer5","ans
   return answers.slice(0, 6);
 };
 
-const generateSuperMatchPrompt = async () => {
-  const fallback = FALLBACK_SUPER_PROMPTS[Math.floor(Math.random() * FALLBACK_SUPER_PROMPTS.length)];
-  const text = await callLLM(
-    `Generate ONE Super Match fill-in-the-blank phrase.
-
-STRICT FORMAT: A single short phrase with exactly one blank marked as ___
-STRICT LENGTH: 2-5 words total including the blank
-The phrase must have three obvious survey answers and a clear #1 answer.
-Avoid weird/awkward compounds and avoid repeating the same noun on both sides.
-NO character names, NO full sentences, NO punctuation at end.
-
-Good examples:
-Television ___
-Birthday ___
-___ Dog
-Phone ___
-Hot ___
-Movie ___
-___ Party
-Gym ___
-___ Chat
-First ___
-
-Return only the phrase.`,
-    60
-  );
-  const firstLine = text.trim().split('\n')[0].trim().replace(/^["'\d.\-\s]+|["']+$/g, '').trim();
-  return firstLine.includes('___') ? firstLine : fallback.prompt;
+const generateSuperMatchPrompt = async (usedPrompts = []) => {
+  // No LLM here: repeated prompts were killing the round. Use a no-repeat survey board.
+  const used = new Set((usedPrompts || []).map(x => String(x).toLowerCase()));
+  const unused = FALLBACK_SUPER_PROMPTS.filter(p => !used.has(p.prompt.toLowerCase()));
+  const pool = unused.length ? unused : FALLBACK_SUPER_PROMPTS;
+  return shuffle(pool)[0].prompt;
 };
 
 const generateSuperMatchAnswers = async (prompt, celebNames) => {
@@ -634,6 +637,7 @@ const assignRolesAndStart = async (room) => {
       ...template,
       name: room.participants[pid],
       tag: 'family celebrity panelist',
+      signMessage: room.participantMessages?.[pid] || randomSign(),
       isHuman: true,
       playerId: pid,
       voice: template.voice || 'alloy',
@@ -655,7 +659,7 @@ const assignRolesAndStart = async (room) => {
   setTimeout(async () => {
     try { await startNewRound(room, 1); }
     catch(e) { console.error('start round 1:', e); }
-  }, 11500);
+  }, 19000);
 };
 
 const maybeFinishAnswerPhase = async (room) => {
@@ -703,6 +707,7 @@ app.post('/api/room', async (req, res) => {
       phase: 'lobby',
       maxPlayers,
       participants: {},
+      participantMessages: {},
       nextParticipantId: 1,
       rolesAssigned: false,
       roles: {},
@@ -755,12 +760,14 @@ app.post('/api/room', async (req, res) => {
 app.post('/api/room/:code/join', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'No room with that code' });
-  const { playerName } = req.body;
+  const { playerName, signMessage } = req.body;
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
   if (room.rolesAssigned) return res.status(409).json({ error: 'Game already started' });
   if (Object.keys(room.participants || {}).length >= room.maxPlayers) return res.status(409).json({ error: 'Room is full' });
   const slot = room.nextParticipantId++;
   room.participants[slot] = playerName.trim().slice(0, 20);
+  room.participantMessages = room.participantMessages || {};
+  room.participantMessages[slot] = String(signMessage || '').trim().slice(0, 32) || randomSign();
   bump(room);
   res.json({ room, slot });
   if (Object.keys(room.participants).length >= room.maxPlayers) {
@@ -924,6 +931,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     room.chosenPrompt = remainingIsA ? room.promptA : room.promptB;
     room.chosenAnswerKey = remainingIsA ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
+    room.humanPanelAnswers = {};
     room.contestantAnswer = null;
     room.matches = [];
     room.phase = 'answering';

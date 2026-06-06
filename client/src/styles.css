@@ -849,3 +849,77 @@ body { margin: 0; }
     height: clamp(36px, 7.2vh, 58px) !important;
   }
 }
+
+/* ── v11: 1970s-style intro spotlight and larger panel sketches ───────── */
+.mg-intro-stage {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 2vh, 22px);
+}
+.mg-intro-marquee {
+  font-family: 'Bowlby One', sans-serif;
+  font-size: clamp(24px, 5vw, 58px);
+  color: var(--yellow);
+  text-shadow: 3px 3px 0 var(--orange-deep), 6px 6px 0 var(--brown);
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+.mg-intro-card {
+  background: var(--cream);
+  border: clamp(4px, 0.8vh, 8px) solid var(--brown);
+  box-shadow: clamp(6px, 1.2vh, 12px) clamp(6px, 1.2vh, 12px) 0 var(--brown);
+  padding: clamp(12px, 2.2vh, 28px) clamp(24px, 5vw, 70px);
+  min-width: min(720px, 86vw);
+  max-width: 980px;
+  text-align: center;
+  animation: starPop 0.35s ease-out;
+}
+@keyframes starPop { from { transform: scale(0.82) rotate(-2deg); opacity: 0; } to { transform: scale(1) rotate(0deg); opacity: 1; } }
+.mg-intro-card svg {
+  width: clamp(130px, 20vh, 220px) !important;
+  height: clamp(130px, 20vh, 220px) !important;
+}
+.mg-intro-name {
+  font-family: 'Bowlby One', sans-serif;
+  color: var(--orange-deep);
+  font-size: clamp(34px, 6vw, 76px);
+  line-height: 1;
+  margin-top: 8px;
+  text-shadow: 2px 2px 0 white;
+}
+.mg-intro-sign {
+  display: inline-block;
+  margin-top: clamp(8px, 1.5vh, 18px);
+  background: white;
+  border: 4px solid var(--brown);
+  padding: 8px 20px;
+  font-family: 'DM Serif Display', serif;
+  font-style: italic;
+  font-size: clamp(22px, 4vw, 48px);
+  color: var(--teal);
+  transform: rotate(-2deg);
+  box-shadow: 4px 4px 0 var(--brown);
+}
+.mg-root.display-mode .mg-panelist svg {
+  width: clamp(64px, 11.5vh, 112px) !important;
+  height: clamp(64px, 11.5vh, 112px) !important;
+}
+.mg-root.display-mode .mg-panelist {
+  align-items: center;
+}
+.mg-root.display-mode .mg-panelist-name,
+.mg-root.display-mode .mg-panelist-tag,
+.mg-root.display-mode .mg-panelist-answer {
+  width: 100%;
+}
+@media (max-height: 760px) {
+  .mg-root.display-mode .mg-panelist svg {
+    width: clamp(54px, 9.4vh, 86px) !important;
+    height: clamp(54px, 9.4vh, 86px) !important;
+  }
+}
