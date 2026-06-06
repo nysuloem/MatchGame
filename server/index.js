@@ -247,90 +247,99 @@ app.get('/api/config', (req, res) => res.json({ ttsEnabled: true }));
 app.post('/api/room', async (req, res) => {
   const { playerName } = req.body;
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
+  const isDisplay = playerName.trim() === '__display__';
   try {
     const panel = await generatePanel();
     const code = makeRoomCode();
     const room = {
       code, version: 1, lastActivity: Date.now(),
-      // Game state
-      phase: 'lobby',        // lobby|cointoss|pick_prompt|answering|revealing|round_end|superMatch|finalMatch|gameOver
-      round: 0,              // 1, 2, 3(superMatch), 4(finalMatch)
-      activeSlot: null,      // which contestant is currently playing (1 or 2)
-      turnInRound: 1,        // 1 = first contestant's turn, 2 = second contestant's turn
-      // Players
-      players: { 1: playerName.trim().slice(0,20), 2: null },
+      phase: 'lobby',
+      round: 0,
+      activeSlot: null,
+      turnInRound: 1,
+      // Display device created the room — slots 1 and 2 are for contestants
+      players: { 1: null, 2: null },
+      hasDisplay: isDisplay,
       scores: { 1: 0, 2: 0 },
       triangleSlot: null,
       cointossWinner: null,
-      // Panel
       panel,
-      // Round tracking - which celebs each contestant matched in round 1
-      round1Matches: { 1: [], 2: [] }, // array of panel indices matched
-      // Current turn data
+      round1Matches: { 1: [], 2: [] },
       promptA: null, promptB: null,
-      chosenPrompt: null,       // the prompt the active contestant is answering
+      chosenPrompt: null,
       usedCharacters: [],
       contestantAnswer: null,
-      panelAnswers: [],         // answers for current prompt (indexed by panel)
-      matches: [],              // bool array for current reveal
-      // Super match
+      panelAnswers: [],
+      matches: [],
       superMatchPrompt: null,
-      superMatchTopAnswers: null,   // [{rank,answer,value}]
-      superMatchCelebIndices: [],   // which 3 celebs contestant picked
-      superMatchCelebAnswers: [],   // their answers
-      superMatchRevealIndex: -1,    // how many celeb answers revealed so far
+      superMatchTopAnswers: null,
+      superMatchCelebIndices: [],
+      superMatchCelebAnswers: [],
+      superMatchRevealIndex: -1,
       superMatchContestantAnswer: null,
       superMatchWinnings: 0,
-      // Final match
       finalMatchPrompt: null,
       finalMatchCelebIndex: null,
       finalMatchContestantAnswer: null,
       finalMatchCelebAnswer: null,
-      finalMatchResult: null,   // 'win' | 'lose'
+      finalMatchResult: null,
       finalMatchWinnings: 0,
     };
     rooms.set(code, room);
-    res.json({ room, slot: 1 });
+    // Display gets no slot; contestants will join as slot 1 and 2
+    res.json({ room, slot: null });
   } catch (e) {
     console.error('create room:', e);
     res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/room/:code/join', (req, res) => {
+app.post('/api/room/:code/join', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'No room with that code' });
-  if (room.players[2]) return res.status(409).json({ error: 'Room is full' });
   const { playerName } = req.body;
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
-  room.players[2] = playerName.trim().slice(0,20);
-  res.json({ room: bump(room), slot: 2 });
+
+  // Assign to first open contestant slot
+  let slot;
+  if (!room.players[1]) {
+    slot = 1;
+    room.players[1] = playerName.trim().slice(0, 20);
+  } else if (!room.players[2]) {
+    slot = 2;
+    room.players[2] = playerName.trim().slice(0, 20);
+  } else {
+    return res.status(409).json({ error: 'Room is full' });
+  }
+
+  bump(room);
+  res.json({ room, slot });
+
+  // Auto-start coin toss when both contestants have joined
+  if (room.players[1] && room.players[2]) {
+    setTimeout(async () => {
+      try {
+        room.phase = 'cointoss';
+        bump(room);
+        setTimeout(() => {
+          const winner = Math.random() < 0.5 ? 1 : 2;
+          room.triangleSlot = winner;
+          room.cointossWinner = winner;
+          bump(room);
+          setTimeout(async () => {
+            try { await startNewRound(room, 1); }
+            catch(e) { console.error('start round 1:', e); }
+          }, 3000);
+        }, 2500);
+      } catch(e) { console.error('auto cointoss:', e); }
+    }, 1500); // brief pause so both players see the lobby first
+  }
 });
 
 app.get('/api/room/:code', (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
   room.lastActivity = Date.now();
-  res.json({ room });
-});
-
-// ─── API: COIN TOSS ───────────────────────────────────────────
-app.post('/api/room/:code/cointoss', (req, res) => {
-  const room = rooms.get(req.params.code.toUpperCase());
-  if (!room) return res.status(404).json({ error: 'Room not found' });
-  room.phase = 'cointoss';
-  bump(room);
-  setTimeout(() => {
-    const winner = Math.random() < 0.5 ? 1 : 2;
-    room.triangleSlot = winner;
-    room.cointossWinner = winner;
-    bump(room);
-    // After 3s, move to round 1
-    setTimeout(async () => {
-      try { await startNewRound(room, 1); }
-      catch(e) { console.error('start round 1:', e); }
-    }, 3000);
-  }, 2500);
   res.json({ room });
 });
 

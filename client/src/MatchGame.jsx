@@ -29,7 +29,6 @@ const api = {
   createRoom:   (playerName) => req('/api/room', { method:'POST', body:{playerName} }),
   joinRoom:     (code, playerName) => req(`/api/room/${code}/join`, { method:'POST', body:{playerName} }),
   getRoom:      (code) => req(`/api/room/${code}`),
-  cointoss:     (code) => req(`/api/room/${code}/cointoss`, { method:'POST' }),
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
   submitAnswer: (code, slot, answer) => req(`/api/room/${code}/answer`, { method:'POST', body:{slot,answer} }),
   revealDone:   (code) => req(`/api/room/${code}/reveal-done`, { method:'POST' }),
@@ -147,28 +146,16 @@ export default function MatchGame() {
     }
   }, []);
 
-  const joinAsDisplay = async () => {
-    if (!roomCode || roomCode.length !== 4) { setError('Enter the 4-letter room code'); return; }
+  // Display: auto-creates a room on mount, then watches for 2nd player and auto-starts coin toss
+  const startAsDisplay = async () => {
     setLoading(true); setError('');
     try {
-      const { room: r } = await api.getRoom(roomCode.toUpperCase());
-      setRoom(r);
-      lastVersionRef.current = r.version;
-      setRoomCode(roomCode.toUpperCase());
-      setMode('display');
-    } catch(e) { setError(e.message); }
-    setLoading(false);
-  };
-
-  const createRoom = async () => {
-    if (!playerName.trim()) { setError('Enter your name'); return; }
-    setLoading(true); setError('');
-    try {
-      const { room: r, slot } = await api.createRoom(playerName.trim());
-      setRoom(r); setPlayerSlot(slot);
+      // Create room with a placeholder name for the display device
+      const { room: r } = await api.createRoom('__display__');
       lastVersionRef.current = r.version;
       setRoomCode(r.code);
-      setMode('phone');
+      setRoom(r);
+      setMode('display');
     } catch(e) { setError(e.message); }
     setLoading(false);
   };
@@ -178,10 +165,12 @@ export default function MatchGame() {
     if (roomCode.length !== 4) { setError('Enter the 4-letter room code'); return; }
     setLoading(true); setError('');
     try {
-      const { room: r, slot } = await api.joinRoom(roomCode.toUpperCase(), playerName.trim());
+      const code = roomCode.toUpperCase();
+      // Slot 1 is reserved for display — join as slot 2 or 3
+      const { room: r, slot } = await api.joinRoom(code, playerName.trim());
       setRoom(r); setPlayerSlot(slot);
       lastVersionRef.current = r.version;
-      setRoomCode(roomCode.toUpperCase());
+      setRoomCode(code);
       setMode('phone');
     } catch(e) { setError(e.message); }
     setLoading(false);
@@ -204,14 +193,10 @@ export default function MatchGame() {
           {/* TV DISPLAY */}
           <div className="mg-home-section">
             <div className="mg-home-section-title">📺 TV Screen (Laptop)</div>
-            <p className="mg-help">Open this on the laptop everyone can see.</p>
-            <label className="mg-label">Room Code</label>
-            <input className="mg-input big" value={roomCode}
-              onChange={e=>setRoomCode(e.target.value.toUpperCase().slice(0,4))}
-              placeholder="ABCD" maxLength={4} />
-            <div className="mg-row">
-              <button className="mg-btn secondary" onClick={joinAsDisplay} disabled={loading || roomCode.length!==4}>
-                Open Display
+            <p className="mg-help">Open this on the laptop everyone can see. A room code will appear automatically.</p>
+            <div className="mg-row" style={{marginTop:24}}>
+              <button className="mg-btn secondary" onClick={startAsDisplay} disabled={loading}>
+                {loading ? 'Starting…' : 'Start Display'}
               </button>
             </div>
           </div>
@@ -221,23 +206,20 @@ export default function MatchGame() {
           {/* CONTESTANT */}
           <div className="mg-home-section">
             <div className="mg-home-section-title">🎮 Contestant (Phone)</div>
-            <p className="mg-help">Each player opens this on their phone.</p>
+            <p className="mg-help">Enter your name and the room code shown on the TV.</p>
             <label className="mg-label">Your Name</label>
             <input className="mg-input" value={playerName}
-              onChange={e=>setPlayerName(e.target.value)} placeholder="e.g. Gene" maxLength={20} />
+              onChange={e=>setPlayerName(e.target.value)}
+              placeholder="e.g. Gene" maxLength={20} />
+            <label className="mg-label">Room Code</label>
+            <input className="mg-input big" value={roomCode}
+              onChange={e=>setRoomCode(e.target.value.toUpperCase().slice(0,4))}
+              placeholder="ABCD" maxLength={4} />
             <div className="mg-row">
-              <button className="mg-btn" onClick={createRoom} disabled={loading || !playerName.trim()}>
-                Host New Game
+              <button className="mg-btn" onClick={joinAsContestant}
+                disabled={loading || !playerName.trim() || roomCode.length !== 4}>
+                Join Game
               </button>
-              <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                <input className="mg-input big" value={roomCode}
-                  onChange={e=>setRoomCode(e.target.value.toUpperCase().slice(0,4))}
-                  placeholder="ABCD" maxLength={4} style={{width:120}} />
-                <button className="mg-btn secondary" onClick={joinAsContestant}
-                  disabled={loading || !playerName.trim() || roomCode.length!==4}>
-                  Join Game
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -356,11 +338,12 @@ function DisplayView({ room, roomCode }) {
         {/* Lobby */}
         {phase === 'lobby' && (
           <div className="mg-display-center-msg">
-            <div className="mg-roomcode">{roomCode}</div>
-            <p className="mg-status">Share this code — contestants join on their phones</p>
+            <p className="mg-status" style={{fontSize:20}}>Both contestants: open the URL on your phone and enter this code</p>
+            <div className="mg-roomcode" style={{fontSize:80,padding:'24px 40px',letterSpacing:'0.3em'}}>{roomCode}</div>
+            <p className="mg-status">Game starts automatically once both players join</p>
             {room.panel?.length > 0 && (
               <>
-                <p className="mg-label" style={{textAlign:'center'}}>Tonight's Panel</p>
+                <p className="mg-label" style={{textAlign:'center',marginTop:20}}>Tonight's Panel</p>
                 <DisplayPanelGrid room={room} revealIndex={-1} />
               </>
             )}
