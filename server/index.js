@@ -12,62 +12,47 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
 const PORT = process.env.PORT || 3001;
-// LLM model used for panel generation, prompts, and panelist answers.
-// gpt-4o-mini is cheap, fast, and plenty smart for this task. Swap to
-// gpt-5.5-mini or gpt-5.5 if you want richer creativity (and don't mind cost).
 const LLM_MODEL = process.env.OPENAI_LLM_MODEL || 'gpt-4o-mini';
 const TTS_MODEL = 'gpt-4o-mini-tts';
-const TTS_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse'];
+const TTS_VOICES = ['alloy','ash','ballad','coral','echo','fable','onyx','nova','sage','shimmer','verse'];
 
 if (!process.env.OPENAI_API_KEY) {
   console.error('FATAL: OPENAI_API_KEY environment variable is not set.');
-  console.error('Set it in Railway → Variables, then redeploy.');
   process.exit(1);
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const TTS_ENABLED = true; // Same key powers both LLM and TTS
-console.log(`Match Game server starting. LLM model: ${LLM_MODEL}, TTS model: ${TTS_MODEL}`);
+console.log(`Match Game server starting. LLM: ${LLM_MODEL}, TTS: ${TTS_MODEL}`);
 
-// ─────────────────────────────────────────────────────────────
-// IN-MEMORY ROOM STORE
-// ─────────────────────────────────────────────────────────────
+// ─── ROOM STORE ───────────────────────────────────────────────
 const rooms = new Map();
-const ROOM_TTL_MS = 1000 * 60 * 60 * 4; // 4 hours
+const ROOM_TTL_MS = 1000 * 60 * 60 * 4;
 
-// Cleanup stale rooms every 30 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms.entries()) {
-    if (now - room.lastActivity > ROOM_TTL_MS) {
-      rooms.delete(code);
-    }
+    if (now - room.lastActivity > ROOM_TTL_MS) rooms.delete(code);
   }
 }, 1000 * 60 * 30);
 
 const makeRoomCode = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code;
-  do {
-    code = Array.from({ length: 4 }, () =>
-      chars[Math.floor(Math.random() * chars.length)]
-    ).join('');
-  } while (rooms.has(code));
+  do { code = Array.from({length:4}, () => chars[Math.floor(Math.random()*chars.length)]).join(''); }
+  while (rooms.has(code));
   return code;
 };
 
-// ─────────────────────────────────────────────────────────────
-// LLM HELPERS
-// ─────────────────────────────────────────────────────────────
+const bump = (room) => { room.version++; room.lastActivity = Date.now(); return room; };
+
+// ─── LLM HELPERS ──────────────────────────────────────────────
 const callLLM = async (prompt, maxTokens = 1200, jsonMode = false) => {
   const params = {
     model: LLM_MODEL,
     max_tokens: maxTokens,
     messages: [{ role: 'user', content: prompt }],
   };
-  if (jsonMode) {
-    params.response_format = { type: 'json_object' };
-  }
+  if (jsonMode) params.response_format = { type: 'json_object' };
   const response = await openai.chat.completions.create(params);
   return response.choices[0]?.message?.content || '';
 };
@@ -78,22 +63,32 @@ const extractJSON = (text) => {
   return JSON.parse(match ? match[0] : clean);
 };
 
+// ─── GAME GENERATION ──────────────────────────────────────────
+
+const CHARACTER_ARCHETYPES = [
+  'Old Man Henderson','Tiny Tina','Professor Bumbleworth','Chef Rodriguez',
+  'Nurse Nancy','Cowboy Pete','Tourist Tim','Grandma Ethel','Rookie Randy',
+  'Millionaire Mortimer','Yoga Instructor Yasmine','Plumber Phil',
+  'Librarian Louise','Astronaut Al','Kindergarten Teacher Karen',
+  'Pirate Pete','Viking Vern','Scientist Sally','Mime Marcel',
+  'Lifeguard Larry','Detective Drake','Clown Carlos','Barber Bob',
+  'Judge Judy-Ann','Mailman Morris'
+];
+
 const generatePanel = async () => {
   const text = await callLLM(
-    `Generate a panel of 6 well-known public figures for a Match Game style game show. Mix actors, musicians, athletes, comedians, TV hosts, and tech figures who are widely recognizable in 2026. Make it a FUN, ECLECTIC mix — different ages, fields, and personalities. Avoid politicians.
+    `Generate a panel of 6 well-known public figures for a Match Game style game show. Mix actors, musicians, athletes, comedians, TV hosts, and tech figures widely recognizable in 2026. Make it FUN and ECLECTIC — different ages, fields, personalities. Avoid politicians.
 
-For each panelist, provide:
-- "name": their full name
-- "tag": a short 3-5 word description of their public persona
-- "voice": the BEST matching OpenAI TTS voice from this list: ${TTS_VOICES.join(', ')}. Match by gender, pitch, and general tone (e.g. onyx is deep authoritative male; nova is bright friendly female; fable is animated British male; coral is warm expressive female; ballad is slow melodic; sage is thoughtful; verse is dynamic).
-- "voiceInstructions": 1-2 sentence instructions telling the TTS model HOW to deliver lines as this person — their pace, energy, accent, distinctive speech patterns, mood. Be specific to their known mannerisms.
+For each panelist provide:
+- "name": full name
+- "tag": 3-5 word description of their public persona  
+- "voice": best matching OpenAI TTS voice from: ${TTS_VOICES.join(', ')}. Match gender/pitch/tone. (onyx=deep authoritative male, nova=bright friendly female, fable=animated British male, coral=warm expressive female, shimmer=bright female, echo=calm male)
+- "voiceInstructions": 1-2 sentences on HOW to deliver lines as this person — pace, energy, accent, mannerisms. Be specific.
 
-IMPORTANT: assign DIFFERENT voices to different panelists when possible. Avoid using the same voice for two panelists in the same panel.
+Assign DIFFERENT voices to different panelists.
 
-Return a JSON object with a single key "panel" whose value is an array of 6 panelist objects:
-{"panel": [{"name":"...","tag":"...","voice":"...","voiceInstructions":"..."}, ...]}`,
-    1500,
-    true,
+Return JSON: {"panel": [{"name":"...","tag":"...","voice":"...","voiceInstructions":"..."}, ...]}`,
+    1500, true
   );
   const parsed = extractJSON(text);
   const panel = Array.isArray(parsed) ? parsed : (parsed.panel || []);
@@ -106,121 +101,212 @@ Return a JSON object with a single key "panel" whose value is an array of 6 pane
   }));
 };
 
-const generatePrompt = async () => {
+const generateRoundPrompts = async (usedCharacters = []) => {
+  // Pick 2 unused archetypes
+  const available = CHARACTER_ARCHETYPES.filter(c => !usedCharacters.includes(c));
+  const shuffled = available.sort(() => Math.random() - 0.5);
+  const charA = shuffled[0] || 'Old Timer Terry';
+  const charB = shuffled[1] || 'Newcomer Nick';
+
   const text = await callLLM(
-    `Generate ONE Match Game style fill-in-the-blank prompt. Match Game prompts are short, slightly absurd, and invite funny one-word or short-phrase answers. They often start with a character name ("Dumb Dora", "Old Man Periwinkle", "Tiny Tina") doing something exaggerated.
+    `Generate exactly 2 different Match Game style fill-in-the-blank prompts. 
 
-Examples of the style:
-- "Dumb Dora was so dumb, she tried to eat her ___."
-- "The fish was so big, it took ___ people to reel it in."
-- "When the magician waved his wand, the audience turned into ___."
-- "My uncle is so cheap, for his wedding he gave the bride a ___."
+Rules:
+- Each prompt uses ONE of these specific character names: "${charA}" and "${charB}" (one per prompt)
+- Vary the sentence STRUCTURE — not both "X was so Y that..." patterns
+- The blank ___ should invite short, funny 1-2 word answers
+- Keep it PG-13 — cheeky is fine, offensive is not
+- Make them genuinely different in style from each other
 
-Generate ONE new prompt in this style. Use ___ as the blank. Keep it PG-13 — mildly cheeky is fine, but nothing offensive. Return ONLY the prompt itself, no quotes, no preamble.`,
-    200
+Good structural variety examples:
+- "Old Man Henderson forgot his ___ again."
+- "When Chef Rodriguez opened the fridge, all she found was ___."
+- "The doctor told Tiny Tina she needed more ___ in her diet."
+- "Tourist Tim couldn't believe how much ___ cost in New York."
+- "Grandma Ethel's secret ingredient was always ___."
+- "Before the big game, Rookie Randy always ate ___."
+
+Return JSON: {"promptA": "...", "promptB": "...", "charA": "${charA}", "charB": "${charB}"}`,
+    400, true
   );
-  return text.trim().replace(/^["']|["']$/g, '');
+  const parsed = extractJSON(text);
+  return {
+    promptA: parsed.promptA || `${charA} couldn't believe how much ___ they needed.`,
+    promptB: parsed.promptB || `${charB} forgot their ___ at home.`,
+    charA, charB,
+  };
 };
 
-const generatePanelAnswers = async (panel, promptText) => {
-  const panelStr = panel.map((p, i) => `${i + 1}. ${p.name} (${p.tag})`).join('\n');
+const generatePanelAnswers = async (panel, promptText, contestantName) => {
+  const panelStr = panel.map((p, i) => `${i+1}. ${p.name} (${p.tag})`).join('\n');
   const text = await callLLM(
-    `You are running a Match Game style game show. The fill-in-the-blank prompt is:
-
+    `Match Game show. The contestant is ${contestantName}. The fill-in-the-blank prompt is:
 "${promptText}"
 
-These 6 celebrity panelists each give an answer IN CHARACTER as themselves — reflecting their public persona, speech patterns, and known interests. Each answer should be a short word or phrase (1-6 words) that fills the blank. Make answers FUNNY and distinctive — some panelists might give similar answers (that's how players score matches!), others wildly different.
+Each of these 6 celebrities gives a SHORT answer IN CHARACTER — but they are ACTIVELY TRYING TO MATCH what ${contestantName} would write. They balance their own personality with strategic thinking about what's most obvious/common.
+
+CRITICAL: Each answer must be 1-2 WORDS MAXIMUM. No exceptions.
 
 Panel:
 ${panelStr}
 
-Return a JSON object with a single key "answers" whose value is an array of 6 strings, in the same order as the panel:
-{"answers": ["answer1","answer2","answer3","answer4","answer5","answer6"]}`,
-    500,
-    true,
+Return JSON: {"answers": ["word","word","word","word","word","word"]}`,
+    400, true
   );
   const parsed = extractJSON(text);
-  return Array.isArray(parsed) ? parsed : (parsed.answers || []);
+  const answers = Array.isArray(parsed) ? parsed : (parsed.answers || []);
+  return answers.map(a => (a || '???').split(/\s+/).slice(0, 2).join(' '));
 };
 
-// ─────────────────────────────────────────────────────────────
-// SCORING
-// ─────────────────────────────────────────────────────────────
-const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+const generateSuperMatchPrompt = async () => {
+  const text = await callLLM(
+    `Generate a Super Match style fill-in-the-blank prompt. These are SHORT partial phrases where the blank has multiple obvious popular answers.
 
-const scoreAnswer = (playerAnswer, panel) => {
-  const a = norm(playerAnswer);
-  return panel.map(p => {
-    const pa = norm(p.answer || '');
-    if (!a || !pa) return false;
-    if (a === pa) return true;
-    if (a.length >= 3 && pa.includes(a)) return true;
-    if (pa.length >= 3 && a.includes(pa)) return true;
-    const wordsA = a.split(/\s+/).filter(w => w.length >= 3);
-    const wordsB = pa.split(/\s+/).filter(w => w.length >= 3);
-    return wordsA.some(w => wordsB.includes(w));
-  });
+Rules:
+- 2-5 words total including the blank ___
+- No character names
+- Should have clear "most popular" answers that most people would agree on
+- Either "___ Dog" style (blank at start) or "Television ___" style (blank at end) or "Hot ___" etc.
+
+Examples: "Television ___", "___ Dog", "Birthday ___", "___ Party", "School ___", "___ Star", "Baby ___"
+
+Return just the prompt text, nothing else.`,
+    100
+  );
+  return text.trim().replace(/^["']|["']$/g, '');
 };
 
-// ─────────────────────────────────────────────────────────────
-// API ROUTES
-// ─────────────────────────────────────────────────────────────
+const generateSuperMatchAnswers = async (prompt, celebNames) => {
+  // Generate the 3 canonical "best" answers AND the celeb suggestions
+  const text = await callLLM(
+    `Super Match game show round. The fill-in-the-blank prompt is: "${prompt}"
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, rooms: rooms.size });
-});
+Part 1: Generate the TOP 3 most popular/obvious answers that a general audience survey would give. Rank them 1st (most popular), 2nd, 3rd. Each must be 1-2 words.
 
-// Create room
+Part 2: Generate suggested answers for these celebrities: ${celebNames.join(', ')}. Each celeb gives 1-2 words — they're trying to help the contestant guess the most popular answer.
+
+Return JSON:
+{
+  "topAnswers": [
+    {"rank": 1, "answer": "...", "value": 1000},
+    {"rank": 2, "answer": "...", "value": 250},
+    {"rank": 3, "answer": "...", "value": 100}
+  ],
+  "celebAnswers": ["answer for celeb 1", "answer for celeb 2", "answer for celeb 3"]
+}`,
+    500, true
+  );
+  return extractJSON(text);
+};
+
+const generateFinalMatchPrompt = async () => {
+  const text = await callLLM(
+    `Generate a Final Match fill-in-the-blank prompt. Similar to Super Match — short, 2-5 words total, one blank. Should have one VERY obvious most-popular answer that two people thinking alike would likely both say.
+
+Examples: "New Year's ___", "___ Ball", "Rock ___", "___ Music", "___ Star"
+
+Return just the prompt text, nothing else.`,
+    80
+  );
+  return text.trim().replace(/^["']|["']$/g, '');
+};
+
+const generateFinalMatchCelebAnswer = async (prompt, celeb, contestantName) => {
+  const text = await callLLM(
+    `Final Match game show. "${contestantName}" just answered the prompt: "${prompt}"
+
+${celeb.name} (${celeb.tag}) is TRYING VERY HARD to match exactly what ${contestantName} would say. They think carefully about what the most obvious, common answer is — the one most people would give. They want to win for the contestant.
+
+Give ${celeb.name}'s answer. 1-2 WORDS MAXIMUM. Just the answer, nothing else.`,
+    30
+  );
+  return text.trim().split(/\s+/).slice(0, 2).join(' ');
+};
+
+// ─── SCORING ──────────────────────────────────────────────────
+const norm = (s) => (s||'').toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
+const fuzzyMatch = (a, b) => {
+  const na = norm(a), nb = norm(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.length >= 3 && nb.includes(na)) return true;
+  if (nb.length >= 3 && na.includes(nb)) return true;
+  const wa = na.split(/\s+/).filter(w => w.length >= 3);
+  const wb = nb.split(/\s+/).filter(w => w.length >= 3);
+  return wa.some(w => wb.includes(w));
+};
+
+const scoreAnswer = (playerAnswer, panel) =>
+  panel.map(p => fuzzyMatch(playerAnswer, p.answer || ''));
+
+// ─── API: HEALTH & CONFIG ──────────────────────────────────────
+app.get('/api/health', (req, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get('/api/config', (req, res) => res.json({ ttsEnabled: true }));
+
+// ─── API: ROOM MANAGEMENT ─────────────────────────────────────
 app.post('/api/room', async (req, res) => {
   const { playerName } = req.body;
-  if (!playerName || !playerName.trim()) {
-    return res.status(400).json({ error: 'playerName required' });
-  }
+  if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
   try {
     const panel = await generatePanel();
     const code = makeRoomCode();
     const room = {
-      code,
-      phase: 'lobby',
-      players: { 1: playerName.trim().slice(0, 20), 2: null },
+      code, version: 1, lastActivity: Date.now(),
+      // Game state
+      phase: 'lobby',        // lobby|cointoss|pick_prompt|answering|revealing|round_end|superMatch|finalMatch|gameOver
+      round: 0,              // 1, 2, 3(superMatch), 4(finalMatch)
+      activeSlot: null,      // which contestant is currently playing (1 or 2)
+      turnInRound: 1,        // 1 = first contestant's turn, 2 = second contestant's turn
+      // Players
+      players: { 1: playerName.trim().slice(0,20), 2: null },
       scores: { 1: 0, 2: 0 },
       triangleSlot: null,
-      activeSlot: null,
       cointossWinner: null,
-      round: 0,
-      prompt: null,
+      // Panel
       panel,
-      answer: null,
-      matches: [],
-      version: 1,
-      lastActivity: Date.now(),
+      // Round tracking - which celebs each contestant matched in round 1
+      round1Matches: { 1: [], 2: [] }, // array of panel indices matched
+      // Current turn data
+      promptA: null, promptB: null,
+      chosenPrompt: null,       // the prompt the active contestant is answering
+      usedCharacters: [],
+      contestantAnswer: null,
+      panelAnswers: [],         // answers for current prompt (indexed by panel)
+      matches: [],              // bool array for current reveal
+      // Super match
+      superMatchPrompt: null,
+      superMatchTopAnswers: null,   // [{rank,answer,value}]
+      superMatchCelebIndices: [],   // which 3 celebs contestant picked
+      superMatchCelebAnswers: [],   // their answers
+      superMatchRevealIndex: -1,    // how many celeb answers revealed so far
+      superMatchContestantAnswer: null,
+      superMatchWinnings: 0,
+      // Final match
+      finalMatchPrompt: null,
+      finalMatchCelebIndex: null,
+      finalMatchContestantAnswer: null,
+      finalMatchCelebAnswer: null,
+      finalMatchResult: null,   // 'win' | 'lose'
+      finalMatchWinnings: 0,
     };
     rooms.set(code, room);
     res.json({ room, slot: 1 });
   } catch (e) {
-    console.error('create room failed:', e);
-    res.status(500).json({ error: 'Could not assemble panel: ' + e.message });
+    console.error('create room:', e);
+    res.status(500).json({ error: e.message });
   }
 });
 
-// Join room
 app.post('/api/room/:code/join', (req, res) => {
-  const code = req.params.code.toUpperCase();
-  const { playerName } = req.body;
-  const room = rooms.get(code);
+  const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'No room with that code' });
   if (room.players[2]) return res.status(409).json({ error: 'Room is full' });
-  if (!playerName || !playerName.trim()) {
-    return res.status(400).json({ error: 'playerName required' });
-  }
-  room.players[2] = playerName.trim().slice(0, 20);
-  room.version++;
-  room.lastActivity = Date.now();
-  res.json({ room, slot: 2 });
+  const { playerName } = req.body;
+  if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
+  room.players[2] = playerName.trim().slice(0,20);
+  res.json({ room: bump(room), slot: 2 });
 });
 
-// Poll room state (frontend hits this every ~1.5s)
 app.get('/api/room/:code', (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -228,141 +314,303 @@ app.get('/api/room/:code', (req, res) => {
   res.json({ room });
 });
 
-// Flip coin (host only)
+// ─── API: COIN TOSS ───────────────────────────────────────────
 app.post('/api/room/:code/cointoss', (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  if (!room.players[2]) return res.status(400).json({ error: 'Waiting for player 2' });
   room.phase = 'cointoss';
-  // Resolve after a delay so clients can animate
+  bump(room);
   setTimeout(() => {
-    const triangleSlot = Math.random() < 0.5 ? 1 : 2;
-    room.triangleSlot = triangleSlot;
-    room.cointossWinner = triangleSlot;
-    room.activeSlot = triangleSlot;
-    room.version++;
-    room.lastActivity = Date.now();
+    const winner = Math.random() < 0.5 ? 1 : 2;
+    room.triangleSlot = winner;
+    room.cointossWinner = winner;
+    bump(room);
+    // After 3s, move to round 1
+    setTimeout(async () => {
+      try { await startNewRound(room, 1); }
+      catch(e) { console.error('start round 1:', e); }
+    }, 3000);
   }, 2500);
-  room.version++;
-  room.lastActivity = Date.now();
   res.json({ room });
 });
 
-// Proceed from coin toss back to lobby (ready to start round)
-app.post('/api/room/:code/proceed', (req, res) => {
-  const room = rooms.get(req.params.code.toUpperCase());
-  if (!room) return res.status(404).json({ error: 'Room not found' });
-  room.phase = 'lobby';
-  room.version++;
-  room.lastActivity = Date.now();
-  res.json({ room });
-});
+// ─── ROUND LOGIC ──────────────────────────────────────────────
+const startNewRound = async (room, roundNum) => {
+  room.round = roundNum;
+  room.phase = 'generating';
+  bump(room);
 
-// Determine who plays next round
-const determineActive = (room) => {
-  if (room.round === 0) return room.cointossWinner;
-  const s1 = room.scores[1], s2 = room.scores[2];
-  if (s1 < s2) return 1;
-  if (s2 < s1) return 2;
-  return room.cointossWinner;
+  if (roundNum <= 2) {
+    // Generate two prompts
+    const { promptA, promptB, charA, charB } = await generateRoundPrompts(room.usedCharacters);
+    room.promptA = promptA;
+    room.promptB = promptB;
+    room.usedCharacters.push(charA, charB);
+
+    // Determine who picks first
+    if (roundNum === 1) {
+      room.activeSlot = room.cointossWinner;
+    } else {
+      // Lower score picks first in round 2
+      const s1 = room.scores[1], s2 = room.scores[2];
+      room.activeSlot = s1 <= s2 ? 1 : 2;
+    }
+    room.turnInRound = 1;
+    room.phase = 'pick_prompt';
+    bump(room);
+  }
+  else if (roundNum === 3) {
+    // Super Match
+    const prompt = await generateSuperMatchPrompt();
+    room.superMatchPrompt = prompt;
+    room.superMatchCelebIndices = [];
+    room.superMatchCelebAnswers = [];
+    room.superMatchRevealIndex = -1;
+    room.superMatchContestantAnswer = null;
+    room.superMatchTopAnswers = null;
+    room.phase = 'superMatch_pickCelebs';
+    bump(room);
+  }
 };
 
-// Start a round (host only)
-app.post('/api/room/:code/start-round', async (req, res) => {
+// Determine the "other" contestant slot
+const otherSlot = (slot) => slot === 1 ? 2 : 1;
+
+// ─── API: PICK PROMPT ─────────────────────────────────────────
+app.post('/api/room/:code/pick-prompt', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
-  if (!room) return res.status(404).json({ error: 'Room not found' });
-  if (!room.triangleSlot) return res.status(400).json({ error: 'Coin toss first' });
+  if (!room || room.phase !== 'pick_prompt') return res.status(400).json({ error: 'Not in pick_prompt phase' });
+  const { slot, choice } = req.body; // choice: 'A' or 'B'
+  if (slot !== room.activeSlot) return res.status(403).json({ error: 'Not your turn to pick' });
 
-  try {
-    const activeSlot = determineActive(room);
-    const promptText = await generatePrompt();
-    const answers = await generatePanelAnswers(room.panel, promptText);
-    const newPanel = room.panel.map((p, i) => ({ ...p, answer: answers[i] || '???' }));
-
-    room.phase = 'round';
-    room.round += 1;
-    room.activeSlot = activeSlot;
-    room.prompt = promptText;
-    room.panel = newPanel;
-    room.answer = null;
-    room.matches = [];
-    room.version++;
-    room.lastActivity = Date.now();
-    res.json({ room });
-  } catch (e) {
-    console.error('start round failed:', e);
-    res.status(500).json({ error: 'Could not start round: ' + e.message });
-  }
+  room.chosenPrompt = choice === 'A' ? room.promptA : room.promptB;
+  room.phase = 'answering';
+  bump(room);
+  res.json({ room });
 });
 
-// Submit answer (active player only)
-app.post('/api/room/:code/answer', (req, res) => {
+// ─── API: SUBMIT ANSWER ───────────────────────────────────────
+app.post('/api/room/:code/answer', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
-  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (!room || room.phase !== 'answering') return res.status(400).json({ error: 'Not in answering phase' });
   const { slot, answer } = req.body;
   if (slot !== room.activeSlot) return res.status(403).json({ error: 'Not your turn' });
-  if (!answer || !answer.trim()) return res.status(400).json({ error: 'Answer required' });
-  if (room.phase !== 'round') return res.status(400).json({ error: 'Not in round phase' });
 
-  const trimmed = answer.trim().slice(0, 50);
-  const matches = scoreAnswer(trimmed, room.panel);
-  room.answer = trimmed;
-  room.matches = matches;
-  room.scores[room.activeSlot] += matches.filter(Boolean).length;
-  room.phase = 'reveal';
-  room.version++;
-  room.lastActivity = Date.now();
+  room.contestantAnswer = answer.trim().slice(0, 50);
+  room.phase = 'generating_answers';
+  bump(room);
   res.json({ room });
-});
 
-// Mark reveal complete (any client can call; idempotent)
-app.post('/api/room/:code/scored', (req, res) => {
-  const room = rooms.get(req.params.code.toUpperCase());
-  if (!room) return res.status(404).json({ error: 'Room not found' });
-  if (room.phase === 'reveal') {
-    room.phase = 'scored';
-    room.version++;
-    room.lastActivity = Date.now();
+  try {
+    // Generate panel answers for current contestant's prompt
+    const answers = await generatePanelAnswers(room.panel, room.chosenPrompt, room.players[room.activeSlot]);
+    room.panel = room.panel.map((p, i) => ({ ...p, answer: answers[i] || '???' }));
+    room.panelAnswers = answers;
+    const matches = scoreAnswer(room.contestantAnswer, room.panel);
+    room.matches = matches;
+    const matchCount = matches.filter(Boolean).length;
+    room.scores[room.activeSlot] += matchCount;
+
+    // Track which celebs this contestant matched in round 1
+    if (room.round === 1) {
+      room.round1Matches[room.activeSlot] = matches.map((m,i) => m ? i : -1).filter(i => i >= 0);
+    }
+
+    room.phase = 'revealing';
+    bump(room);
+  } catch(e) {
+    console.error('generate answers:', e);
+    room.phase = 'error';
+    bump(room);
   }
-  res.json({ room });
 });
 
-// Next round (host only) - resets to lobby waiting state
-app.post('/api/room/:code/next-round', (req, res) => {
+// ─── API: REVEAL DONE ─────────────────────────────────────────
+app.post('/api/room/:code/reveal-done', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  room.phase = 'lobby';
-  room.prompt = null;
-  room.answer = null;
-  room.matches = [];
-  room.panel = room.panel.map(p => ({ ...p, answer: null }));
-  room.version++;
-  room.lastActivity = Date.now();
+  res.json({ room: bump(room) });
+
+  // Determine what happens next
+  const currentActive = room.activeSlot;
+
+  if (room.turnInRound === 1) {
+    // First contestant done — second contestant now picks
+    room.turnInRound = 2;
+    // The "other" prompt goes to the other contestant
+    const other = otherSlot(currentActive);
+    room.activeSlot = other;
+    room.chosenPrompt = currentActive === 1
+      ? (room.promptA === room.chosenPrompt ? room.promptB : room.promptA)
+      : (room.promptA === room.chosenPrompt ? room.promptB : room.promptA);
+    // Actually just give them the remaining prompt — no pick for contestant 2
+    room.panel = room.panel.map(p => ({ ...p, answer: null }));
+    room.contestantAnswer = null;
+    room.matches = [];
+    room.phase = 'answering'; // contestant 2 goes straight to answering
+    bump(room);
+  } else {
+    // Both contestants done this round
+    if (room.round === 1) {
+      // Move to round 2
+      setTimeout(async () => {
+        try { await startNewRound(room, 2); }
+        catch(e) { console.error('start round 2:', e); }
+      }, 3000);
+    } else if (room.round === 2) {
+      // Check early out + determine winner
+      const s1 = room.scores[1], s2 = room.scores[2];
+      const leader = s1 > s2 ? 1 : 2;
+      const trailer = otherSlot(leader);
+      // Early out: if trailer already lost (leader can't be caught)
+      // Winner goes to superMatch
+      room.activeSlot = leader;
+      room.panel = room.panel.map(p => ({ ...p, answer: null }));
+      room.phase = 'round_end';
+      bump(room);
+      setTimeout(async () => {
+        try { await startNewRound(room, 3); }
+        catch(e) { console.error('start super match:', e); }
+      }, 4000);
+    }
+  }
+});
+
+// ─── API: SUPER MATCH — PICK CELEBS ───────────────────────────
+app.post('/api/room/:code/supermatch-pick', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room || room.phase !== 'superMatch_pickCelebs') return res.status(400).json({ error: 'Wrong phase' });
+  const { celebIndices } = req.body; // array of 3 panel indices
+  if (!Array.isArray(celebIndices) || celebIndices.length !== 3) return res.status(400).json({ error: '3 celebs required' });
+
+  room.superMatchCelebIndices = celebIndices;
+  room.phase = 'superMatch_generating';
+  bump(room);
+  res.json({ room });
+
+  try {
+    const celebNames = celebIndices.map(i => room.panel[i].name);
+    const result = await generateSuperMatchAnswers(room.superMatchPrompt, celebNames);
+    room.superMatchTopAnswers = result.topAnswers || [];
+    // Store celeb answers on the panel entries
+    celebIndices.forEach((panelIdx, i) => {
+      room.panel[panelIdx] = {
+        ...room.panel[panelIdx],
+        answer: (result.celebAnswers || [])[i] || '???'
+      };
+    });
+    room.superMatchRevealIndex = -1;
+    room.phase = 'superMatch_revealing';
+    bump(room);
+  } catch(e) {
+    console.error('supermatch generate:', e);
+    room.phase = 'error';
+    bump(room);
+  }
+});
+
+// ─── API: SUPER MATCH — CONTESTANT ANSWER ─────────────────────
+app.post('/api/room/:code/supermatch-answer', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  const { answer } = req.body;
+  room.superMatchContestantAnswer = answer.trim().slice(0, 50);
+
+  // Score against top answers
+  const topAnswers = room.superMatchTopAnswers || [];
+  let winnings = 0;
+  for (const ta of topAnswers) {
+    if (fuzzyMatch(room.superMatchContestantAnswer, ta.answer)) {
+      winnings = ta.value;
+      break;
+    }
+  }
+  room.superMatchWinnings = winnings;
+  room.phase = winnings > 0 ? 'superMatch_won' : 'superMatch_lost';
+  bump(room);
   res.json({ room });
 });
 
-// Frontend config (so client knows whether to attempt OpenAI TTS or fall back)
-app.get('/api/config', (req, res) => {
-  res.json({ ttsEnabled: TTS_ENABLED });
+// ─── API: FINAL MATCH ─────────────────────────────────────────
+app.post('/api/room/:code/finalmatch-start', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  room.phase = 'finalMatch_generating';
+  bump(room);
+  res.json({ room });
+
+  try {
+    const prompt = await generateFinalMatchPrompt();
+    room.finalMatchPrompt = prompt;
+    room.finalMatchCelebIndex = null;
+    room.finalMatchContestantAnswer = null;
+    room.finalMatchCelebAnswer = null;
+    room.phase = 'finalMatch_pickCeleb';
+    bump(room);
+  } catch(e) {
+    console.error('finalmatch start:', e);
+    room.phase = 'error';
+    bump(room);
+  }
 });
 
-// Text-to-speech - returns MP3 audio
-// Body: { slot: 0-5 for panelist, OR isAnnouncer: true, text: string, code?: string }
+app.post('/api/room/:code/finalmatch-pick', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  const { celebIndex } = req.body;
+  room.finalMatchCelebIndex = celebIndex;
+  room.phase = 'finalMatch_answering';
+  bump(room);
+  res.json({ room });
+});
+
+app.post('/api/room/:code/finalmatch-answer', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  const { answer } = req.body;
+  room.finalMatchContestantAnswer = answer.trim().slice(0, 50);
+  room.phase = 'finalMatch_generating_celeb';
+  bump(room);
+  res.json({ room });
+
+  try {
+    const celeb = room.panel[room.finalMatchCelebIndex];
+    const celebAnswer = await generateFinalMatchCelebAnswer(
+      room.finalMatchPrompt, celeb, room.players[room.activeSlot]
+    );
+    room.finalMatchCelebAnswer = celebAnswer;
+    const matched = fuzzyMatch(room.finalMatchContestantAnswer, celebAnswer);
+    room.finalMatchResult = matched ? 'win' : 'lose';
+    room.finalMatchWinnings = matched ? room.superMatchWinnings * 10 : 0;
+    room.phase = 'finalMatch_reveal';
+    bump(room);
+  } catch(e) {
+    console.error('finalmatch celeb answer:', e);
+    room.phase = 'error';
+    bump(room);
+  }
+});
+
+app.post('/api/room/:code/finalmatch-done', (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  room.phase = 'gameOver';
+  bump(room);
+  res.json({ room });
+});
+
+// ─── API: TTS ─────────────────────────────────────────────────
 app.post('/api/speak', async (req, res) => {
   const { code, slot, text, isAnnouncer } = req.body;
-  if (!text || typeof text !== 'string') {
-    return res.status(400).json({ error: 'text required' });
-  }
+  if (!text) return res.status(400).json({ error: 'text required' });
 
-  let voice = 'alloy';
-  let instructions = '';
-
+  let voice = 'alloy', instructions = '';
   if (isAnnouncer) {
     voice = 'onyx';
-    instructions = 'Speak with the dramatic, theatrical flair of a 1970s game show announcer. Deep, deliberate, with anticipatory pauses. Slightly amused, like you are in on a joke with the audience.';
+    instructions = 'Speak with dramatic, theatrical flair of a 1970s game show announcer. Deep, deliberate, with anticipatory pauses. Slightly amused.';
   } else if (code && typeof slot === 'number') {
-    const room = rooms.get(code.toUpperCase());
-    if (room && room.panel[slot]) {
+    const room = rooms.get(code?.toUpperCase());
+    if (room?.panel[slot]) {
       voice = room.panel[slot].voice || 'alloy';
       instructions = room.panel[slot].voiceInstructions || '';
     }
@@ -370,31 +618,21 @@ app.post('/api/speak', async (req, res) => {
 
   try {
     const audioResponse = await openai.audio.speech.create({
-      model: TTS_MODEL,
-      voice,
+      model: TTS_MODEL, voice,
       input: text.slice(0, 500),
-      instructions,
-      response_format: 'mp3',
+      instructions, response_format: 'mp3',
     });
     const buffer = Buffer.from(await audioResponse.arrayBuffer());
-    res.set('Content-Type', 'audio/mpeg');
-    res.set('Cache-Control', 'no-store');
-    res.send(buffer);
-  } catch (e) {
-    console.error('TTS error:', e.message);
-    res.status(500).json({ error: 'TTS generation failed: ' + e.message });
+    res.set('Content-Type', 'audio/mpeg').set('Cache-Control', 'no-store').send(buffer);
+  } catch(e) {
+    console.error('TTS:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
-// ─────────────────────────────────────────────────────────────
-// SERVE FRONTEND (built React app)
-// ─────────────────────────────────────────────────────────────
+// ─── SERVE FRONTEND ───────────────────────────────────────────
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientDist));
-app.get('*', (req, res) => {
-  res.sendFile(path.join(clientDist, 'index.html'));
-});
+app.get('*', (req, res) => res.sendFile(path.join(clientDist, 'index.html')));
 
-app.listen(PORT, () => {
-  console.log(`Match Game server listening on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Match Game listening on port ${PORT}`));
