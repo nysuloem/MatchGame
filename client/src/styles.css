@@ -923,3 +923,58 @@ body { margin: 0; }
     height: clamp(54px, 9.4vh, 86px) !important;
   }
 }
+
+/* ── v12: host reveal after full celebrity intro ───────── */
+.mg-intro-card.host {
+  overflow: hidden;
+  position: relative;
+}
+.mg-curtain-wrap {
+  position: relative;
+  height: clamp(150px, 24vh, 260px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  background: linear-gradient(90deg, #6d0000, #b30000, #6d0000);
+  border: 5px solid var(--brown);
+  box-shadow: inset 0 0 24px #0008;
+}
+.mg-curtain {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 52%;
+  background: repeating-linear-gradient(90deg, #8b0000 0 18px, #c01818 18px 36px);
+  z-index: 2;
+  animation: curtainRise 1.1s ease-out forwards;
+}
+.mg-curtain.left { left: 0; transform-origin: left center; }
+.mg-curtain.right { right: 0; transform-origin: right center; }
+@keyframes curtainRise {
+  from { transform: scaleX(1); opacity: 1; }
+  to { transform: scaleX(0.08); opacity: 0.45; }
+}
+.mg-host-figure {
+  z-index: 1;
+  background: var(--yellow);
+  border: 5px solid var(--brown);
+  box-shadow: 6px 6px 0 var(--brown);
+  width: clamp(150px, 22vh, 240px);
+  height: clamp(130px, 20vh, 220px);
+  border-radius: 18px 18px 6px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  animation: hostPop 0.45s ease-out 0.65s both;
+}
+@keyframes hostPop { from { transform: translateY(45px) scale(0.85); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+.mg-host-head { font-size: clamp(42px, 8vh, 80px); line-height: 1; }
+.mg-host-body {
+  font-family: 'Bowlby One', sans-serif;
+  color: var(--brown);
+  font-size: clamp(16px, 3vh, 28px);
+  line-height: 1.05;
+  text-align: center;
+}

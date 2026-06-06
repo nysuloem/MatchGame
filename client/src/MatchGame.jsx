@@ -33,6 +33,7 @@ const api = {
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
   submitAnswer: (code, slot, answer) => req(`/api/room/${code}/answer`, { method:'POST', body:{slot,answer} }),
   revealDone:   (code) => req(`/api/room/${code}/reveal-done`, { method:'POST' }),
+  introDone:     (code) => req(`/api/room/${code}/intro-done`, { method:'POST' }),
   superMatchPick: (code, celebIndices) => req(`/api/room/${code}/supermatch-pick`, { method:'POST', body:{celebIndices} }),
   superMatchRevealNext: (code) => req(`/api/room/${code}/supermatch-reveal-next`, { method:'POST' }),
   superMatchCelebAnswer: (code, slot, answer) => req(`/api/room/${code}/supermatch-celeb-answer`, { method:'POST', body:{slot,answer} }),
@@ -101,7 +102,7 @@ const playRetroSting = () => {
     osc.type = 'square';
     osc.frequency.value = freq;
     gain.gain.setValueAtTime(0.0001, now + i * 0.12);
-    gain.gain.exponentialRampToValueAtTime(0.08, now + i * 0.12 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.14, now + i * 0.12 + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.12 + 0.16);
     osc.connect(gain).connect(ctx.destination);
     osc.start(now + i * 0.12);
@@ -114,13 +115,13 @@ const startThinkingMusic = () => {
     const ctx = getAudioCtx();
     if (!ctx) return;
     const now = ctx.currentTime;
-    [261.63, 329.63, 392.0, 329.63].forEach((freq, i) => {
+    [261.63, 329.63, 392.0, 493.88].forEach((freq, i) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'triangle';
       osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, now + i * 0.18);
-      gain.gain.exponentialRampToValueAtTime(0.035, now + i * 0.18 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.055, now + i * 0.18 + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.18 + 0.15);
       osc.connect(gain).connect(ctx.destination);
       osc.start(now + i * 0.18);
@@ -547,20 +548,24 @@ function DisplayView({ room, roomCode }) {
   const runIntro = async (r) => {
     setIntroComplete(false);
     setIntroIndex(-1);
-    await delay(600);
+    await delay(700);
     playRetroSting();
-    // Host announces the show
     await speakTTS({ text: "Get ready to match the stars!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     await delay(500);
-    // Host announces each celebrity by name — celeb card pops in as host says their name
+    // Host announces each celebrity by name — exactly one card is spotlighted at a time.
     for (let i = 0; i < r.panel.length; i++) {
       setIntroIndex(i);
+      playRetroSting();
       await speakTTS({ text: r.panel[i].name, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-      await delay(700);
+      await delay(850);
     }
-    // All celebs introduced — now show the room code
-    setIntroComplete(true);
+    await delay(500);
+    setIntroIndex(r.panel.length);
     playAudience('applause');
+    await speakTTS({ text: "And now, here's the host of Match Game... Ray Geneburn!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+    await delay(1400);
+    setIntroComplete(true);
+    try { await api.introDone(roomCode); } catch {}
   };
 
   const runReveal = async (r) => {
@@ -718,16 +723,32 @@ function DisplayView({ room, roomCode }) {
 }
 
 
+function HostAvatar() {
+  return (
+    <div className="mg-host-figure">
+      <div className="mg-host-head">🎤</div>
+      <div className="mg-host-body">Ray<br/>Geneburn</div>
+    </div>
+  );
+}
+
 function DisplayIntroSpotlight({ room, introIndex }) {
+  const isHost = introIndex >= (room?.panel?.length || 0) && introIndex >= 0;
   const p = room?.panel?.[introIndex];
   return (
     <div className="mg-intro-stage">
       <div className="mg-intro-marquee">Get Ready to Match the Stars!</div>
-      {p ? (
+      {isHost ? (
+        <div className="mg-intro-card host" key="host">
+          <div className="mg-curtain-wrap"><div className="mg-curtain left"></div><div className="mg-curtain right"></div><HostAvatar /></div>
+          <div className="mg-intro-name">Ray Geneburn</div>
+          <div className="mg-intro-sign">Let's match!</div>
+        </div>
+      ) : p ? (
         <div className="mg-intro-card" key={introIndex}>
-          <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={170} />
+          <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={190} />
           <div className="mg-intro-name">{p.name}</div>
-          <div className="mg-intro-sign">{p.signMessage || p.tag || 'Hi Mom!'}</div>
+          <div className="mg-intro-sign">{p.signMessage || 'Hi Mom!'}</div>
         </div>
       ) : (
         <div className="mg-intro-card waiting"><div className="mg-loading">Cue the stars</div></div>
@@ -1271,7 +1292,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
                 </div>
                 <p className="mg-help" style={{marginTop:12}}>Listen to the TV for the question!</p>
               </>
-            ) : isHumanCeleb && room.panel?.[celebIndex] && !room.panel[celebIndex].inactiveThisTurn && !room.humanPanelAnswers?.[celebIndex] && !submitted ? (
+            ) : isHumanCeleb && room.panel?.[celebIndex] && !(room.round === 2 && (room.round1Matches?.[room.activeSlot] || []).includes(celebIndex)) && !room.humanPanelAnswers?.[celebIndex] && !submitted ? (
               <>
                 <p className="mg-status" style={{fontSize:18,marginBottom:8}}>
                   You are a celebrity panelist. Write your answer before the contestant is revealed:
@@ -1288,8 +1309,8 @@ function PhoneView({ room, roomCode, playerSlot }) {
                   </button>
                 </div>
               </>
-            ) : isHumanCeleb && room.panel?.[celebIndex]?.inactiveThisTurn ? (
-              <p className="mg-status">You already matched this contestant, so you sit out this Round 2 question. Watch the TV!</p>
+            ) : isHumanCeleb && room.round === 2 && (room.round1Matches?.[room.activeSlot] || []).includes(celebIndex) ? (
+              <p className="mg-status">You already matched in the previous round, so you sit out this Round 2 question. Watch the TV!</p>
             ) : (
               <p className="mg-status">
                 {isMyTurn ? `Locked in!` : isHumanCeleb ? 'Answer locked in — watch the TV!' : `${room.players[room.activeSlot]} is answering…`}

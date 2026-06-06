@@ -655,11 +655,9 @@ const assignRolesAndStart = async (room) => {
   room.triangleSlot = Math.random() < 0.5 ? 1 : 2;
   room.cointossWinner = room.triangleSlot;
   room.phase = 'intro';
+  room.introStartedAt = Date.now();
+  room.introCompleted = false;
   bump(room);
-  setTimeout(async () => {
-    try { await startNewRound(room, 1); }
-    catch(e) { console.error('start round 1:', e); }
-  }, 19000);
 };
 
 const maybeFinishAnswerPhase = async (room) => {
@@ -775,6 +773,21 @@ app.post('/api/room/:code/join', async (req, res) => {
   }
 });
 
+
+app.post('/api/room/:code/intro-done', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.phase !== 'intro') return res.json({ room });
+  if (room.introCompleted) return res.json({ room });
+  room.introCompleted = true;
+  bump(room);
+  res.json({ room });
+  setTimeout(async () => {
+    try { await startNewRound(room, 1); }
+    catch(e) { console.error('start round 1 after intro:', e); room.phase = 'error'; bump(room); }
+  }, 500);
+});
+
 app.get('/api/room/:code', (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -798,7 +811,7 @@ const startNewRound = async (room, roundNum) => {
     room.humanPanelAnswers = {};
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
-    room.panel = room.panel.map(p => ({ ...p, answer: null }));
+    room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
     const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || []);
     room.promptA = promptA;
     room.promptB = promptB;
@@ -826,7 +839,7 @@ const startNewRound = async (room, roundNum) => {
     room.humanPanelAnswers = {};
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
-    room.panel = room.panel.map(p => ({ ...p, answer: null }));
+    room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
     const prompt = await generateSuperMatchPrompt(room.usedSuperPrompts || []);
     room.superMatchPrompt = prompt;
     room.usedSuperPrompts = [...(room.usedSuperPrompts || []), prompt];
@@ -914,7 +927,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     const other = otherSlot(currentActive);
     if (room.round >= 2 && (room.scores[other] || 0) > (room.scores[currentActive] || 0)) {
       room.activeSlot = other;
-      room.panel = room.panel.map(p => ({ ...p, answer: null }));
+      room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
       room.phase = 'round_end';
       bump(room);
       res.json({ room });
@@ -956,7 +969,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     if (s1 === s2) {
       room.scores = { 1: 0, 2: 0 };
       room.round1Matches = { 1: [], 2: [] };
-      room.panel = room.panel.map(p => ({ ...p, answer: null }));
+      room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
       room.phase = 'tiebreaker';
       bump(room);
       res.json({ room });
@@ -969,7 +982,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
 
     const leader = s1 > s2 ? 1 : 2;
     room.activeSlot = leader;
-    room.panel = room.panel.map(p => ({ ...p, answer: null }));
+    room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
     room.phase = 'round_end';
     bump(room);
     res.json({ room });
