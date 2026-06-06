@@ -220,6 +220,7 @@ export default function MatchGame() {
   const [room, setRoom] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [joinFromQr, setJoinFromQr] = useState(false);
   const pollRef = useRef(null);
   const lastVersionRef = useRef(null);
 
@@ -244,6 +245,17 @@ export default function MatchGame() {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.getVoices();
       window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    }
+  }, []);
+
+
+  // QR/deep-link support: scanning the TV QR opens the phone directly to the name-entry screen.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const joinCode = (params.get('room') || params.get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+    if (joinCode) {
+      setRoomCode(joinCode);
+      setJoinFromQr(true);
     }
   }, []);
 
@@ -290,40 +302,62 @@ export default function MatchGame() {
 
         {error && <div className="mg-error" onClick={()=>setError('')}>{error}</div>}
 
-        <div className="mg-home-sections">
-          {/* TV DISPLAY */}
-          <div className="mg-home-section">
-            <div className="mg-home-section-title">📺 TV Screen (Laptop)</div>
-            <p className="mg-help">Open this on the laptop everyone can see. A room code will appear automatically.</p>
-            <div className="mg-row" style={{marginTop:24}}>
-              <button className="mg-btn secondary" onClick={startAsDisplay} disabled={loading}>
-                {loading ? 'Starting…' : 'Start Display'}
+        {joinFromQr ? (
+          <div className="mg-home-sections qr-join-only">
+            <div className="mg-home-section qr-join-card">
+              <div className="mg-home-section-title">🎮 Join the Match Game</div>
+              <p className="mg-help">You scanned the TV QR code. Just enter your name.</p>
+              <label className="mg-label">Your Name</label>
+              <input className="mg-input" value={playerName}
+                onChange={e=>setPlayerName(e.target.value)}
+                placeholder="e.g. Jason" maxLength={20} autoFocus />
+              <div className="mg-row">
+                <button className="mg-btn" onClick={joinAsContestant}
+                  disabled={loading || !playerName.trim() || roomCode.length !== 4}>
+                  {loading ? 'Joining…' : 'Join Game'}
+                </button>
+              </div>
+              <button className="mg-linkbtn" onClick={()=>{ setJoinFromQr(false); window.history.replaceState({}, '', window.location.pathname); }}>
+                I need to join a different game
               </button>
             </div>
           </div>
+        ) : (
+          <div className="mg-home-sections">
+            {/* TV DISPLAY */}
+            <div className="mg-home-section">
+              <div className="mg-home-section-title">📺 TV Screen (Laptop)</div>
+              <p className="mg-help">Open this on the laptop everyone can see. Contestants will scan a QR code from the TV.</p>
+              <div className="mg-row" style={{marginTop:24}}>
+                <button className="mg-btn secondary" onClick={startAsDisplay} disabled={loading}>
+                  {loading ? 'Starting…' : 'Start Display'}
+                </button>
+              </div>
+            </div>
 
-          <div className="mg-home-divider">or</div>
+            <div className="mg-home-divider">or</div>
 
-          {/* CONTESTANT */}
-          <div className="mg-home-section">
-            <div className="mg-home-section-title">🎮 Contestant (Phone)</div>
-            <p className="mg-help">Enter your name and the room code shown on the TV.</p>
-            <label className="mg-label">Your Name</label>
-            <input className="mg-input" value={playerName}
-              onChange={e=>setPlayerName(e.target.value)}
-              placeholder="e.g. Gene" maxLength={20} />
-            <label className="mg-label">Room Code</label>
-            <input className="mg-input big" value={roomCode}
-              onChange={e=>setRoomCode(e.target.value.toUpperCase().slice(0,4))}
-              placeholder="ABCD" maxLength={4} />
-            <div className="mg-row">
-              <button className="mg-btn" onClick={joinAsContestant}
-                disabled={loading || !playerName.trim() || roomCode.length !== 4}>
-                Join Game
-              </button>
+            {/* CONTESTANT FALLBACK */}
+            <div className="mg-home-section">
+              <div className="mg-home-section-title">🎮 Contestant (Phone)</div>
+              <p className="mg-help">Normally you can scan the QR code on the TV. Use this fallback only if scanning is not working.</p>
+              <label className="mg-label">Your Name</label>
+              <input className="mg-input" value={playerName}
+                onChange={e=>setPlayerName(e.target.value)}
+                placeholder="e.g. Gene" maxLength={20} />
+              <label className="mg-label">Room Code</label>
+              <input className="mg-input big" value={roomCode}
+                onChange={e=>setRoomCode(e.target.value.toUpperCase().slice(0,4))}
+                placeholder="ABCD" maxLength={4} />
+              <div className="mg-row">
+                <button className="mg-btn" onClick={joinAsContestant}
+                  disabled={loading || !playerName.trim() || roomCode.length !== 4}>
+                  Join Game
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         <p className="mg-help" style={{marginTop:24}}>
           AI voices are generated by OpenAI — not real celebrity voices.
@@ -336,6 +370,17 @@ export default function MatchGame() {
 // ─────────────────────────────────────────────────────────────
 // DISPLAY VIEW — the TV screen everyone watches
 // ─────────────────────────────────────────────────────────────
+
+const getJoinUrl = (roomCode) => {
+  if (!roomCode || typeof window === 'undefined') return '';
+  const base = `${window.location.origin}${window.location.pathname}`;
+  return `${base}?room=${encodeURIComponent(roomCode)}`;
+};
+
+const getQrSrc = (url) => url
+  ? `https://api.qrserver.com/v1/create-qr-code/?size=360x360&margin=14&data=${encodeURIComponent(url)}`
+  : '';
+
 function DisplayView({ room, roomCode }) {
   const prevPhaseRef = useRef(null);
   const prevVersionRef = useRef(null);
@@ -525,7 +570,7 @@ function DisplayView({ room, roomCode }) {
           {phase==='tiebreaker' && <div className="mg-display-round" style={{color:'var(--pink)'}}>⚡ Tiebreaker!</div>}
           {phase.startsWith('superMatch') && <div className="mg-display-round super">★ Super Match ★</div>}
           {phase.startsWith('finalMatch') && <div className="mg-display-round final">★★ Final Match ★★</div>}
-          <div className="mg-display-code">Room: {roomCode}</div>
+          <div className="mg-display-code">{['lobby','intro'].includes(phase) ? 'Scan QR to join' : ''}</div>
         </div>
         <div className="mg-display-contestant right" style={activeStyle(2)}>
           <div className={`mg-contestant-symbol ${slotClass(room,2)}`}>{slotSymbol(room,2)||'●'}</div>
@@ -541,9 +586,12 @@ function DisplayView({ room, roomCode }) {
             {/* Room code only appears AFTER all celebs have been introduced */}
             {introComplete && (
               <>
-                <p className="mg-status" style={{fontSize:20}}>Both contestants: open the URL on your phone and enter this code</p>
-                <div className="mg-roomcode" style={{fontSize:80,padding:'24px 40px',letterSpacing:'0.3em'}}>{roomCode}</div>
-                <p className="mg-status">Game starts automatically once both players join</p>
+                <p className="mg-status" style={{fontSize:22}}>Contestants: scan this QR code with your phone</p>
+                <div className="mg-qr-wrap">
+                  <img className="mg-qr" src={getQrSrc(getJoinUrl(roomCode))} alt="QR code to join this Match Game room" />
+                </div>
+                <p className="mg-status">It will open straight to the name-entry screen.</p>
+                <p className="mg-help tiny-fallback">Fallback code: {roomCode}</p>
               </>
             )}
             {/* Panel grid — cards start hidden, pop in as host announces each one */}
@@ -1038,12 +1086,11 @@ function PhoneView({ room, roomCode, playerSlot }) {
         {/* Lobby */}
         {phase === 'lobby' && (
           <div className="mg-phone-body">
-            <div className="mg-roomcode" style={{fontSize:36}}>{roomCode}</div>
             <p className="mg-status">
               {room.players[2] ? 'Both players connected! Waiting to start…' : 'Waiting for player 2 to join…'}
             </p>
             {!room.players[2] && playerSlot === 1 && (
-              <p className="mg-help">Share the room code with your opponent, then wait for the coin toss.</p>
+              <p className="mg-help">Ask the other contestant to scan the QR code on the TV.</p>
             )}
           </div>
         )}

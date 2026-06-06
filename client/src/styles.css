@@ -715,3 +715,44 @@ body { margin: 0; }
   from { transform: rotate(-1deg) scale(1.01); }
   to { transform: rotate(1deg) scale(1.04); }
 }
+
+/* QR-code joining */
+.qr-join-only {
+  max-width: 420px;
+  margin-inline: auto;
+}
+.qr-join-card {
+  flex-basis: 100%;
+}
+.mg-linkbtn {
+  border: 0;
+  background: transparent;
+  color: var(--orange-deep);
+  font-family: 'DM Mono', monospace;
+  text-decoration: underline;
+  cursor: pointer;
+  margin-top: 16px;
+  font-size: 13px;
+}
+.mg-qr-wrap {
+  background: white;
+  border: 5px solid var(--brown);
+  box-shadow: 7px 7px 0 var(--brown);
+  padding: 16px;
+  margin: 16px auto 12px;
+  width: min(42vh, 390px);
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mg-qr {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+.tiny-fallback {
+  opacity: 0.58;
+  font-size: 11px !important;
+  margin-top: 8px !important;
+}
