@@ -1,15 +1,6 @@
-[phases.setup]
-nixPkgs = ['nodejs_20']
-
-[phases.install]
-cmds = [
-  'npm ci',
-  'cd client && npm ci',
-  'cd server && npm ci'
-]
-
-[phases.build]
-cmds = ['cd client && npm run build']
-
-[start]
-cmd = 'cd server && npm start'
+node_modules/
+dist/
+.env
+.env.local
+.DS_Store
+*.log
