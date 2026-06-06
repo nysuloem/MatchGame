@@ -96,6 +96,14 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
   const parsed = extractJSON(text);
   const panel = Array.isArray(parsed) ? parsed : (parsed.panel || []);
   const validAvatarTypes = ['man_young','man_middle','man_older','woman_young','woman_middle','woman_older','person_athletic','person_glamorous'];
+  const usedAvatarTypes = new Set();
+  const uniqueAvatarType = (requested) => {
+    const preferred = validAvatarTypes.includes(requested) ? requested : 'man_middle';
+    if (!usedAvatarTypes.has(preferred)) { usedAvatarTypes.add(preferred); return preferred; }
+    const fallback = validAvatarTypes.find(t => !usedAvatarTypes.has(t)) || preferred;
+    usedAvatarTypes.add(fallback);
+    return fallback;
+  };
   const cleanPanelName = (name = '') => String(name)
     .replace(/\b(Mr|Mrs|Ms|Miss|Dr|Sir|Dame)\.?\s+/gi, '')
     .replace(/\s+(Jr|Sr|II|III|IV)\.?$/gi, '')
@@ -104,7 +112,7 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
   return panel.slice(0, 6).map(p => ({
     name: cleanPanelName(p.name),
     tag: p.tag,
-    avatarType: validAvatarTypes.includes(p.avatarType) ? p.avatarType : 'man_middle',
+    avatarType: uniqueAvatarType(p.avatarType),
     voice: TTS_VOICES.includes(p.voice) ? p.voice : 'alloy',
     voiceInstructions: p.voiceInstructions || '',
     answerStyle: ['obvious','literal','punny','wildcard','deadpan','chaotic'].includes(p.answerStyle) ? p.answerStyle : 'obvious',
@@ -452,6 +460,11 @@ const startNewRound = async (room, roundNum) => {
 
   if (!isSuper) {
     // Regular round (1, 2, or tiebreaker 3+)
+    room.chosenPrompt = null;
+    room.contestantAnswer = null;
+    room.panelAnswers = [];
+    room.matches = [];
+    room.panel = room.panel.map(p => ({ ...p, answer: null }));
     const { promptA, promptB, charA, charB } = await generateRoundPrompts(room.usedCharacters);
     room.promptA = promptA;
     room.promptB = promptB;
@@ -470,6 +483,10 @@ const startNewRound = async (room, roundNum) => {
     bump(room);
   } else {
     // Super Match
+    room.chosenPrompt = null;
+    room.contestantAnswer = null;
+    room.matches = [];
+    room.panel = room.panel.map(p => ({ ...p, answer: null }));
     const prompt = await generateSuperMatchPrompt();
     room.superMatchPrompt = prompt;
     room.superMatchCelebIndices = [];
@@ -511,11 +528,18 @@ app.post('/api/room/:code/answer', async (req, res) => {
   res.json({ room });
 
   try {
-    // Generate panel answers for current contestant's prompt
+    // Generate panel answers for current contestant's prompt. In Round 2, celebrities
+    // already matched by this contestant in Round 1 sit out, just like classic Match Game.
+    const inactiveCelebIndices = room.round === 2
+      ? (room.round1Matches?.[room.activeSlot] || [])
+      : [];
     const answers = await generatePanelAnswers(room.panel, room.chosenPrompt, room.players[room.activeSlot], room.round);
-    room.panel = room.panel.map((p, i) => ({ ...p, answer: answers[i] || '???' }));
-    room.panelAnswers = answers;
-    const matches = scoreAnswer(room.contestantAnswer, room.panel);
+    room.panel = room.panel.map((p, i) => inactiveCelebIndices.includes(i)
+      ? ({ ...p, answer: null, inactiveThisTurn: true })
+      : ({ ...p, answer: answers[i] || '???', inactiveThisTurn: false })
+    );
+    room.panelAnswers = room.panel.map(p => p.answer);
+    const matches = scoreAnswer(room.contestantAnswer, room.panel).map((m, i) => inactiveCelebIndices.includes(i) ? false : m);
     room.matches = matches;
     const matchCount = matches.filter(Boolean).length;
     room.scores[room.activeSlot] += matchCount;
@@ -638,7 +662,11 @@ app.post('/api/room/:code/supermatch-pick', async (req, res) => {
 app.post('/api/room/:code/supermatch-reveal-next', (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  room.superMatchRevealIndex = (room.superMatchRevealIndex || -1) + 1;
+  room.superMatchRevealIndex = (room.superMatchRevealIndex ?? -1) + 1;
+  const total = room.superMatchCelebIndices?.length || 0;
+  if (total > 0 && room.superMatchRevealIndex >= total - 1) {
+    room.phase = 'superMatch_answering';
+  }
   bump(room);
   res.json({ room });
 });

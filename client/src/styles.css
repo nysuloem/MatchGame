@@ -262,13 +262,12 @@ body { margin: 0; }
 }
 .mg-panelist.revealed { background: var(--cream); }
 .mg-panelist.matched {
-  background: #c8e6a0;
+  background: var(--cream);
   transform: rotate(-1deg) scale(1.02);
   box-shadow: 4px 4px 0 var(--brown);
 }
 .mg-panelist.prelit {
-  background: #f0f0f0;
-  opacity: 0.65;
+  background: white;
 }
 
 .mg-panelist-name {
@@ -312,13 +311,15 @@ body { margin: 0; }
   border-top: 1px dashed var(--brown);
 }
 .mg-symbol {
-  font-size: clamp(14px, 2vw, 20px);
-  opacity: 0.18;
-  transition: opacity 0.3s, transform 0.3s, text-shadow 0.3s;
+  font-size: clamp(28px, 4.8vw, 54px);
+  line-height: 0.9;
+  font-weight: 900;
+  opacity: 0.16;
+  transition: opacity 0.3s, transform 0.3s, text-shadow 0.3s, filter 0.3s;
 }
 .mg-symbol.tri { color: var(--tri-green); }
 .mg-symbol.cir { color: var(--cir-red); }
-.mg-symbol.lit { opacity: 1; transform: scale(1.4); text-shadow: 0 0 8px currentColor; }
+.mg-symbol.lit { opacity: 1; transform: scale(1.25); text-shadow: 0 0 18px currentColor, 0 0 34px currentColor; filter: brightness(1.25); }
 
 /* ── SUPER MATCH ELEMENTS ──────────────────────────────────── */
 .mg-super-celeb-grid {
