@@ -44,6 +44,9 @@ const makeRoomCode = () => {
 };
 
 const bump = (room) => { room.version++; room.lastActivity = Date.now(); return room; };
+const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
+const clampInt = (n, min, max) => Math.max(min, Math.min(max, Number.parseInt(n, 10) || min));
+
 
 // ─── LLM HELPERS ──────────────────────────────────────────────
 const callLLM = async (prompt, maxTokens = 1200, jsonMode = false) => {
@@ -128,7 +131,26 @@ const FALLBACK_ROUND_PROMPTS = [
   { prompt: "The hotel said breakfast was included, but it was only a single ___.", answers: ['muffin','egg','banana'], category: 'travel' },
   { prompt: "The dog groomer gave Mr. Jenkins' poodle a haircut that looked like a ___.", answers: ['mop','lion','rat'], category: 'pets' },
   { prompt: "The new car came with heated seats and a talking ___.", answers: ['dashboard','steering wheel','cupholder'], category: 'cars' },
-  { prompt: "At karaoke night, Kevin got booed after singing into a ___.", answers: ['banana','remote','brush'], category: 'parties' }
+  { prompt: "At karaoke night, Kevin got booed after singing into a ___.", answers: ['banana','remote','brush'], category: 'parties' },
+  { prompt: "Brett said her new boyfriend was cheap because he proposed with a ___.", answers: ['coupon','ring pop','cheque'], category: 'dating' },
+  { prompt: "The dentist told Marvin to open wide, then found a ___ in there.", answers: ['toothbrush','cavity','sandwich'], category: 'health' },
+  { prompt: "Dumb Derek brought flowers to his date, but they were actually ___.", answers: ['weeds','plastic','broccoli'], category: 'dating' },
+  { prompt: "The lifeguard blew his whistle when he saw Grandma doing ___ in the pool.", answers: ['cannonballs','yoga','laundry'], category: 'vacation' },
+  { prompt: "At the buffet, Uncle Lou filled his pockets with ___.", answers: ['shrimp','bread','cheese'], category: 'family' },
+  { prompt: "The bride was late because her dress got stuck in the ___.", answers: ['door','car','elevator'], category: 'wedding' },
+  { prompt: "The influencer said her secret to beauty was sleep, water, and a little ___.", answers: ['makeup','wine','filter'], category: 'social media' },
+  { prompt: "The substitute teacher lost control when the class hid his ___.", answers: ['glasses','phone','pants'], category: 'school' },
+  { prompt: "At the dog park, Helen was embarrassed when her dog stole a man's ___.", answers: ['hotdog','hat','shorts'], category: 'pets' },
+  { prompt: "The mechanic said the car's problem was too much ___ in the engine.", answers: ['oil','water','cheese'], category: 'cars' },
+  { prompt: "The magician's trick went wrong when he pulled a ___ out of his pants.", answers: ['rabbit','phone','sock'], category: 'parties' },
+  { prompt: "Grandpa's smartwatch said his heart rate jumped when he saw ___.", answers: ['Grandma','beer','Betty'], category: 'family' },
+  { prompt: "The waiter dropped the tray when the customer asked for extra ___.", answers: ['cheese','sauce','napkins'], category: 'restaurants' },
+  { prompt: "At the gym, Pamela said she only came to exercise her ___.", answers: ['mouth','thumbs','eyes'], category: 'gym' },
+  { prompt: "The office printer jammed because someone tried to print a ___.", answers: ['sandwich','cheque','photo'], category: 'work' },
+  { prompt: "On movie night, Dad cried when someone ate the last ___.", answers: ['popcorn','chip','cookie'], category: 'family' },
+  { prompt: "The yoga class got awkward when Steve's pose revealed his ___.", answers: ['butt','underwear','belly'], category: 'gym' },
+  { prompt: "The teenager said the family vacation was ruined because there was no ___.", answers: ['wifi','signal','phone'], category: 'vacation' },
+  { prompt: "The bachelor party ended early when the groom lost his ___.", answers: ['pants','ring','wallet'], category: 'wedding' }
 ];
 
 const FALLBACK_SUPER_PROMPTS = [
@@ -141,7 +163,18 @@ const FALLBACK_SUPER_PROMPTS = [
   { prompt:'___ Party', topAnswers:[{rank:1,answer:'Birthday',value:500},{rank:2,answer:'House',value:250},{rank:3,answer:'Pool',value:100}] },
   { prompt:'Gym ___', topAnswers:[{rank:1,answer:'Rat',value:500},{rank:2,answer:'Bag',value:250},{rank:3,answer:'Class',value:100}] },
   { prompt:'___ Chat', topAnswers:[{rank:1,answer:'Group',value:500},{rank:2,answer:'Video',value:250},{rank:3,answer:'Snap',value:100}] },
-  { prompt:'First ___', topAnswers:[{rank:1,answer:'Date',value:500},{rank:2,answer:'Kiss',value:250},{rank:3,answer:'Love',value:100}] }
+  { prompt:'First ___', topAnswers:[{rank:1,answer:'Date',value:500},{rank:2,answer:'Kiss',value:250},{rank:3,answer:'Love',value:100}] },
+  { prompt:'Coffee ___', topAnswers:[{rank:1,answer:'Cup',value:500},{rank:2,answer:'Shop',value:250},{rank:3,answer:'Break',value:100}] },
+  { prompt:'Wedding ___', topAnswers:[{rank:1,answer:'Cake',value:500},{rank:2,answer:'Ring',value:250},{rank:3,answer:'Dress',value:100}] },
+  { prompt:'School ___', topAnswers:[{rank:1,answer:'Bus',value:500},{rank:2,answer:'Dance',value:250},{rank:3,answer:'Lunch',value:100}] },
+  { prompt:'Christmas ___', topAnswers:[{rank:1,answer:'Tree',value:500},{rank:2,answer:'Gift',value:250},{rank:3,answer:'Party',value:100}] },
+  { prompt:'Rock ___', topAnswers:[{rank:1,answer:'Star',value:500},{rank:2,answer:'Music',value:250},{rank:3,answer:'Band',value:100}] },
+  { prompt:'Car ___', topAnswers:[{rank:1,answer:'Keys',value:500},{rank:2,answer:'Wash',value:250},{rank:3,answer:'Seat',value:100}] },
+  { prompt:'Pizza ___', topAnswers:[{rank:1,answer:'Pie',value:500},{rank:2,answer:'Slice',value:250},{rank:3,answer:'Delivery',value:100}] },
+  { prompt:'Dating ___', topAnswers:[{rank:1,answer:'App',value:500},{rank:2,answer:'Game',value:250},{rank:3,answer:'Profile',value:100}] },
+  { prompt:'___ Room', topAnswers:[{rank:1,answer:'Living',value:500},{rank:2,answer:'Bed',value:250},{rank:3,answer:'Dining',value:100}] },
+  { prompt:'___ Money', topAnswers:[{rank:1,answer:'Cash',value:500},{rank:2,answer:'Prize',value:250},{rank:3,answer:'Blood',value:100}] },
+  { prompt:'Game ___', topAnswers:[{rank:1,answer:'Show',value:500},{rank:2,answer:'Night',value:250},{rank:3,answer:'Board',value:100}] }
 ];
 
 const generatePanel = async () => {
@@ -248,6 +281,20 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = []) =>
   const availableCategories = PROMPT_CATEGORIES.filter(c => !usedCategories.includes(c));
   const cats = (availableCategories.length ? availableCategories : PROMPT_CATEGORIES).sort(() => Math.random() - 0.5).slice(0, 2);
   const seed = Math.random().toString(36).slice(2, 8);
+  const usedPromptSet = new Set((usedCategories || []).filter(x => String(x).startsWith('PROMPT:')).map(x => String(x).slice(7).toLowerCase()));
+  // Most family playtests work better with a curated Match Game bank than with fully free-form questions.
+  // Use the LLM only some of the time; otherwise draw from no-repeat curated prompts.
+  if (Math.random() < 0.65) {
+    const unused = FALLBACK_ROUND_PROMPTS.filter(p => !usedPromptSet.has(p.prompt.toLowerCase()));
+    const pool = unused.length >= 2 ? shuffle(unused) : shuffle(FALLBACK_ROUND_PROMPTS);
+    return {
+      promptA: pool[0].prompt, promptB: pool[1].prompt,
+      answersA: pool[0].answers, answersB: pool[1].answers,
+      categoryA: 'PROMPT:' + pool[0].prompt, categoryB: 'PROMPT:' + pool[1].prompt,
+      charA: pool[0].prompt.match(/^([^'’]+)'/)?.[1] || charA,
+      charB: pool[1].prompt.match(/^([^'’]+)'/)?.[1] || charB,
+    };
+  }
 
   const text = await callLLM(
     `Generate exactly 2 Match Game fill-in-the-blank prompts with "definitive" answers.
@@ -335,7 +382,7 @@ ANSWER RULES:
 - Use simple concrete words, not explanations.
 - The answer must fit the blank naturally when read in the prompt.
 - Round 1: answers may vary, but they must stay in the same answer neighborhood. About 2 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, 1 should give a plausible in-character answer, and 1 should give a funny answer.
-- Round 2: increase matching. Most eligible celebrities should cluster around the #1 answer or a very close synonym. One celebrity may use #2/#3. One may be funny, but still plausibly matchable.
+- Round 2: increase matching strongly. At least 4 eligible celebrities should use the #1 answer or an obvious synonym. One celebrity may use #2/#3. One may be funny/lightly innuendo-based, but still plausibly matchable.
 - The funny answer should be a quick laugh, light innuendo is allowed, but it must still make sense for the blank.
 - Do NOT make the same celebrity type the oddball every time; follow the designated funny position.
 - Do NOT make every celebrity different. That ruins the game.
@@ -499,7 +546,7 @@ const SYNONYM_GROUPS = [
   ['beer','drink','drinks','booze','alcohol','liquor','wine','cocktail','beverage'],
   ['phone','cell','cellphone','mobile','iphone','smartphone'],
   ['car','auto','automobile','vehicle','truck','ride'],
-  ['money','cash','bucks','dollars','dough'],
+  ['money','cash','bucks','dollars','dough','cheque','check','paycheck','paycheque'],
   ['butt','bum','rear','behind','bottom'],
   ['bathroom','toilet','washroom','restroom','loo'],
   ['dog','puppy','pooch'],
@@ -562,20 +609,107 @@ app.get('/api/health', (req, res) => res.json({ ok: true, rooms: rooms.size }));
 app.get('/api/config', (req, res) => res.json({ ttsEnabled: true }));
 
 // ─── API: ROOM MANAGEMENT ─────────────────────────────────────
+const makeAiPanelSeat = async () => (await generatePanel())[0] || MODERN_PANEL_BACKUPS[0];
+
+const assignRolesAndStart = async (room) => {
+  if (room.rolesAssigned) return;
+  room.rolesAssigned = true;
+  const ids = Object.keys(room.participants || {}).map(Number);
+  const shuffled = shuffle(ids);
+  const c1 = shuffled[0], c2 = shuffled[1];
+  room.playerIds = { 1: c1, 2: c2 };
+  room.players = { 1: room.participants[c1], 2: room.participants[c2] };
+  room.roles = {};
+  room.roles[c1] = { role: 'contestant', contestantSlot: 1 };
+  room.roles[c2] = { role: 'contestant', contestantSlot: 2 };
+
+  const humanCelebIds = shuffled.slice(2, 8);
+  const basePanel = await generatePanel();
+  let panel = [...basePanel];
+  for (let i = 0; i < humanCelebIds.length && i < 6; i++) {
+    const pid = humanCelebIds[i];
+    const template = panel[i] || MODERN_PANEL_BACKUPS[i % MODERN_PANEL_BACKUPS.length];
+    room.roles[pid] = { role: 'celeb', celebIndex: i };
+    panel[i] = {
+      ...template,
+      name: room.participants[pid],
+      tag: 'family celebrity panelist',
+      isHuman: true,
+      playerId: pid,
+      voice: template.voice || 'alloy',
+      voiceInstructions: 'Read clearly and playfully like a family game-show panelist.',
+      answerStyle: 'human',
+      matchBias: 0.85,
+      answer: null,
+    };
+  }
+  // Fill any empty panel seats with AI celebs.
+  for (let i = 0; i < 6; i++) {
+    if (!panel[i]) panel[i] = MODERN_PANEL_BACKUPS[i % MODERN_PANEL_BACKUPS.length];
+  }
+  room.panel = panel.slice(0, 6);
+  room.triangleSlot = Math.random() < 0.5 ? 1 : 2;
+  room.cointossWinner = room.triangleSlot;
+  room.phase = 'intro';
+  bump(room);
+  setTimeout(async () => {
+    try { await startNewRound(room, 1); }
+    catch(e) { console.error('start round 1:', e); }
+  }, 11500);
+};
+
+const maybeFinishAnswerPhase = async (room) => {
+  if (!room || room.phase !== 'answering' || !room.contestantAnswer) return;
+  const inactiveCelebIndices = room.round === 2 ? (room.round1Matches?.[room.activeSlot] || []) : [];
+  const requiredHumanCelebs = (room.panel || [])
+    .map((p, i) => ({ p, i }))
+    .filter(({p, i}) => p?.isHuman && !inactiveCelebIndices.includes(i));
+  const allHumanReady = requiredHumanCelebs.every(({i}) => room.humanPanelAnswers?.[i]);
+  if (!allHumanReady) return;
+
+  room.phase = 'generating_answers';
+  bump(room);
+  try {
+    const answers = await generatePanelAnswers(room.panel, room.chosenPrompt, room.players[room.activeSlot], room.round, room.chosenAnswerKey || []);
+    room.panel = room.panel.map((p, i) => {
+      if (inactiveCelebIndices.includes(i)) return { ...p, answer: null, inactiveThisTurn: true };
+      if (p.isHuman) return { ...p, answer: room.humanPanelAnswers?.[i] || '???', inactiveThisTurn: false };
+      return { ...p, answer: answers[i] || '???', inactiveThisTurn: false };
+    });
+    room.panelAnswers = room.panel.map(p => p.answer);
+    const matches = scoreAnswer(room.contestantAnswer, room.panel).map((m, i) => inactiveCelebIndices.includes(i) ? false : m);
+    room.matches = matches;
+    const matchCount = matches.filter(Boolean).length;
+    room.pendingScoreDelta = matchCount;
+    room.pendingMatches = matches.map((m,i) => m ? i : -1).filter(i => i >= 0);
+    room.phase = 'revealing';
+    bump(room);
+  } catch(e) {
+    console.error('generate answers:', e);
+    room.phase = 'error';
+    bump(room);
+  }
+};
+
 app.post('/api/room', async (req, res) => {
-  const { playerName } = req.body;
+  const { playerName, playerCount } = req.body;
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
   const isDisplay = playerName.trim() === '__display__';
   try {
-    const panel = await generatePanel();
     const code = makeRoomCode();
+    const maxPlayers = clampInt(playerCount || 2, 2, 8);
     const room = {
       code, version: 1, lastActivity: Date.now(),
       phase: 'lobby',
+      maxPlayers,
+      participants: {},
+      nextParticipantId: 1,
+      rolesAssigned: false,
+      roles: {},
+      playerIds: { 1: null, 2: null },
       round: 0,
       activeSlot: null,
       turnInRound: 1,
-      // Display device created the room — slots 1 and 2 are for contestants
       players: { 1: null, 2: null },
       hasDisplay: isDisplay,
       scores: { 1: 0, 2: 0 },
@@ -583,15 +717,17 @@ app.post('/api/room', async (req, res) => {
       pendingMatches: [],
       triangleSlot: null,
       cointossWinner: null,
-      panel,
+      panel: [],
       round1Matches: { 1: [], 2: [] },
       promptA: null, promptB: null,
       chosenPrompt: null,
       usedCharacters: [],
       usedCategories: [],
+      usedSuperPrompts: [],
       chosenAnswerKey: [],
       contestantAnswer: null,
       panelAnswers: [],
+      humanPanelAnswers: {},
       matches: [],
       superMatchPrompt: null,
       superMatchTopAnswers: null,
@@ -609,7 +745,6 @@ app.post('/api/room', async (req, res) => {
       finalMatchWinnings: 0,
     };
     rooms.set(code, room);
-    // Display gets no slot; contestants will join as slot 1 and 2
     res.json({ room, slot: null });
   } catch (e) {
     console.error('create room:', e);
@@ -622,40 +757,14 @@ app.post('/api/room/:code/join', async (req, res) => {
   if (!room) return res.status(404).json({ error: 'No room with that code' });
   const { playerName } = req.body;
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
-
-  // Assign to first open contestant slot
-  let slot;
-  if (!room.players[1]) {
-    slot = 1;
-    room.players[1] = playerName.trim().slice(0, 20);
-  } else if (!room.players[2]) {
-    slot = 2;
-    room.players[2] = playerName.trim().slice(0, 20);
-  } else {
-    return res.status(409).json({ error: 'Room is full' });
-  }
-
+  if (room.rolesAssigned) return res.status(409).json({ error: 'Game already started' });
+  if (Object.keys(room.participants || {}).length >= room.maxPlayers) return res.status(409).json({ error: 'Room is full' });
+  const slot = room.nextParticipantId++;
+  room.participants[slot] = playerName.trim().slice(0, 20);
   bump(room);
   res.json({ room, slot });
-
-  // Auto-start coin toss when both contestants have joined
-  if (room.players[1] && room.players[2]) {
-    setTimeout(async () => {
-      try {
-        room.phase = 'cointoss';
-        bump(room);
-        setTimeout(() => {
-          const winner = Math.random() < 0.5 ? 1 : 2;
-          room.triangleSlot = winner;
-          room.cointossWinner = winner;
-          bump(room);
-          setTimeout(async () => {
-            try { await startNewRound(room, 1); }
-            catch(e) { console.error('start round 1:', e); }
-          }, 3000);
-        }, 2500);
-      } catch(e) { console.error('auto cointoss:', e); }
-    }, 1500); // brief pause so both players see the lobby first
+  if (Object.keys(room.participants).length >= room.maxPlayers) {
+    setTimeout(() => assignRolesAndStart(room).catch(e => { console.error('assign roles:', e); room.phase = 'error'; bump(room); }), 1000);
   }
 });
 
@@ -679,6 +788,7 @@ const startNewRound = async (room, roundNum) => {
     room.contestantAnswer = null;
     room.panelAnswers = [];
     room.matches = [];
+    room.humanPanelAnswers = {};
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null }));
@@ -706,11 +816,13 @@ const startNewRound = async (room, roundNum) => {
     room.chosenPrompt = null;
     room.contestantAnswer = null;
     room.matches = [];
+    room.humanPanelAnswers = {};
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null }));
-    const prompt = await generateSuperMatchPrompt();
+    const prompt = await generateSuperMatchPrompt(room.usedSuperPrompts || []);
     room.superMatchPrompt = prompt;
+    room.usedSuperPrompts = [...(room.usedSuperPrompts || []), prompt];
     room.superMatchCelebIndices = [];
     room.superMatchCelebAnswers = [];
     room.superMatchRevealIndex = -1;
@@ -730,7 +842,8 @@ app.post('/api/room/:code/pick-prompt', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room || room.phase !== 'pick_prompt') return res.status(400).json({ error: 'Not in pick_prompt phase' });
   const { slot, choice } = req.body; // choice: 'A' or 'B'
-  if (slot !== room.activeSlot) return res.status(403).json({ error: 'Not your turn to pick' });
+  const role = room.roles?.[slot];
+  if (!role || role.role !== 'contestant' || role.contestantSlot !== room.activeSlot) return res.status(403).json({ error: 'Not your turn to pick' });
 
   room.chosenPrompt = choice === 'A' ? room.promptA : room.promptB;
   room.chosenAnswerKey = choice === 'A' ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
@@ -744,38 +857,25 @@ app.post('/api/room/:code/answer', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room || room.phase !== 'answering') return res.status(400).json({ error: 'Not in answering phase' });
   const { slot, answer } = req.body;
-  if (slot !== room.activeSlot) return res.status(403).json({ error: 'Not your turn' });
+  if (!answer?.trim()) return res.status(400).json({ error: 'answer required' });
+  const role = room.roles?.[slot];
+  if (!role) return res.status(403).json({ error: 'Not in this room' });
+  const cleanAnswer = answer.trim().slice(0, 50);
 
-  room.contestantAnswer = answer.trim().slice(0, 50);
-  room.phase = 'generating_answers';
+  if (role.role === 'contestant') {
+    if (role.contestantSlot !== room.activeSlot) return res.status(403).json({ error: 'Not your turn' });
+    room.contestantAnswer = cleanAnswer;
+  } else if (role.role === 'celeb') {
+    const inactiveCelebIndices = room.round === 2 ? (room.round1Matches?.[room.activeSlot] || []) : [];
+    if (inactiveCelebIndices.includes(role.celebIndex)) return res.status(403).json({ error: 'You already matched this contestant' });
+    room.humanPanelAnswers = room.humanPanelAnswers || {};
+    room.humanPanelAnswers[role.celebIndex] = cleanAnswer;
+  } else {
+    return res.status(403).json({ error: 'Unknown role' });
+  }
   bump(room);
   res.json({ room });
-
-  try {
-    // Generate panel answers for current contestant's prompt. In Round 2, celebrities
-    // already matched by this contestant in Round 1 sit out, just like classic Match Game.
-    const inactiveCelebIndices = room.round === 2
-      ? (room.round1Matches?.[room.activeSlot] || [])
-      : [];
-    const answers = await generatePanelAnswers(room.panel, room.chosenPrompt, room.players[room.activeSlot], room.round, room.chosenAnswerKey || []);
-    room.panel = room.panel.map((p, i) => inactiveCelebIndices.includes(i)
-      ? ({ ...p, answer: null, inactiveThisTurn: true })
-      : ({ ...p, answer: answers[i] || '???', inactiveThisTurn: false })
-    );
-    room.panelAnswers = room.panel.map(p => p.answer);
-    const matches = scoreAnswer(room.contestantAnswer, room.panel).map((m, i) => inactiveCelebIndices.includes(i) ? false : m);
-    room.matches = matches;
-    const matchCount = matches.filter(Boolean).length;
-    room.pendingScoreDelta = matchCount;
-    room.pendingMatches = matches.map((m,i) => m ? i : -1).filter(i => i >= 0);
-
-    room.phase = 'revealing';
-    bump(room);
-  } catch(e) {
-    console.error('generate answers:', e);
-    room.phase = 'error';
-    bump(room);
-  }
+  maybeFinishAnswerPhase(room).catch(e => console.error('finish answer phase:', e));
 });
 
 // ─── API: REVEAL DONE ─────────────────────────────────────────
@@ -802,9 +902,23 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
   room.pendingMatches = [];
 
   if (room.turnInRound === 1) {
-    // First contestant done — second contestant now answers the remaining prompt.
-    room.turnInRound = 2;
+    // First contestant done. In Round 2+, if the second contestant is already ahead,
+    // classic Match Game logic says they don't need to answer — they win immediately.
     const other = otherSlot(currentActive);
+    if (room.round >= 2 && (room.scores[other] || 0) > (room.scores[currentActive] || 0)) {
+      room.activeSlot = other;
+      room.panel = room.panel.map(p => ({ ...p, answer: null }));
+      room.phase = 'round_end';
+      bump(room);
+      res.json({ room });
+      setTimeout(async () => {
+        try { await startNewRound(room, 'super'); }
+        catch(e) { console.error('start super match:', e); }
+      }, 3500);
+      return;
+    }
+    // Otherwise, second contestant now answers the remaining prompt.
+    room.turnInRound = 2;
     room.activeSlot = other;
     const remainingIsA = room.promptA !== room.chosenPrompt;
     room.chosenPrompt = remainingIsA ? room.promptA : room.promptB;
@@ -863,42 +977,74 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
   return res.json({ room });
 });
 
+
+const completeSuperMatchGeneration = async (room) => {
+  const safeIndices = room.superMatchCelebIndices || [];
+  room.phase = 'superMatch_generating';
+  bump(room);
+  const celebNames = safeIndices.map(i => room.panel[i].name);
+  const result = await generateSuperMatchAnswers(room.superMatchPrompt, celebNames);
+  room.superMatchTopAnswers = Array.isArray(result.topAnswers) ? result.topAnswers : [];
+  if (room.superMatchTopAnswers.length === 0) {
+    room.superMatchTopAnswers = [{ rank: 1, answer: (result.celebAnswers || [])[0] || 'answer', value: 500 }];
+  }
+  safeIndices.forEach((panelIdx, i) => {
+    const humanAnswer = room.superMatchHumanAnswers?.[panelIdx];
+    room.panel[panelIdx] = {
+      ...room.panel[panelIdx],
+      answer: humanAnswer || (result.celebAnswers || [])[i] || '???'
+    };
+  });
+  room.superMatchRevealIndex = -1;
+  room.phase = 'superMatch_revealing';
+  bump(room);
+};
+
 // ─── API: SUPER MATCH — PICK CELEBS ───────────────────────────
 app.post('/api/room/:code/supermatch-pick', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room || room.phase !== 'superMatch_pickCelebs') return res.status(400).json({ error: 'Wrong phase' });
-  const { celebIndices } = req.body; // array of 3 panel indices
+  const { celebIndices } = req.body;
   if (!Array.isArray(celebIndices) || celebIndices.length !== 3) return res.status(400).json({ error: '3 celebs required' });
 
   const safeIndices = celebIndices.map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < room.panel.length).slice(0, 3);
   if (safeIndices.length !== 3) return res.status(400).json({ error: 'Invalid celebrity selection' });
 
   room.superMatchCelebIndices = safeIndices;
+  room.superMatchHumanAnswers = {};
+  const humanSelected = safeIndices.filter(i => room.panel[i]?.isHuman);
+  if (humanSelected.length) {
+    room.phase = 'superMatch_human_answering';
+    bump(room);
+    res.json({ room });
+    return;
+  }
+
   room.phase = 'superMatch_generating';
   bump(room);
   res.json({ room });
+  try { await completeSuperMatchGeneration(room); }
+  catch(e) { console.error('supermatch generate:', e); room.phase = 'error'; bump(room); }
+});
 
-  try {
-    const celebNames = safeIndices.map(i => room.panel[i].name);
-    const result = await generateSuperMatchAnswers(room.superMatchPrompt, celebNames);
-    room.superMatchTopAnswers = Array.isArray(result.topAnswers) ? result.topAnswers : [];
-    if (room.superMatchTopAnswers.length === 0) {
-      room.superMatchTopAnswers = [{ rank: 1, answer: (result.celebAnswers || [])[0] || 'answer', value: 500 }];
-    }
-    // Store celeb answers on the panel entries
-    safeIndices.forEach((panelIdx, i) => {
-      room.panel[panelIdx] = {
-        ...room.panel[panelIdx],
-        answer: (result.celebAnswers || [])[i] || '???'
-      };
-    });
-    room.superMatchRevealIndex = -1;
-    room.phase = 'superMatch_revealing';
-    bump(room);
-  } catch(e) {
-    console.error('supermatch generate:', e);
-    room.phase = 'error';
-    bump(room);
+app.post('/api/room/:code/supermatch-celeb-answer', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room || room.phase !== 'superMatch_human_answering') return res.status(400).json({ error: 'Wrong phase' });
+  const { slot, answer } = req.body;
+  if (!answer?.trim()) return res.status(400).json({ error: 'answer required' });
+  const role = room.roles?.[slot];
+  if (!role || role.role !== 'celeb' || !(room.superMatchCelebIndices || []).includes(role.celebIndex)) {
+    return res.status(403).json({ error: 'Not a selected celebrity' });
+  }
+  room.superMatchHumanAnswers = room.superMatchHumanAnswers || {};
+  room.superMatchHumanAnswers[role.celebIndex] = answer.trim().slice(0, 50);
+  bump(room);
+  res.json({ room });
+  const selectedHumans = (room.superMatchCelebIndices || []).filter(i => room.panel[i]?.isHuman);
+  const allReady = selectedHumans.every(i => room.superMatchHumanAnswers?.[i]);
+  if (allReady) {
+    try { await completeSuperMatchGeneration(room); }
+    catch(e) { console.error('supermatch generate:', e); room.phase = 'error'; bump(room); }
   }
 });
 

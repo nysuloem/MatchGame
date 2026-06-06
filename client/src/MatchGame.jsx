@@ -27,7 +27,7 @@ const req = async (path, opts = {}) => {
 };
 
 const api = {
-  createRoom:   (playerName) => req('/api/room', { method:'POST', body:{playerName} }),
+  createRoom:   (playerName, playerCount=2) => req('/api/room', { method:'POST', body:{playerName, playerCount} }),
   joinRoom:     (code, playerName) => req(`/api/room/${code}/join`, { method:'POST', body:{playerName} }),
   getRoom:      (code) => req(`/api/room/${code}`),
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
@@ -35,6 +35,7 @@ const api = {
   revealDone:   (code) => req(`/api/room/${code}/reveal-done`, { method:'POST' }),
   superMatchPick: (code, celebIndices) => req(`/api/room/${code}/supermatch-pick`, { method:'POST', body:{celebIndices} }),
   superMatchRevealNext: (code) => req(`/api/room/${code}/supermatch-reveal-next`, { method:'POST' }),
+  superMatchCelebAnswer: (code, slot, answer) => req(`/api/room/${code}/supermatch-celeb-answer`, { method:'POST', body:{slot,answer} }),
   superMatchAnswer: (code, answer) => req(`/api/room/${code}/supermatch-answer`, { method:'POST', body:{answer} }),
   finalMatchStart: (code) => req(`/api/room/${code}/finalmatch-start`, { method:'POST' }),
   finalMatchPick:  (code, celebIndex) => req(`/api/room/${code}/finalmatch-pick`, { method:'POST', body:{celebIndex} }),
@@ -87,6 +88,51 @@ const playAudience = (kind = 'applause') => {
       osc.stop(now + idx * 0.12 + 0.4);
     });
   }
+};
+
+let thinkingMusicTimer = null;
+const playRetroSting = () => {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  [392, 494, 587, 784, 988].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, now + i * 0.12);
+    gain.gain.exponentialRampToValueAtTime(0.08, now + i * 0.12 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.12 + 0.16);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + i * 0.12);
+    osc.stop(now + i * 0.12 + 0.18);
+  });
+};
+const startThinkingMusic = () => {
+  if (thinkingMusicTimer) return;
+  const tick = () => {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [261.63, 329.63, 392.0, 329.63].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + i * 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.035, now + i * 0.18 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.18 + 0.15);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + i * 0.18);
+      osc.stop(now + i * 0.18 + 0.18);
+    });
+  };
+  tick();
+  thinkingMusicTimer = setInterval(tick, 900);
+};
+const stopThinkingMusic = () => {
+  if (thinkingMusicTimer) clearInterval(thinkingMusicTimer);
+  thinkingMusicTimer = null;
 };
 const ttsCache = new Map();
 const ttsKey = ({ text, code, slot, isAnnouncer }) => `${code || ''}|${slot ?? ''}|${isAnnouncer ? 'announcer' : 'panel'}|${text}`;
@@ -172,7 +218,7 @@ const quickCanon = (s='') => {
     ['tv','television','telly'], ['abs','muscles','muscle','six pack','sixpack'],
     ['beer','drink','drinks','booze','alcohol','liquor','wine','cocktail','beverage'],
     ['phone','cell','cellphone','mobile','iphone'], ['car','auto','vehicle','truck'],
-    ['money','cash','bucks','dollars'], ['bathroom','toilet','washroom','restroom'],
+    ['money','cash','bucks','dollars','cheque','check','paycheque','paycheck'], ['bathroom','toilet','washroom','restroom'],
   ];
   for (const group of groups) {
     for (const alias of group) out = out.replace(new RegExp(`\\b${quickNorm(alias).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'g'), group[0]);
@@ -198,6 +244,7 @@ const PHASE_LABELS = {
   intro: 'Meet the panel!',
   superMatch_pickCelebs: 'Super Match — choose your celebrities!',
   superMatch_generating: 'Panel is preparing…',
+  superMatch_human_answering: 'The stars are writing…',
   superMatch_revealing: 'The panel reveals…',
   superMatch_answering: 'Super Match — make your choice!',
   superMatch_won: 'Super Match complete!',
@@ -221,6 +268,7 @@ export default function MatchGame() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [joinFromQr, setJoinFromQr] = useState(false);
+  const [playerCount, setPlayerCount] = useState(2);
   const pollRef = useRef(null);
   const lastVersionRef = useRef(null);
 
@@ -264,7 +312,7 @@ export default function MatchGame() {
     setLoading(true); setError('');
     try {
       // Create room with a placeholder name for the display device
-      const { room: r } = await api.createRoom('__display__');
+      const { room: r } = await api.createRoom('__display__', playerCount);
       lastVersionRef.current = r.version;
       setRoomCode(r.code);
       setRoom(r);
@@ -297,7 +345,7 @@ export default function MatchGame() {
     <div className="mg-root">
       <div className="mg-card">
         <h1 className="mg-title">The<br/>Match Game</h1>
-        <p className="mg-subtitle">— a parlor diversion for two contestants —</p>
+        <p className="mg-subtitle">— a family game show for 2–8 players —</p>
         <div className="mg-stars">★ ★ ★ ★ ★ ★ ★</div>
 
         {error && <div className="mg-error" onClick={()=>setError('')}>{error}</div>}
@@ -327,7 +375,11 @@ export default function MatchGame() {
             {/* TV DISPLAY */}
             <div className="mg-home-section">
               <div className="mg-home-section-title">📺 TV Screen (Laptop)</div>
-              <p className="mg-help">Open this on the laptop everyone can see. Contestants will scan a QR code from the TV.</p>
+              <p className="mg-help">Open this on the laptop everyone can see. Everyone scans the QR code, then the game randomly chooses 2 contestants and makes the rest celebrity panelists.</p>
+              <label className="mg-label">How many people are playing?</label>
+              <select className="mg-input" value={playerCount} onChange={e=>setPlayerCount(Number(e.target.value))}>
+                {[2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
               <div className="mg-row" style={{marginTop:24}}>
                 <button className="mg-btn secondary" onClick={startAsDisplay} disabled={loading}>
                   {loading ? 'Starting…' : 'Start Display'}
@@ -391,6 +443,7 @@ function DisplayView({ room, roomCode }) {
   const [introIndex, setIntroIndex] = useState(-1);
   const [introComplete, setIntroComplete] = useState(false);
   const [promptReadyFor, setPromptReadyFor] = useState(null);
+  const [superPromptReady, setSuperPromptReady] = useState(false);
   const introRunRef = useRef(false);
   const turnPromptAnnouncedRef = useRef(null);
   const inheritedTurnAnnouncedRef = useRef(null);
@@ -414,7 +467,7 @@ function DisplayView({ room, roomCode }) {
     const prevPhase = prevPhaseRef.current;
     prevPhaseRef.current = phase;
 
-    if (phase === 'lobby' && prevPhase !== 'lobby' && !introRunRef.current && room.panel?.length > 0) {
+    if (phase === 'intro' && prevPhase !== 'intro' && !introRunRef.current && room.panel?.length > 0) {
       introRunRef.current = true;
       runIntro(room);
     }
@@ -459,17 +512,24 @@ function DisplayView({ room, roomCode }) {
         setRevealIndex(-1); runReveal(room);
       }
     }
+    if (['answering','generating_answers','superMatch_generating','finalMatch_generating_celeb'].includes(phase)) startThinkingMusic();
+    else stopThinkingMusic();
     if (phase === 'tiebreaker' && prevPhase !== 'tiebreaker') {
       speakTTS({ text: "It's a tie! Scores reset — tiebreaker round!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     }
     if (phase === 'superMatch_pickCelebs' && prevPhase !== 'superMatch_pickCelebs') {
-      speakTTS({ text: `${room.players[room.activeSlot]}, you're moving on to the Super Match!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      setSuperPromptReady(false);
+      (async () => {
+        await speakTTS({ text: `${room.players[room.activeSlot]}, you're moving on to the Super Match!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+        await delay(250);
+        setSuperPromptReady(true);
+      })();
     }
   }, [room?.version, audioUnlocked]);
 
   // Also run intro when audio gets unlocked if panel is already ready
   useEffect(() => {
-    if (audioUnlocked && room?.panel?.length > 0 && !introRunRef.current) {
+    if (audioUnlocked && room?.phase === 'intro' && room?.panel?.length > 0 && !introRunRef.current) {
       introRunRef.current = true;
       runIntro(room);
     }
@@ -477,6 +537,7 @@ function DisplayView({ room, roomCode }) {
 
   const runIntro = async (r) => {
     await delay(600);
+    playRetroSting();
     // Host announces the show
     await speakTTS({ text: "Get ready to match the stars!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     await delay(500);
@@ -583,17 +644,18 @@ function DisplayView({ room, roomCode }) {
       <div className="mg-display-main">
         {(phase==='lobby'||phase==='intro') && (
           <div className="mg-display-center-msg">
-            {/* Room code only appears AFTER all celebs have been introduced */}
-            {introComplete && (
+            {phase === 'lobby' && (
               <>
-                <p className="mg-status" style={{fontSize:22}}>Contestants: scan this QR code with your phone</p>
+                <p className="mg-status" style={{fontSize:22}}>Everyone scan this QR code with your phone</p>
                 <div className="mg-qr-wrap">
                   <img className="mg-qr" src={getQrSrc(getJoinUrl(roomCode))} alt="QR code to join this Match Game room" />
                 </div>
-                <p className="mg-status">It will open straight to the name-entry screen.</p>
+                <p className="mg-status">Joined: {Object.keys(room.participants || {}).length} / {room.maxPlayers || 2}</p>
                 <p className="mg-help tiny-fallback">Fallback code: {roomCode}</p>
               </>
             )}
+            {phase === 'intro' && !introComplete && <p className="mg-status" style={{fontSize:22}}>Roles are set. Meet tonight's stars!</p>}
+            {phase === 'intro' && introComplete && <p className="mg-status" style={{fontSize:22}}>Here we go!</p>}
             {/* Panel grid — cards start hidden, pop in as host announces each one */}
             {room.panel?.length>0 && (
               <>
@@ -609,7 +671,7 @@ function DisplayView({ room, roomCode }) {
             {!coinFlipping&&coinResult&&<p className="mg-status" style={{fontSize:24}}><strong>{room.players[coinResult]}</strong> wins the toss and plays first!</p>}
           </div>
         )}
-        {['generating','generating_answers','round_end','superMatch_generating','finalMatch_generating','finalMatch_generating_celeb','tiebreaker'].includes(phase) && (
+        {['generating','generating_answers','round_end','superMatch_generating','superMatch_human_answering','finalMatch_generating','finalMatch_generating_celeb','tiebreaker'].includes(phase) && (
           <div className="mg-display-center-msg">
             <div className="mg-loading">
               {phase==='generating'&&'Preparing questions'}
@@ -617,6 +679,7 @@ function DisplayView({ room, roomCode }) {
               {phase==='round_end'&&'Calculating scores'}
               {phase==='tiebreaker'&&"It's a tie — resetting scores"}
               {phase==='superMatch_generating'&&'Consulting the panel'}
+              {phase==='superMatch_human_answering'&&'Waiting for the live stars'}
               {phase==='finalMatch_generating'&&'Preparing the Final Match'}
               {phase==='finalMatch_generating_celeb'&&`${room.panel[room.finalMatchCelebIndex]?.name} is thinking hard`}
             </div>
@@ -625,7 +688,7 @@ function DisplayView({ room, roomCode }) {
         )}
         {['pick_prompt','answering'].includes(phase) && <DisplayRoundActive room={room} promptVisible={promptReadyFor === room.chosenPrompt}/>}
         {phase==='revealing' && <DisplayReveal room={room} revealIndex={revealIndex} roomCode={roomCode}/>}
-        {phase==='superMatch_pickCelebs' && <DisplaySuperMatchPickCelebs room={room}/>}
+        {phase==='superMatch_pickCelebs' && <DisplaySuperMatchPickCelebs room={room} promptVisible={superPromptReady}/>}
         {phase==='superMatch_revealing' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
         {phase==='superMatch_answering' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
         {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room} roomCode={roomCode}/>}
@@ -669,7 +732,7 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) 
             }}>
             <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={70} />
             <div className="mg-panelist-name">{p.name}</div>
-            <div className="mg-panelist-tag">{p.tag}</div>
+            <div className="mg-panelist-tag">{p.isHuman ? 'LIVE FAMILY STAR' : p.tag}</div>
             <div className={`mg-panelist-answer ${shown ? '' : 'blank'}`}>
               {shown ? (p.answer || (prelit ? 'Matched' : '')) : ''}
             </div>
@@ -711,13 +774,13 @@ function DisplayReveal({ room, revealIndex, roomCode }) {
   );
 }
 
-function DisplaySuperMatchPickCelebs({ room }) {
+function DisplaySuperMatchPickCelebs({ room, promptVisible = true }) {
   return (
     <div className="mg-display-center-msg">
       <div className="mg-display-round super" style={{fontSize:32,marginBottom:16}}>★ Super Match ★</div>
-      <div className="mg-prompt">{room.superMatchPrompt}</div>
+      <div className="mg-prompt">{promptVisible ? room.superMatchPrompt : 'Listen carefully…'}</div>
       <p className="mg-status" style={{fontSize:20}}>
-        {room.players[room.activeSlot]} — choose 3 celebrities on your phone!
+        {promptVisible ? `${room.players[room.activeSlot]} — choose 3 celebrities on your phone!` : 'The Super Match question is coming up…'}
       </p>
       <DisplayPanelGrid room={room} revealIndex={-1} />
     </div>
@@ -966,7 +1029,7 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
 
       <div className={`mg-final-celeb-focus ${stage === 'thinking' ? 'stressed' : ''} ${stage !== 'thinking' ? 'revealed' : ''}`}>
         <div style={{width:150,height:150,margin:'0 auto 10px'}}>
-          <CelebAvatar type={celeb?.avatarType} />
+          <CelebAvatar avatarType={celeb?.avatarType || 'man_middle'} />
         </div>
         <div className="mg-panelist-name" style={{fontSize:30}}>{celeb?.name}</div>
         <div className="mg-panelist-tag">{stage === 'thinking' ? 'thinking hard…' : 'reveals:'}</div>
@@ -1014,9 +1077,14 @@ function PhoneView({ room, roomCode, playerSlot }) {
   if (!room) return <PhoneWaiting />;
 
   const phase = room.phase;
-  const isMyTurn = room.activeSlot === playerSlot;
-  const myName = room.players[playerSlot] || 'You';
-  const sym = slotSymbol(room, playerSlot);
+  const myRole = room.roles?.[playerSlot];
+  const isContestant = myRole?.role === 'contestant';
+  const isHumanCeleb = myRole?.role === 'celeb';
+  const contestantSlot = myRole?.contestantSlot;
+  const celebIndex = myRole?.celebIndex;
+  const isMyTurn = isContestant && room.activeSlot === contestantSlot;
+  const myName = room.participants?.[playerSlot] || room.players?.[contestantSlot] || 'You';
+  const sym = isContestant ? slotSymbol(room, contestantSlot) : '★';
 
   const handlePickPrompt = async (choice) => {
     setSubmitted(true);
@@ -1052,6 +1120,13 @@ function PhoneView({ room, roomCode, playerSlot }) {
     catch(e) { setSubmitted(false); }
   };
 
+  const handleSuperMatchCelebAnswer = async () => {
+    if (!myAnswer.trim()) return;
+    setSubmitted(true);
+    try { await api.superMatchCelebAnswer(roomCode, playerSlot, myAnswer); }
+    catch(e) { setSubmitted(false); }
+  };
+
   const handleFinalMatchPick = async (celebIndex) => {
     setSubmitted(true);
     try { await api.finalMatchPick(roomCode, celebIndex); }
@@ -1078,20 +1153,29 @@ function PhoneView({ room, roomCode, playerSlot }) {
     <div className="mg-root phone-mode">
       <div className="mg-phone-card">
         <div className="mg-phone-header">
-          <span className={`mg-phone-symbol ${slotClass(room, playerSlot)}`}>{sym || '★'}</span>
+          <span className={`mg-phone-symbol ${isContestant ? slotClass(room, contestantSlot) : 'star'}`}>{sym || '★'}</span>
           <span className="mg-phone-name">{myName}</span>
-          <span className="mg-phone-score">{room.scores[playerSlot]}</span>
+          <span className="mg-phone-score">{isContestant ? room.scores[contestantSlot] : 'STAR'}</span>
         </div>
 
         {/* Lobby */}
         {phase === 'lobby' && (
           <div className="mg-phone-body">
             <p className="mg-status">
-              {room.players[2] ? 'Both players connected! Waiting to start…' : 'Waiting for player 2 to join…'}
+              You're in! Waiting for everyone else to join: {Object.keys(room.participants || {}).length} / {room.maxPlayers || 2}
             </p>
-            {!room.players[2] && playerSlot === 1 && (
-              <p className="mg-help">Ask the other contestant to scan the QR code on the TV.</p>
-            )}
+            <p className="mg-help">Keep watching the TV screen.</p>
+          </div>
+        )}
+
+        {/* Intro / role reveal */}
+        {phase === 'intro' && (
+          <div className="mg-phone-body">
+            <p className="mg-status">
+              {isContestant ? `You are a contestant! Watch the TV to see when it's your turn.` :
+               isHumanCeleb ? `You are one of the celebrity panelists! Watch the TV for your introduction.` :
+               'Roles are being assigned — watch the TV!'}
+            </p>
           </div>
         )}
 
@@ -1103,13 +1187,14 @@ function PhoneView({ room, roomCode, playerSlot }) {
         )}
 
         {/* Generating */}
-        {['generating','generating_answers','round_end','superMatch_generating','finalMatch_generating','finalMatch_generating_celeb'].includes(phase) && (
+        {['generating','generating_answers','round_end','superMatch_generating','superMatch_human_answering','finalMatch_generating','finalMatch_generating_celeb'].includes(phase) && (
           <div className="mg-phone-body">
             <div className="mg-loading">
               {phase === 'generating' && 'Preparing questions'}
               {phase === 'generating_answers' && 'Panel is conferring'}
               {phase === 'round_end' && 'Scoring round'}
               {phase === 'superMatch_generating' && 'Consulting the panel'}
+              {phase === 'superMatch_human_answering' && 'Selected stars are answering'}
               {phase === 'finalMatch_generating' && 'Preparing Final Match'}
               {phase === 'finalMatch_generating_celeb' && 'Celebrity is thinking'}
             </div>
@@ -1158,9 +1243,28 @@ function PhoneView({ room, roomCode, playerSlot }) {
                 </div>
                 <p className="mg-help" style={{marginTop:12}}>Listen to the TV for the question!</p>
               </>
+            ) : isHumanCeleb && room.panel?.[celebIndex] && !room.panel[celebIndex].inactiveThisTurn && !room.humanPanelAnswers?.[celebIndex] && !submitted ? (
+              <>
+                <p className="mg-status" style={{fontSize:18,marginBottom:8}}>
+                  You are a celebrity panelist. Write your answer before the contestant is revealed:
+                </p>
+                <div className="mg-prompt phone">{room.chosenPrompt}</div>
+                <input className="mg-input" value={myAnswer}
+                  onChange={e => setMyAnswer(e.target.value)}
+                  placeholder="Your celeb answer" maxLength={50}
+                  onKeyDown={e => { if (e.key==='Enter') handleSubmitAnswer(); }}
+                  autoFocus style={{fontSize:24,padding:'18px 16px'}} />
+                <div className="mg-row">
+                  <button className="mg-btn" onClick={handleSubmitAnswer} disabled={!myAnswer.trim()}>
+                    Lock In Celeb Answer
+                  </button>
+                </div>
+              </>
+            ) : isHumanCeleb && room.panel?.[celebIndex]?.inactiveThisTurn ? (
+              <p className="mg-status">You already matched this contestant, so you sit out this Round 2 question. Watch the TV!</p>
             ) : (
               <p className="mg-status">
-                {isMyTurn ? `Locked in!` : `${room.players[room.activeSlot]} is answering…`}
+                {isMyTurn ? `Locked in!` : isHumanCeleb ? 'Answer locked in — watch the TV!' : `${room.players[room.activeSlot]} is answering…`}
               </p>
             )}
           </div>
@@ -1198,6 +1302,31 @@ function PhoneView({ room, roomCode, playerSlot }) {
               <button className="mg-btn" onClick={handleSuperMatchPick}
                 disabled={selectedCelebs.length !== 3}>Ask Them!</button>
             </div>
+          </div>
+        )}
+
+        {/* Super Match — selected live celebrities answer first */}
+        {phase === 'superMatch_human_answering' && (
+          <div className="mg-phone-body">
+            {isHumanCeleb && (room.superMatchCelebIndices || []).includes(celebIndex) && !room.superMatchHumanAnswers?.[celebIndex] && !submitted ? (
+              <>
+                <div className="mg-display-round super">★ Super Match ★</div>
+                <div className="mg-prompt phone">{room.superMatchPrompt}</div>
+                <p className="mg-status">You were selected to help. Write your answer:</p>
+                <input className="mg-input" value={myAnswer}
+                  onChange={e => setMyAnswer(e.target.value)}
+                  placeholder="Your Super Match answer" maxLength={30}
+                  onKeyDown={e => { if (e.key==='Enter') handleSuperMatchCelebAnswer(); }}
+                  autoFocus />
+                <div className="mg-row">
+                  <button className="mg-btn" onClick={handleSuperMatchCelebAnswer} disabled={!myAnswer.trim()}>
+                    Lock In Answer
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="mg-status">Watch the TV — selected stars are writing their answers!</p>
+            )}
           </div>
         )}
 
