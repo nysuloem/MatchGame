@@ -782,12 +782,18 @@ app.post('/api/room/:code/answer', async (req, res) => {
 app.post('/api/room/:code/reveal-done', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  res.json({ room: bump(room) });
 
-  // Commit score only AFTER the TV reveal has completed, so the score changes live during reveal.
+  // Idempotency guard: React StrictMode, polling races, or a double-click/retry should not
+  // commit the same reveal twice or advance a round early. Only a live reveal can be finalized.
+  if (room.phase !== 'revealing') {
+    return res.json({ room });
+  }
+
+  // Commit score only AFTER the TV reveal has completed. The TV shows a temporary live score
+  // during the reveal; the stored score changes here once, after the reveal is done.
   const currentActive = room.activeSlot;
   if (room.pendingScoreDelta) {
-    room.scores[currentActive] += room.pendingScoreDelta;
+    room.scores[currentActive] = (room.scores[currentActive] || 0) + room.pendingScoreDelta;
   }
   if (room.round === 1 && Array.isArray(room.pendingMatches)) {
     room.round1Matches[currentActive] = [...room.pendingMatches];
@@ -796,56 +802,65 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
   room.pendingMatches = [];
 
   if (room.turnInRound === 1) {
-    // First contestant done — second contestant now picks
+    // First contestant done — second contestant now answers the remaining prompt.
     room.turnInRound = 2;
-    // The "other" prompt goes to the other contestant
     const other = otherSlot(currentActive);
     room.activeSlot = other;
     const remainingIsA = room.promptA !== room.chosenPrompt;
     room.chosenPrompt = remainingIsA ? room.promptA : room.promptB;
     room.chosenAnswerKey = remainingIsA ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
-    // Actually just give them the remaining prompt — no pick for contestant 2
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
     room.contestantAnswer = null;
     room.matches = [];
-    room.pendingScoreDelta = 0;
-    room.pendingMatches = [];
-    room.phase = 'answering'; // contestant 2 goes straight to answering
+    room.phase = 'answering';
     bump(room);
-  } else {
-    // Both contestants done this round
-    if (room.round === 1) {
-      setTimeout(async () => {
-        try { await startNewRound(room, 2); }
-        catch(e) { console.error('start round 2:', e); }
-      }, 3000);
-    } else if (room.round >= 2) {
-      const s1 = room.scores[1], s2 = room.scores[2];
-      if (s1 === s2) {
-        // TIE — run a tiebreaker round: wipe scores, start fresh round
-        room.scores = { 1: 0, 2: 0 };
-        room.round1Matches = { 1: [], 2: [] };
-        room.panel = room.panel.map(p => ({ ...p, answer: null }));
-        room.phase = 'tiebreaker';
-        bump(room);
-        setTimeout(async () => {
-          try { await startNewRound(room, room.round + 1); }
-          catch(e) { console.error('start tiebreaker:', e); }
-        }, 4000);
-      } else {
-        // Winner determined — go to super match
-        const leader = s1 > s2 ? 1 : 2;
-        room.activeSlot = leader;
-        room.panel = room.panel.map(p => ({ ...p, answer: null }));
-        room.phase = 'round_end';
-        bump(room);
-        setTimeout(async () => {
-          try { await startNewRound(room, 'super'); }
-          catch(e) { console.error('start super match:', e); }
-        }, 4000);
-      }
-    }
+    return res.json({ room });
   }
+
+  // Both contestants have now played this round.
+  if (room.round === 1) {
+    room.phase = 'round_end';
+    bump(room);
+    res.json({ room });
+    setTimeout(async () => {
+      try { await startNewRound(room, 2); }
+      catch(e) { console.error('start round 2:', e); }
+    }, 3000);
+    return;
+  }
+
+  if (room.round >= 2) {
+    const s1 = room.scores[1], s2 = room.scores[2];
+    if (s1 === s2) {
+      room.scores = { 1: 0, 2: 0 };
+      room.round1Matches = { 1: [], 2: [] };
+      room.panel = room.panel.map(p => ({ ...p, answer: null }));
+      room.phase = 'tiebreaker';
+      bump(room);
+      res.json({ room });
+      setTimeout(async () => {
+        try { await startNewRound(room, room.round + 1); }
+        catch(e) { console.error('start tiebreaker:', e); }
+      }, 4000);
+      return;
+    }
+
+    const leader = s1 > s2 ? 1 : 2;
+    room.activeSlot = leader;
+    room.panel = room.panel.map(p => ({ ...p, answer: null }));
+    room.phase = 'round_end';
+    bump(room);
+    res.json({ room });
+    setTimeout(async () => {
+      try { await startNewRound(room, 'super'); }
+      catch(e) { console.error('start super match:', e); }
+    }, 4000);
+    return;
+  }
+
+  room.phase = 'round_end';
+  bump(room);
+  return res.json({ room });
 });
 
 // ─── API: SUPER MATCH — PICK CELEBS ───────────────────────────
@@ -929,6 +944,8 @@ app.post('/api/room/:code/supermatch-answer', async (req, res) => {
 app.post('/api/room/:code/finalmatch-start', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.phase?.startsWith('finalMatch')) return res.json({ room });
+  if (room.phase !== 'superMatch_won') return res.status(400).json({ error: 'Final Match can only start after a Super Match win' });
   room.phase = 'finalMatch_generating';
   bump(room);
   res.json({ room });

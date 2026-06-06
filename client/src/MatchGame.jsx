@@ -347,6 +347,9 @@ function DisplayView({ room, roomCode }) {
   const [introComplete, setIntroComplete] = useState(false);
   const [promptReadyFor, setPromptReadyFor] = useState(null);
   const introRunRef = useRef(false);
+  const turnPromptAnnouncedRef = useRef(null);
+  const inheritedTurnAnnouncedRef = useRef(null);
+  const revealRunRef = useRef(null);
 
   const unlockAudio = () => {
     try {
@@ -378,26 +381,38 @@ function DisplayView({ room, roomCode }) {
           speakTTS({ text: `${room.players[room.triangleSlot]} wins the toss and plays first!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
       }, 2500);
     }
-    if (phase === 'pick_prompt' && prevPhase !== 'pick_prompt') {
+    if (phase === 'pick_prompt') {
       setPromptReadyFor(null);
-      speakTTS({ text: `${room.players[room.activeSlot]}, it's your turn. Choose A or B.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      const turnKey = `${room.round}-${room.turnInRound}-${room.activeSlot}-pick`;
+      if (turnPromptAnnouncedRef.current !== turnKey) {
+        turnPromptAnnouncedRef.current = turnKey;
+        speakTTS({ text: `${room.players[room.activeSlot]}, it's your turn. Choose A or B.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      }
     }
-    if (phase === 'answering' && prevPhase !== 'answering' && room.chosenPrompt) {
-      setPromptReadyFor(null);
+    if (phase === 'answering' && room.chosenPrompt) {
+      const answerKey = `${room.round}-${room.turnInRound}-${room.activeSlot}-${room.chosenPrompt}`;
+      if (promptReadyFor !== room.chosenPrompt) setPromptReadyFor(null);
       (async () => {
         await delay(350);
         // If the player just picked A/B, we already said their name in pick_prompt.
-        // If they inherited the remaining question, announce their turn here.
-        if (prevPhase !== 'pick_prompt') {
+        // If they inherited the remaining question, announce their turn once here.
+        if (prevPhase !== 'pick_prompt' && inheritedTurnAnnouncedRef.current !== answerKey) {
+          inheritedTurnAnnouncedRef.current = answerKey;
           await speakTTS({ text: `${room.players[room.activeSlot]}, it's your turn.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
           await delay(200);
         }
-        await speakTTS({ text: promptForSpeech(room.chosenPrompt), isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-        setPromptReadyFor(room.chosenPrompt);
+        if (promptReadyFor !== room.chosenPrompt) {
+          await speakTTS({ text: promptForSpeech(room.chosenPrompt), isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+          setPromptReadyFor(room.chosenPrompt);
+        }
       })();
     }
-    if (phase === 'revealing' && prevPhase !== 'revealing') {
-      setRevealIndex(-1); runReveal(room);
+    if (phase === 'revealing') {
+      const revealKey = `${room.round}-${room.turnInRound}-${room.activeSlot}-${room.contestantAnswer || ''}-${room.version}`;
+      if (revealRunRef.current !== revealKey) {
+        revealRunRef.current = revealKey;
+        setRevealIndex(-1); runReveal(room);
+      }
     }
     if (phase === 'tiebreaker' && prevPhase !== 'tiebreaker') {
       speakTTS({ text: "It's a tie! Scores reset — tiebreaker round!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
@@ -742,8 +757,11 @@ function DisplaySuperMatchResult({ room, roomCode }) {
   const winnings = room.superMatchWinnings;
   const [visibleCount, setVisibleCount] = useState(0);
   const [celebrated, setCelebrated] = useState(false);
+  const ranRef = useRef(false);
 
   useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
     let cancelled = false;
     (async () => {
       await delay(500);
@@ -757,6 +775,12 @@ function DisplaySuperMatchResult({ room, roomCode }) {
           playAudience('win');
           setCelebrated(true);
           await speakTTS({ text: `It's a match! ${room.players[room.activeSlot]} wins ${fmt$(winnings)}!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+          if (!cancelled) {
+            await delay(1800);
+            if (!cancelled) {
+              try { await api.finalMatchStart(roomCode); } catch {}
+            }
+          }
           return;
         } else {
           playAudience('applause');
@@ -790,6 +814,7 @@ function DisplaySuperMatchResult({ room, roomCode }) {
         ? <div className="mg-super-win">
             <div className="mg-bigsymbol" style={{fontSize:72,color:'var(--tri-green)',textShadow:'0 0 24px currentColor'}}>MATCH!</div>
             <div>{fmt$(winnings)}!!!</div>
+            <p className="mg-status" style={{fontSize:20,marginTop:12}}>Moving on to the Final Match...</p>
           </div>
         : visibleCount >= topAnswers.length && winnings <= 0
           ? <p className="mg-status" style={{fontSize:20}}>No match this time.</p>
@@ -1169,14 +1194,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
         {/* Super Match result */}
         {phase === 'superMatch_won' && (
           <div className="mg-phone-body">
-            <p className="mg-status">Watch the TV for the result!</p>
-            {playerSlot === room.activeSlot && (
-              <div className="mg-row" style={{marginTop:24}}>
-                <button className="mg-btn" onClick={handleStartFinalMatch}>
-                  Play the Final Match!
-                </button>
-              </div>
-            )}
+            <p className="mg-status">Watch the TV — the Final Match will start automatically!</p>
           </div>
         )}
 
