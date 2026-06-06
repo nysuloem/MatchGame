@@ -435,6 +435,13 @@ function DisplayView({ room, roomCode }) {
     await Promise.all((r.panel || []).map((p, i) => p.answer ? prefetchTTS({
       text: p.answer, code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length],
     }).catch(() => null) : Promise.resolve(null)));
+    await delay(350);
+    await speakTTS({
+      text: `${r.players[r.activeSlot]} said, ${r.contestantAnswer}.`,
+      isAnnouncer: true,
+      fallbackProfile: ANNOUNCER_PROFILE,
+    });
+    await delay(350);
     for (let i = 0; i < r.panel.length; i++) {
       setRevealIndex(i);
       if (r.panel[i].answer) {
@@ -827,6 +834,13 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
       playAudience('applause');
       await speakTTS({
         text: `Now, let's see if ${celeb?.name || 'our star'} can match ${room.players[room.activeSlot]}.`,
+        isAnnouncer: true,
+        fallbackProfile: ANNOUNCER_PROFILE,
+      });
+      if (cancelled) return;
+      await delay(350);
+      await speakTTS({
+        text: `${room.players[room.activeSlot]} said, ${room.finalMatchContestantAnswer}.`,
         isAnnouncer: true,
         fallbackProfile: ANNOUNCER_PROFILE,
       });

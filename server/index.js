@@ -103,13 +103,15 @@ const PROMPT_CATEGORIES = [
 ];
 
 const FALLBACK_ROUND_PROMPTS = [
+  // These are deliberately "definitive" Match Game prompts: one likely answer,
+  // a couple of plausible alternates, and room for one funny/innuendo panel answer.
   { prompt: "Grandma Ethel's dating profile said she was looking for a man with a big ___.", answers: ['wallet','heart','truck'], category: 'dating' },
   { prompt: "Rookie Randy got nervous at the gym and dropped a ___ on his foot.", answers: ['weight','dumbbell','barbell'], category: 'gym' },
   { prompt: "Tiny Tina's phone autocorrected 'love you' to 'send ___.", answers: ['money','cash','pizza'], category: 'phones' },
-  { prompt: "Chef Rodriguez's secret ingredient turned out to be ___.", answers: ['beer','garlic','ketchup'], category: 'food' },
+  { prompt: "Chef Rodriguez's secret ingredient turned out to be ___.", answers: ['garlic','beer','ketchup'], category: 'food' },
   { prompt: "Professor Bumbleworth's Zoom background accidentally showed his ___.", answers: ['underwear','bed','cat'], category: 'work' },
   { prompt: "Cowboy Pete tried to impress his date by riding a ___.", answers: ['horse','bull','scooter'], category: 'dating' },
-  { prompt: "Nurse Nancy told the doctor the patient needed less stress and more ___.", answers: ['sleep','wine','vacation'], category: 'health' },
+  { prompt: "Nurse Nancy said the patient needed less stress and more ___.", answers: ['sleep','wine','vacation'], category: 'health' },
   { prompt: "Tourist Tim packed sunscreen, a swimsuit, and one giant ___.", answers: ['hat','towel','camera'], category: 'vacation' },
   { prompt: "Librarian Louise shushed everyone, then loudly dropped her ___.", answers: ['phone','book','purse'], category: 'work' },
   { prompt: "Millionaire Mortimer surprised everyone by arriving at the wedding in a ___.", answers: ['limo','helicopter','taxi'], category: 'wedding' },
@@ -117,7 +119,16 @@ const FALLBACK_ROUND_PROMPTS = [
   { prompt: "Plumber Phil said the bathroom smelled like ___.", answers: ['toilet','fish','garbage'], category: 'home' },
   { prompt: "Detective Drake knew the suspect was guilty when he found the missing ___.", answers: ['phone','wallet','shoe'], category: 'mystery' },
   { prompt: "Astronaut Al's space suit was fine until he sat on a ___.", answers: ['button','rock','taco'], category: 'work' },
-  { prompt: "Grandma Ethel went viral after posting a selfie with her ___.", answers: ['cat','dentures','boyfriend'], category: 'social media' }
+  { prompt: "At the family reunion, Uncle Bob hid the good ___ in his jacket.", answers: ['wine','beer','cheese'], category: 'family' },
+  { prompt: "Martha's smart fridge refused to open until she said please and bought more ___.", answers: ['milk','beer','cheese'], category: 'home' },
+  { prompt: "The gym teacher said the new uniform was just shorts and a giant ___.", answers: ['whistle','shirt','sock'], category: 'school' },
+  { prompt: "Dumb Dora thought a dating app swipe meant she had to clean the ___.", answers: ['screen','floor','phone'], category: 'dating apps' },
+  { prompt: "The influencer's beach photo was ruined when a seagull stole her ___.", answers: ['sandwich','phone','bikini'], category: 'social media' },
+  { prompt: "At the office party, Steve accidentally photocopied his ___.", answers: ['butt','face','hand'], category: 'work' },
+  { prompt: "The hotel said breakfast was included, but it was only a single ___.", answers: ['muffin','egg','banana'], category: 'travel' },
+  { prompt: "The dog groomer gave Mr. Jenkins' poodle a haircut that looked like a ___.", answers: ['mop','lion','rat'], category: 'pets' },
+  { prompt: "The new car came with heated seats and a talking ___.", answers: ['dashboard','steering wheel','cupholder'], category: 'cars' },
+  { prompt: "At karaoke night, Kevin got booed after singing into a ___.", answers: ['banana','remote','brush'], category: 'parties' }
 ];
 
 const FALLBACK_SUPER_PROMPTS = [
@@ -239,50 +250,59 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = []) =>
   const seed = Math.random().toString(36).slice(2, 8);
 
   const text = await callLLM(
-    `Generate exactly 2 highly matchable Match Game fill-in-the-blank prompts.
+    `Generate exactly 2 Match Game fill-in-the-blank prompts with "definitive" answers.
 
 Use character names "${charA}" and "${charB}" — one per prompt.
 Use two DIFFERENT comedy categories: "${cats[0]}" and "${cats[1]}".
 Variety seed: ${seed}
 
-CRITICAL OUTPUT REQUIREMENT:
-For each prompt, include an "answers" array containing the 3 most likely short answers that normal contestants would give. These answer keys will be used to guide the celebrity panel.
+VERY IMPORTANT: "DEFINITIVE" DOES NOT MEAN BORINGLY OBVIOUS.
+A great prompt should make players think, "Oh, there are a few possibilities, but one answer is clearly the Match Game answer."
+The blank should NOT be wide open. The top 3 likely answers should be in the same semantic neighborhood.
 
-WHAT MAKES A GREAT PROMPT:
-- The blank has ONE obvious intended meaning.
-- The top answer should feel obvious and concrete, not abstract.
-- Most people should converge on 2-3 answers, not 10 scattered answers.
-- The setup should be funny, classic Match Game-ish, and PG-13/family 17+.
-- Use varied topics: phones, dating apps, group chats, streaming, gyms, food delivery, school, work, driving, pets, hotels, weddings, family, bathrooms, money, parties.
-- Avoid repeating old sentence patterns such as "secret ingredient" or "Zoom background" unless the category really fits.
-- Avoid clues where the answer creates an awkward phrase or repeats the clue.
+CRITICAL OUTPUT REQUIREMENT:
+For each prompt, include an "answers" array containing the 3 most likely short answers that normal contestants would give, ordered by likelihood.
+Also include a "definitiveScore" from 1-10. Only return prompts scoring 8-10.
+
+PROMPT RULES:
+- The top answer must be concrete and easy to imagine.
+- The #2/#3 answers should be plausible alternatives, not totally different interpretations.
+- The setup should be funny, classic Match Game-ish, and family 17+/PG-13.
+- Light innuendo is welcome; no explicit sexual content, slurs, or cruelty.
+- Avoid very broad blanks like "something", "stuff", "thing", or "place".
+- Avoid clues where almost any noun could fit.
+- Avoid answers that create awkward redundant phrases.
 - 10-22 words per prompt.
 - Answers must be 1-2 words each.
 
-GOOD EXAMPLE JSON:
-{
-  "promptA": "Tiny Tina's phone autocorrected 'love you' to 'send ___.",
-  "answersA": ["money", "cash", "pizza"],
-  "categoryA": "phones and group chats",
-  "promptB": "Rookie Randy got nervous at the gym and dropped a ___ on his foot.",
-  "answersB": ["weight", "dumbbell", "barbell"],
-  "categoryB": "gym and body comedy",
-  "charA": "Tiny Tina",
-  "charB": "Rookie Randy"
-}
+GOOD DEFINITIVE EXAMPLES:
+- "Grandma Ethel's dating profile said she wanted a man with a big ___." answers: wallet, heart, truck
+- "At the office party, Steve accidentally photocopied his ___." answers: butt, face, hand
+- "Rookie Randy got nervous at the gym and dropped a ___ on his foot." answers: weight, dumbbell, barbell
+- "Tiny Tina's phone autocorrected 'love you' to 'send ___." answers: money, cash, pizza
 
-Return JSON exactly with keys: promptA, answersA, categoryA, promptB, answersB, categoryB, charA, charB`,
-    800, true
+BAD WIDE-OPEN EXAMPLES:
+- "Dumb Dave found a ___ in his kitchen." Too many answers.
+- "The teacher brought a ___ to class." Too many answers.
+- "On vacation, Linda wanted a ___." Too broad.
+
+Return JSON exactly with keys: promptA, answersA, definitiveScoreA, categoryA, promptB, answersB, definitiveScoreB, categoryB, charA, charB`,
+    900, true
   );
   const parsed = extractJSON(text);
   const fallbackA = FALLBACK_ROUND_PROMPTS[Math.floor(Math.random() * FALLBACK_ROUND_PROMPTS.length)];
   const fallbackB = FALLBACK_ROUND_PROMPTS.filter(p => p.prompt !== fallbackA.prompt)[Math.floor(Math.random() * Math.max(1, FALLBACK_ROUND_PROMPTS.length - 1))] || fallbackA;
   const cleanAnswers = (arr, fb) => (Array.isArray(arr) ? arr : fb.answers).map(a => String(a || '').trim()).filter(Boolean).slice(0, 3);
+  const scoreA = Number(parsed.definitiveScoreA || 0);
+  const scoreB = Number(parsed.definitiveScoreB || 0);
+  const validPrompt = (prompt, answers, score) => typeof prompt === 'string' && prompt.includes('___') && answers.length >= 2 && score >= 7;
+  const answersA = cleanAnswers(parsed.answersA, fallbackA);
+  const answersB = cleanAnswers(parsed.answersB, fallbackB);
   return {
-    promptA: parsed.promptA || fallbackA.prompt,
-    promptB: parsed.promptB || fallbackB.prompt,
-    answersA: cleanAnswers(parsed.answersA, fallbackA),
-    answersB: cleanAnswers(parsed.answersB, fallbackB),
+    promptA: validPrompt(parsed.promptA, answersA, scoreA) ? parsed.promptA : fallbackA.prompt,
+    promptB: validPrompt(parsed.promptB, answersB, scoreB) ? parsed.promptB : fallbackB.prompt,
+    answersA: validPrompt(parsed.promptA, answersA, scoreA) ? answersA : fallbackA.answers,
+    answersB: validPrompt(parsed.promptB, answersB, scoreB) ? answersB : fallbackB.answers,
     categoryA: parsed.categoryA || fallbackA.category,
     categoryB: parsed.categoryB || fallbackB.category,
     charA, charB,
@@ -292,47 +312,61 @@ Return JSON exactly with keys: promptA, answersA, categoryA, promptB, answersB, 
 const generatePanelAnswers = async (panel, promptText, contestantName, roundNum = 1, answerKey = []) => {
   const panelStr = panel.map((p, i) => `${i+1}. ${p.name} (${p.tag}; style=${p.answerStyle || 'obvious'}; matchBias=${p.matchBias ?? 0.8})`).join('\n');
   const key = (answerKey || []).filter(Boolean).slice(0, 3);
-  const targetCommonCount = roundNum === 1 ? 4 : 6;
-  const targetTopAnswerCount = roundNum === 1 ? 2 : 4;
-  const targetCreativeCount = Math.max(0, 6 - targetCommonCount);
+  const order = [0,1,2,3,4,5].sort(() => Math.random() - 0.5);
+  const funnyIndex = order[0];
+  const topSlots = new Set(order.slice(roundNum === 1 ? 1 : 0, roundNum === 1 ? 3 : 4));
+  const alternateSlots = new Set(order.slice(roundNum === 1 ? 3 : 4, roundNum === 1 ? 5 : 5));
+
   const text = await callLLM(
     `You are writing celebrity panel answers for Match Game.
 
 Prompt: "${promptText}"
 Contestant: ${contestantName}
 Round: ${roundNum}
-Known most-likely audience answers: ${key.length ? key.join(', ') : 'infer the obvious answers'}
+Definitive likely answers, in order: ${key.length ? key.join(', ') : 'infer the obvious answers'}
+Designated funny/innuendo celebrity position: ${funnyIndex + 1}
 
-CRITICAL GAMEPLAY GOAL:
-The game is currently too hard. The panel must be funny, but they are mainly trying to MATCH the contestant.
+THE BIG FIX:
+The game should feel like classic Match Game. Answers must be matchable, but still funny.
+The panel should NOT give six unrelated answers.
 
 ANSWER RULES:
 - 1-2 WORDS MAXIMUM per celebrity.
 - Use simple concrete words, not explanations.
-- Round 1: at least ${targetCommonCount} of 6 celebrities must choose one of the known obvious answers or a close synonym. At least ${targetTopAnswerCount} should choose the #1 answer.
-- Round 2: all eligible celebrities should be strongly clustered. At least ${targetTopAnswerCount} of 6 should choose the #1 answer exactly or a very close synonym, and the rest should choose #2/#3 unless their persona absolutely demands a joke.
+- The answer must fit the blank naturally when read in the prompt.
+- Round 1: answers may vary, but they must stay in the same answer neighborhood. About 2 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, 1 should give a plausible in-character answer, and 1 should give a funny answer.
+- Round 2: increase matching. Most eligible celebrities should cluster around the #1 answer or a very close synonym. One celebrity may use #2/#3. One may be funny, but still plausibly matchable.
+- The funny answer should be a quick laugh, light innuendo is allowed, but it must still make sense for the blank.
+- Do NOT make the same celebrity type the oddball every time; follow the designated funny position.
 - Do NOT make every celebrity different. That ruins the game.
-- Prefer matchable synonyms over cleverness. "TV" and "television" are fine; "streaming platform" is too fussy.
-- Keep in-character flavour subtle; the answer itself should remain obvious.
+- Do NOT be too clever, abstract, or niche.
 
 Panel:
 ${panelStr}
 
 Return JSON: {"answers": ["answer1","answer2","answer3","answer4","answer5","answer6"]}`,
-    500, true
+    550, true
   );
   const parsed = extractJSON(text);
   let answers = Array.isArray(parsed) ? parsed : (parsed.answers || []);
   answers = answers.map(a => (a || '???').split(/\s+/).slice(0, 2).join(' '));
+  while (answers.length < 6) answers.push(key[0] || '???');
 
-  // Safety net: force enough convergence even if the model got too creative.
+  // Safety net: keep the model funny, but enforce Match Game convergence with randomized positions.
   if (key.length) {
     const top = key[0];
     const second = key[1] || key[0];
-    const requiredTop = roundNum === 1 ? 2 : 4;
-    for (let i = 0; i < Math.min(requiredTop, 6); i++) answers[i] = answers[i] && answers[i] !== '???' ? (i < requiredTop ? top : answers[i]) : top;
-    if (roundNum >= 2) {
-      for (let i = requiredTop; i < 6; i++) answers[i] = answers[i] && answers[i] !== '???' ? (i % 2 ? second : top) : second;
+    const third = key[2] || second;
+    if (roundNum === 1) {
+      for (const i of topSlots) answers[i] = top;
+      for (const i of alternateSlots) answers[i] = Math.random() < 0.5 ? second : third;
+      // Leave funnyIndex and the final remaining panelist's model answers if they are plausible-looking.
+      // If the funny answer is empty, give it a slightly playful but still matchable alternate.
+      if (!answers[funnyIndex] || answers[funnyIndex] === '???') answers[funnyIndex] = third;
+    } else {
+      for (const i of topSlots) answers[i] = top;
+      for (const i of alternateSlots) answers[i] = second;
+      if (!answers[funnyIndex] || answers[funnyIndex] === '???') answers[funnyIndex] = Math.random() < 0.5 ? second : third;
     }
   }
   return answers.slice(0, 6);
