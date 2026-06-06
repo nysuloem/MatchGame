@@ -65,6 +65,23 @@ const extractJSON = (text) => {
 
 // ─── GAME GENERATION ──────────────────────────────────────────
 
+const CLASSIC_MATCH_GAMERS = [
+  'Betty White','Richard Dawson','Brett Somers','Charles Nelson Reilly','Fannie Flagg',
+  'Nipsey Russell','Patti Deutsch','Marcia Wallace','Joyce Bulifant','Elaine Joyce'
+];
+
+const MODERN_PANEL_BACKUPS = [
+  { name:'Ryan Reynolds', tag:'quick-witted movie star', avatarType:'man_middle', voice:'verse', voiceInstructions:'Bright, fast, playful game-show delivery.', answerStyle:'punny', matchBias:0.86 },
+  { name:'Zendaya', tag:'cool pop-culture icon', avatarType:'woman_young', voice:'nova', voiceInstructions:'Confident, warm, crisp, and amused.', answerStyle:'obvious', matchBias:0.88 },
+  { name:'Kevin Hart', tag:'high-energy comedian', avatarType:'man_middle', voice:'ash', voiceInstructions:'Big energy, quick timing, and clear delivery.', answerStyle:'punny', matchBias:0.84 },
+  { name:'Taylor Swift', tag:'mega pop storyteller', avatarType:'person_glamorous', voice:'shimmer', voiceInstructions:'Warm, bright, playful, and very clear.', answerStyle:'literal', matchBias:0.87 },
+  { name:'Dwayne Johnson', tag:'charismatic action star', avatarType:'person_athletic', voice:'onyx', voiceInstructions:'Big, confident, upbeat, and easy to hear.', answerStyle:'obvious', matchBias:0.89 },
+  { name:'Mindy Kaling', tag:'sharp sitcom writer', avatarType:'woman_middle', voice:'coral', voiceInstructions:'Clever, upbeat, dry but friendly.', answerStyle:'deadpan', matchBias:0.85 },
+  { name:'Gordon Ramsay', tag:'fiery TV chef', avatarType:'man_middle', voice:'fable', voiceInstructions:'Intense but playful, crisp and theatrical.', answerStyle:'literal', matchBias:0.82 },
+  { name:'Billie Eilish', tag:'deadpan music star', avatarType:'woman_young', voice:'sage', voiceInstructions:'Cool, dry, low-key, but audible.', answerStyle:'deadpan', matchBias:0.8 },
+  { name:"Shaquille O'Neal", tag:'larger-than-life athlete', avatarType:'person_athletic', voice:'onyx', voiceInstructions:'Booming, playful, generous, and clear.', answerStyle:'obvious', matchBias:0.9 }
+];
+
 const CHARACTER_ARCHETYPES = [
   'Old Man Henderson','Tiny Tina','Professor Bumbleworth','Chef Rodriguez',
   'Nurse Nancy','Cowboy Pete','Tourist Tim','Grandma Ethel','Rookie Randy',
@@ -76,25 +93,36 @@ const CHARACTER_ARCHETYPES = [
 ];
 
 const generatePanel = async () => {
+  const classic = CLASSIC_MATCH_GAMERS[Math.floor(Math.random() * CLASSIC_MATCH_GAMERS.length)];
+  const varietySeed = Math.random().toString(36).slice(2, 8);
   const text = await callLLM(
-    `Generate a panel of 6 well-known public figures for a Match Game style game show. Mix actors, musicians, athletes, comedians, TV hosts, internet personalities, and tech figures widely recognizable to adults and older teenagers in 2026. Make it FUN and ECLECTIC — different ages, fields, personalities. Avoid politicians.
+    `Generate a panel of 6 well-known public figures for a Match Game style game show.
+
+CRITICAL PANEL RULES:
+- Include EXACTLY ONE classic Match Game regular: ${classic}.
+- The other 5 panelists must be recognizable to adults and older teenagers in 2026.
+- Make the five modern choices highly varied: choose from different categories such as comedians, sitcom actors, musicians, athletes, internet personalities, movie stars, TV hosts, chefs, reality TV figures, and tech/pop-culture figures.
+- Avoid politicians.
+- Avoid always choosing the same obvious people. Variety seed: ${varietySeed}.
+- Do not duplicate fields, vibes, or sketch/avatar types if you can avoid it.
 
 For each panelist provide:
 - "name": the short public/stage name they are normally known by on screen. No middle names, initials, titles, suffixes, or overly formal full legal names unless that is how the public usually knows them
 - "tag": 3-5 word description of their public persona
 - "avatarType": one of these sketch styles that best fits them visually: "man_young", "man_middle", "man_older", "woman_young", "woman_middle", "woman_older", "person_athletic", "person_glamorous"
-- "voice": best matching OpenAI TTS voice from: ${TTS_VOICES.join(', ')}. (onyx=deep authoritative male, nova=bright friendly female, fable=animated British male, coral=warm expressive female, shimmer=bright female, echo=calm male, alloy=neutral)
-- "voiceInstructions": 1-2 sentences on HOW to deliver lines as this person — pace, energy, accent, mannerisms.
+- "voice": best matching OpenAI TTS voice from: ${TTS_VOICES.join(', ')}. Prefer louder/brighter voices when possible: verse, ash, coral, nova, shimmer, fable. Use onyx only for very deep voices.
+- "voiceInstructions": 1-2 sentences on HOW to deliver lines as this person — energetic, crisp, theatrical, easy to hear. Do not imitate a real voice exactly.
 - "answerStyle": one of "obvious", "literal", "punny", "wildcard", "deadpan", "chaotic". Use mostly obvious/literal/punny, with only one true wildcard.
-- "matchBias": a number from 0.65 to 0.95 describing how hard this panelist usually tries to match contestants.
+- "matchBias": a number from 0.70 to 0.98 describing how hard this panelist usually tries to match contestants.
 
 Assign DIFFERENT voices to different panelists.
 
-Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"...","voiceInstructions":"...","answerStyle":"...","matchBias":0.8}, ...]}`,
+Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"...","voiceInstructions":"...","answerStyle":"...","matchBias":0.85}, ...]}`,
     1500, true
   );
   const parsed = extractJSON(text);
-  const panel = Array.isArray(parsed) ? parsed : (parsed.panel || []);
+  let panel = Array.isArray(parsed) ? parsed : (parsed.panel || []);
+
   const validAvatarTypes = ['man_young','man_middle','man_older','woman_young','woman_middle','woman_older','person_athletic','person_glamorous'];
   const usedAvatarTypes = new Set();
   const uniqueAvatarType = (requested) => {
@@ -109,14 +137,53 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
     .replace(/\s+(Jr|Sr|II|III|IV)\.?$/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+  // Hard guarantee: exactly one classic Match Game regular is present.
+  const hasClassic = panel.some(p => cleanPanelName(p.name).toLowerCase() === classic.toLowerCase());
+  if (!hasClassic) {
+    panel = [{
+      name: classic,
+      tag: 'classic Match Game star',
+      avatarType: classic === 'Betty White' || classic === 'Brett Somers' || classic === 'Fannie Flagg' || classic === 'Patti Deutsch' || classic === 'Marcia Wallace' || classic === 'Joyce Bulifant' || classic === 'Elaine Joyce' ? 'woman_older' : 'man_older',
+      voice: classic === 'Richard Dawson' ? 'fable' : 'coral',
+      voiceInstructions: 'Deliver with warm, witty, classic game-show timing. Clear, upbeat, and a little mischievous.',
+      answerStyle: 'obvious',
+      matchBias: 0.92
+    }, ...panel.filter(p => !CLASSIC_MATCH_GAMERS.map(x => x.toLowerCase()).includes(cleanPanelName(p.name).toLowerCase()))];
+  } else {
+    // If more than one classic appears, keep the requested one if possible and remove extras.
+    const seenClassic = new Set();
+    panel = panel.filter(p => {
+      const nm = cleanPanelName(p.name).toLowerCase();
+      if (!CLASSIC_MATCH_GAMERS.map(x => x.toLowerCase()).includes(nm)) return true;
+      if (nm === classic.toLowerCase() && !seenClassic.has(nm)) { seenClassic.add(nm); return true; }
+      return false;
+    });
+  }
+
+  const usedNames = new Set();
+  panel = panel.filter(p => {
+    const nm = cleanPanelName(p.name).toLowerCase();
+    if (!nm || usedNames.has(nm)) return false;
+    usedNames.add(nm);
+    return true;
+  });
+  for (const backup of MODERN_PANEL_BACKUPS.sort(() => Math.random() - 0.5)) {
+    if (panel.length >= 6) break;
+    if (!usedNames.has(backup.name.toLowerCase())) {
+      panel.push(backup);
+      usedNames.add(backup.name.toLowerCase());
+    }
+  }
+
   return panel.slice(0, 6).map(p => ({
     name: cleanPanelName(p.name),
     tag: p.tag,
     avatarType: uniqueAvatarType(p.avatarType),
-    voice: TTS_VOICES.includes(p.voice) ? p.voice : 'alloy',
-    voiceInstructions: p.voiceInstructions || '',
+    voice: TTS_VOICES.includes(p.voice) ? p.voice : 'verse',
+    voiceInstructions: p.voiceInstructions || 'Speak clearly, energetically, and loud enough to carry in a game-show room.',
     answerStyle: ['obvious','literal','punny','wildcard','deadpan','chaotic'].includes(p.answerStyle) ? p.answerStyle : 'obvious',
-    matchBias: Number.isFinite(Number(p.matchBias)) ? Math.max(0.55, Math.min(0.98, Number(p.matchBias))) : 0.8,
+    matchBias: Number.isFinite(Number(p.matchBias)) ? Math.max(0.65, Math.min(0.98, Number(p.matchBias))) : 0.85,
     answer: null,
   }));
 };
@@ -174,7 +241,7 @@ Return JSON: {"promptA": "...", "promptB": "...", "charA": "${charA}", "charB": 
 
 const generatePanelAnswers = async (panel, promptText, contestantName, roundNum = 1) => {
   const panelStr = panel.map((p, i) => `${i+1}. ${p.name} (${p.tag}; style=${p.answerStyle || 'obvious'}; matchBias=${p.matchBias ?? 0.8})`).join('\n');
-  const targetCommonCount = roundNum === 1 ? 3 : 5;
+  const targetCommonCount = roundNum === 1 ? 3 : 6;
   const targetCreativeCount = 6 - targetCommonCount;
   const text = await callLLM(
     `You are running a Match Game. The prompt is: "${promptText}"
@@ -183,7 +250,8 @@ STEP 1 — Identify the 2-3 most obvious, common answers most people would give 
 
 STEP 2 — Each celebrity below gives their answer. IMPORTANT RULES:
 - This is regular Round ${roundNum}. Round 1 should be harder; Round 2 should be easier, like classic Match Game.
-- EXACTLY ${targetCommonCount} of the 6 celebrities should choose one of the 2-3 obvious answers or a very close synonym.
+- EXACTLY ${targetCommonCount} of the 6 celebrities should choose one of the 2 most obvious answers or a very close synonym.
+- Round 2 should feel easier: celebrities should strongly converge on the same obvious answer rather than all giving different answers.
 - The remaining ${targetCreativeCount} can be more creative/in-character, but still plausible.
 - Each answer reflects the celebrity's personality in HOW they'd say it, but most still aim for the obvious answer.
 - 1-2 WORDS MAXIMUM per answer, no exceptions.
@@ -259,10 +327,13 @@ Return JSON:
 
 const generateFinalMatchPrompt = async () => {
   const text = await callLLM(
-    `Generate a Final Match fill-in-the-blank prompt. Similar to Super Match — short, 2-5 words total, one blank. Should have one VERY obvious most-popular answer that two people thinking alike would likely both say.
+    `Generate a Final Match fill-in-the-blank prompt. Similar to Super Match — short, 2-5 words total, one blank. It must have one VERY obvious most-popular answer that two people thinking alike would likely both say.
 
-Use classic Match Game survey-answer logic, but modern examples are welcome.
-Examples: "New Year's ___", "___ Ball", "Rock ___", "___ Music", "___ Star", "Netflix ___", "Phone ___"
+STRICT QUALITY RULES:
+- The phrase should be a familiar compound phrase or common expression.
+- Do NOT generate prompts where the obvious answer creates a redundant or awkward phrase, like "First Date ___" -> "Dinner Date".
+- The blank should be strongly constrained: "New Year's ___" -> Eve, "___ Ball" -> Beach/Base, "Rock ___" -> Star/Music, "___ Music" -> Pop/Rock, "Movie ___" -> Star, "Phone ___" -> Call, "Birthday ___" -> Cake.
+- Avoid abstract, vague, or overly clever clues.
 
 Return just the prompt text, nothing else.`,
     80
@@ -369,6 +440,8 @@ app.post('/api/room', async (req, res) => {
       players: { 1: null, 2: null },
       hasDisplay: isDisplay,
       scores: { 1: 0, 2: 0 },
+      pendingScoreDelta: 0,
+      pendingMatches: [],
       triangleSlot: null,
       cointossWinner: null,
       panel,
@@ -464,6 +537,8 @@ const startNewRound = async (room, roundNum) => {
     room.contestantAnswer = null;
     room.panelAnswers = [];
     room.matches = [];
+    room.pendingScoreDelta = 0;
+    room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null }));
     const { promptA, promptB, charA, charB } = await generateRoundPrompts(room.usedCharacters);
     room.promptA = promptA;
@@ -486,6 +561,8 @@ const startNewRound = async (room, roundNum) => {
     room.chosenPrompt = null;
     room.contestantAnswer = null;
     room.matches = [];
+    room.pendingScoreDelta = 0;
+    room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null }));
     const prompt = await generateSuperMatchPrompt();
     room.superMatchPrompt = prompt;
@@ -494,6 +571,7 @@ const startNewRound = async (room, roundNum) => {
     room.superMatchRevealIndex = -1;
     room.superMatchContestantAnswer = null;
     room.superMatchTopAnswers = null;
+    room.superMatchTopRevealIndex = -1;
     room.phase = 'superMatch_pickCelebs';
     bump(room);
   }
@@ -542,12 +620,8 @@ app.post('/api/room/:code/answer', async (req, res) => {
     const matches = scoreAnswer(room.contestantAnswer, room.panel).map((m, i) => inactiveCelebIndices.includes(i) ? false : m);
     room.matches = matches;
     const matchCount = matches.filter(Boolean).length;
-    room.scores[room.activeSlot] += matchCount;
-
-    // Track which celebs this contestant matched in round 1
-    if (room.round === 1) {
-      room.round1Matches[room.activeSlot] = matches.map((m,i) => m ? i : -1).filter(i => i >= 0);
-    }
+    room.pendingScoreDelta = matchCount;
+    room.pendingMatches = matches.map((m,i) => m ? i : -1).filter(i => i >= 0);
 
     room.phase = 'revealing';
     bump(room);
@@ -564,8 +638,16 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
   if (!room) return res.status(404).json({ error: 'Room not found' });
   res.json({ room: bump(room) });
 
-  // Determine what happens next
+  // Commit score only AFTER the TV reveal has completed, so the score changes live during reveal.
   const currentActive = room.activeSlot;
+  if (room.pendingScoreDelta) {
+    room.scores[currentActive] += room.pendingScoreDelta;
+  }
+  if (room.round === 1 && Array.isArray(room.pendingMatches)) {
+    room.round1Matches[currentActive] = [...room.pendingMatches];
+  }
+  room.pendingScoreDelta = 0;
+  room.pendingMatches = [];
 
   if (room.turnInRound === 1) {
     // First contestant done — second contestant now picks
@@ -577,9 +659,11 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
       ? (room.promptA === room.chosenPrompt ? room.promptB : room.promptA)
       : (room.promptA === room.chosenPrompt ? room.promptB : room.promptA);
     // Actually just give them the remaining prompt — no pick for contestant 2
-    room.panel = room.panel.map(p => ({ ...p, answer: null }));
+    room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
     room.contestantAnswer = null;
     room.matches = [];
+    room.pendingScoreDelta = 0;
+    room.pendingMatches = [];
     room.phase = 'answering'; // contestant 2 goes straight to answering
     bump(room);
   } else {
@@ -689,6 +773,7 @@ app.post('/api/room/:code/supermatch-answer', async (req, res) => {
     }
   }
   room.superMatchWinnings = winnings;
+  room.superMatchTopRevealIndex = -1;
   room.phase = winnings > 0 ? 'superMatch_won' : 'superMatch_lost';
   bump(room);
   res.json({ room });
@@ -773,8 +858,8 @@ app.post('/api/speak', async (req, res) => {
 
   let voice = 'alloy', instructions = '';
   if (isAnnouncer) {
-    voice = 'onyx';
-    instructions = 'Speak with dramatic, theatrical flair of a 1970s game show announcer. Deep, deliberate, with anticipatory pauses. Slightly amused.';
+    voice = 'verse';
+    instructions = 'Speak like a very enthusiastic 1970s game-show host: bright, energetic, smiling, theatrical, quick but clear, with big excitement on contestant names and prize reveals.';
   } else if (code && typeof slot === 'number') {
     const room = rooms.get(code?.toUpperCase());
     if (room?.panel[slot]) {

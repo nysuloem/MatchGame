@@ -643,3 +643,50 @@ body { margin: 0; }
 .mg-bigsymbol { font-size:80px; line-height:1; margin:16px 0; }
 .mg-bigsymbol.tri { color:var(--tri-green); text-shadow:0 0 18px var(--tri-green); }
 .mg-bigsymbol.cir { color:var(--cir-red); text-shadow:0 0 18px var(--cir-red); }
+
+/* ── CELEBRATION EFFECTS ───────────────────────────────────── */
+.mg-super-win {
+  font-family: 'Bowlby One', sans-serif;
+  font-size: clamp(42px, 7vw, 86px);
+  color: var(--orange-deep);
+  text-align: center;
+  animation: pop-win 0.8s ease-out infinite alternate;
+  z-index: 2;
+}
+@keyframes pop-win {
+  from { transform: scale(1) rotate(-1deg); }
+  to { transform: scale(1.06) rotate(1deg); }
+}
+.mg-confetti {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+.mg-confetti span {
+  position: absolute;
+  top: -8vh;
+  width: 12px;
+  height: 20px;
+  background: var(--yellow);
+  border: 1px solid var(--brown);
+  animation: confetti-fall 2.8s linear infinite;
+}
+.mg-confetti span:nth-child(3n) { background: var(--pink); }
+.mg-confetti span:nth-child(3n+1) { background: var(--teal); }
+@keyframes confetti-fall {
+  0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(115vh) rotate(720deg); opacity: 0; }
+}
+
+/* Larger match indicators for living-room readability */
+.mg-symbol {
+  font-size: clamp(40px, 6.4vw, 76px);
+  opacity: 0.18;
+}
+.mg-symbol.lit {
+  opacity: 1;
+  transform: scale(1.35);
+  text-shadow: 0 0 22px currentColor, 0 0 44px currentColor, 0 0 70px currentColor;
+}

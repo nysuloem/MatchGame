@@ -12,7 +12,7 @@ const VOICE_PROFILES = [
   { rate:1.1, pitch:1.3 },  { rate:0.9, pitch:0.7 },
   { rate:1.05, pitch:1.0 }, { rate:0.92, pitch:0.95 },
 ];
-const ANNOUNCER_PROFILE = { rate:0.9, pitch:0.75 };
+const ANNOUNCER_PROFILE = { rate:1.06, pitch:1.18 };
 
 // ─── API ──────────────────────────────────────────────────────
 const req = async (path, opts = {}) => {
@@ -45,6 +45,49 @@ const api = {
 
 // ─── SPEECH ───────────────────────────────────────────────────
 let currentAudio = null;
+let sharedAudioCtx = null;
+const getAudioCtx = () => {
+  try {
+    sharedAudioCtx = sharedAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume();
+    return sharedAudioCtx;
+  } catch { return null; }
+};
+const playAudience = (kind = 'applause') => {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  const duration = kind === 'win' ? 1.8 : kind === 'applause' ? 0.8 : 0.55;
+  const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    const t = i / data.length;
+    const burst = kind === 'laugh' ? Math.sin(i * 0.09) * 0.35 : 1;
+    const envelope = kind === 'win' ? Math.sin(Math.PI * t) : Math.exp(-2.6 * t);
+    data[i] = (Math.random() * 2 - 1) * burst * envelope * 0.32;
+  }
+  const src = ctx.createBufferSource();
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(kind === 'win' ? 0.55 : 0.32, now);
+  gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+  src.buffer = buffer;
+  src.connect(gain).connect(ctx.destination);
+  src.start(now);
+  if (kind === 'win') {
+    [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const og = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = 'triangle';
+      og.gain.setValueAtTime(0.0001, now + idx * 0.12);
+      og.gain.exponentialRampToValueAtTime(0.18, now + idx * 0.12 + 0.03);
+      og.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.12 + 0.35);
+      osc.connect(og).connect(ctx.destination);
+      osc.start(now + idx * 0.12);
+      osc.stop(now + idx * 0.12 + 0.4);
+    });
+  }
+};
 const ttsCache = new Map();
 const ttsKey = ({ text, code, slot, isAnnouncer }) => `${code || ''}|${slot ?? ''}|${isAnnouncer ? 'announcer' : 'panel'}|${text}`;
 const prefetchTTS = (params) => {
@@ -90,6 +133,16 @@ const speakTTS = async (params) => {
   try {
     const url = await prefetchTTS(params);
     const audio = new Audio(url);
+    audio.volume = 1.0;
+    try {
+      const ctx = getAudioCtx();
+      if (ctx) {
+        const src = ctx.createMediaElementSource(audio);
+        const gain = ctx.createGain();
+        gain.gain.value = params.isAnnouncer ? 1.18 : 1.35;
+        src.connect(gain).connect(ctx.destination);
+      }
+    } catch {}
     currentAudio = audio;
     return new Promise(resolve => {
       const done = () => {
@@ -297,7 +350,7 @@ function DisplayView({ room, roomCode }) {
 
   const unlockAudio = () => {
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = getAudioCtx();
       const buf = ctx.createBuffer(1, 1, 22050);
       const src = ctx.createBufferSource();
       src.buffer = buf; src.connect(ctx.destination); src.start(0); ctx.resume();
@@ -333,8 +386,12 @@ function DisplayView({ room, roomCode }) {
       setPromptReadyFor(null);
       (async () => {
         await delay(350);
-        await speakTTS({ text: `${room.players[room.activeSlot]}, it's your turn.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-        await delay(200);
+        // If the player just picked A/B, we already said their name in pick_prompt.
+        // If they inherited the remaining question, announce their turn here.
+        if (prevPhase !== 'pick_prompt') {
+          await speakTTS({ text: `${room.players[room.activeSlot]}, it's your turn.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+          await delay(200);
+        }
         await speakTTS({ text: promptForSpeech(room.chosenPrompt), isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         setPromptReadyFor(room.chosenPrompt);
       })();
@@ -371,6 +428,7 @@ function DisplayView({ room, roomCode }) {
     }
     // All celebs introduced — now show the room code
     setIntroComplete(true);
+    playAudience('applause');
   };
 
   const runReveal = async (r) => {
@@ -381,7 +439,9 @@ function DisplayView({ room, roomCode }) {
       setRevealIndex(i);
       if (r.panel[i].answer) {
         await speakTTS({ text: r.panel[i].answer, code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length] });
-        await delay(350);
+        if (r.matches?.[i]) playAudience('applause');
+        else playAudience('laugh');
+        await delay(r.matches?.[i] ? 650 : 350);
       } else {
         await delay(150);
       }
@@ -420,13 +480,19 @@ function DisplayView({ room, roomCode }) {
       : {background:'rgba(211,47,47,0.22)',borderTop:'5px solid var(--cir-red)',transition:'background 0.4s'};
   };
 
+  const displayScores = { ...(room.scores || {1:0,2:0}) };
+  if (phase === 'revealing' && room.activeSlot && Array.isArray(room.matches)) {
+    const liveMatches = room.matches.slice(0, Math.max(0, revealIndex + 1)).filter(Boolean).length;
+    displayScores[room.activeSlot] = (displayScores[room.activeSlot] || 0) + liveMatches;
+  }
+
   return (
     <div className="mg-root display-mode">
       <div className="mg-display-header">
         <div className="mg-display-contestant left" style={activeStyle(1)}>
           <div className={`mg-contestant-symbol ${slotClass(room,1)}`}>{slotSymbol(room,1)||'▲'}</div>
           <div className="mg-contestant-name">{p1name}</div>
-          <div className="mg-contestant-num">{room.scores[1]}</div>
+          <div className="mg-contestant-num">{displayScores[1]}</div>
           {isActive(1) && <div className="mg-your-turn" style={{color:room.triangleSlot===1?'var(--tri-green)':'var(--cir-red)'}}>{p1name}, it's your turn!</div>}
         </div>
         <div className="mg-display-title-center">
@@ -442,7 +508,7 @@ function DisplayView({ room, roomCode }) {
         <div className="mg-display-contestant right" style={activeStyle(2)}>
           <div className={`mg-contestant-symbol ${slotClass(room,2)}`}>{slotSymbol(room,2)||'●'}</div>
           <div className="mg-contestant-name">{p2name}</div>
-          <div className="mg-contestant-num">{room.scores[2]}</div>
+          <div className="mg-contestant-num">{displayScores[2]}</div>
           {isActive(2) && <div className="mg-your-turn" style={{color:room.triangleSlot===2?'var(--tri-green)':'var(--cir-red)'}}>{p2name}, it's your turn!</div>}
         </div>
       </div>
@@ -492,7 +558,7 @@ function DisplayView({ room, roomCode }) {
         {phase==='superMatch_pickCelebs' && <DisplaySuperMatchPickCelebs room={room}/>}
         {phase==='superMatch_revealing' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
         {phase==='superMatch_answering' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
-        {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room}/>}
+        {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room} roomCode={roomCode}/>}
         {['finalMatch_pickCeleb','finalMatch_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
         {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room}/>}
         {phase==='gameOver' && (
@@ -653,16 +719,57 @@ function DisplaySuperMatchReveal({ room, roomCode, setRevealIndex = () => {} }) 
   );
 }
 
-function DisplaySuperMatchResult({ room }) {
-  const topAnswers = room.superMatchTopAnswers || [];
+function Confetti() {
+  return (
+    <div className="mg-confetti" aria-hidden="true">
+      {Array.from({length: 48}).map((_, i) => (
+        <span key={i} style={{left:`${(i*37)%100}%`, animationDelay:`${(i%12)*0.08}s`}} />
+      ))}
+    </div>
+  );
+}
+
+function DisplaySuperMatchResult({ room, roomCode }) {
+  const topAnswers = [...(room.superMatchTopAnswers || [])].sort((a,b) => (a.value || 0) - (b.value || 0));
   const contestantAnswer = room.superMatchContestantAnswer;
   const winnings = room.superMatchWinnings;
+  const [visibleCount, setVisibleCount] = useState(0);
+  const [celebrated, setCelebrated] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await delay(500);
+      for (let i = 0; i < topAnswers.length; i++) {
+        if (cancelled) return;
+        const ta = topAnswers[i];
+        await speakTTS({ text: `For ${fmt$(ta.value)}... ${ta.answer}`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+        setVisibleCount(i + 1);
+        const isMatch = quickFuzzyMatch(contestantAnswer, ta.answer);
+        if (isMatch && winnings > 0) {
+          playAudience('win');
+          setCelebrated(true);
+          await speakTTS({ text: `It's a match! ${room.players[room.activeSlot]} wins ${fmt$(winnings)}!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+          return;
+        } else {
+          playAudience('applause');
+        }
+        await delay(650);
+      }
+      if (!cancelled && winnings <= 0) {
+        await speakTTS({ text: `No match this time.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div className="mg-display-center-msg">
+      {celebrated && <Confetti />}
       <div className="mg-prompt">{room.superMatchPrompt}</div>
       <p className="mg-status">{room.players[room.activeSlot]} said: <strong>"{contestantAnswer}"</strong></p>
       <div className="mg-top-answers">
-        {[...topAnswers].reverse().map((ta, i) => {
+        {topAnswers.slice(0, visibleCount).map((ta, i) => {
           const isMatch = quickFuzzyMatch(contestantAnswer, ta.answer);
           return (
             <div key={i} className={`mg-top-answer ${isMatch ? 'matched' : ''}`}>
@@ -672,11 +779,14 @@ function DisplaySuperMatchResult({ room }) {
           );
         })}
       </div>
-      {winnings > 0
-        ? <div className="mg-bigsymbol" style={{fontSize:48,color:'var(--tri-green)',textShadow:'0 0 20px currentColor'}}>
-            {fmt$(winnings)} !!!
+      {winnings > 0 && celebrated
+        ? <div className="mg-super-win">
+            <div className="mg-bigsymbol" style={{fontSize:72,color:'var(--tri-green)',textShadow:'0 0 24px currentColor'}}>MATCH!</div>
+            <div>{fmt$(winnings)}!!!</div>
           </div>
-        : <p className="mg-status" style={{fontSize:20}}>No match this time.</p>}
+        : visibleCount >= topAnswers.length && winnings <= 0
+          ? <p className="mg-status" style={{fontSize:20}}>No match this time.</p>
+          : <p className="mg-status" style={{fontSize:20}}>Survey says...</p>}
     </div>
   );
 }
@@ -841,8 +951,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
         {/* Coin toss */}
         {phase === 'cointoss' && (
           <div className="mg-phone-body">
-            <div className="mg-coin flipping">?</div>
-            <p className="mg-status">Flipping the coin…</p>
+            <p className="mg-status">Watch the TV screen for who goes first!</p>
           </div>
         )}
 
