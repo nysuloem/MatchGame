@@ -102,37 +102,44 @@ Return JSON: {"panel": [{"name":"...","tag":"...","voice":"...","voiceInstructio
 };
 
 const generateRoundPrompts = async (usedCharacters = []) => {
-  // Pick 2 unused archetypes
   const available = CHARACTER_ARCHETYPES.filter(c => !usedCharacters.includes(c));
   const shuffled = available.sort(() => Math.random() - 0.5);
   const charA = shuffled[0] || 'Old Timer Terry';
   const charB = shuffled[1] || 'Newcomer Nick';
 
   const text = await callLLM(
-    `Generate exactly 2 different Match Game style fill-in-the-blank prompts. 
+    `Generate exactly 2 Match Game style fill-in-the-blank prompts. Use character names "${charA}" and "${charB}" (one per prompt).
 
-Rules:
-- Each prompt uses ONE of these specific character names: "${charA}" and "${charB}" (one per prompt)
-- Vary the sentence STRUCTURE — not both "X was so Y that..." patterns
-- The blank ___ should invite short, funny 1-2 word answers
-- Keep it PG-13 — cheeky is fine, offensive is not
-- Make them genuinely different in style from each other
+WHAT MAKES A GREAT MATCH GAME PROMPT:
+1. The blank has ONE obvious intended meaning — no ambiguity about what is being described
+2. The blank invites funny, surprising, or slightly risqué 1-2 word answers
+3. The setup gives enough context that everyone immediately understands the situation
+4. Multiple people would naturally think of the same funny answer
 
-Good structural variety examples:
-- "Old Man Henderson forgot his ___ again."
-- "When Chef Rodriguez opened the fridge, all she found was ___."
-- "The doctor told Tiny Tina she needed more ___ in her diet."
-- "Tourist Tim couldn't believe how much ___ cost in New York."
-- "Grandma Ethel's secret ingredient was always ___."
-- "Before the big game, Rookie Randy always ate ___."
+BAD PROMPT (avoid): "Nurse Nancy gave a shot but missed and hit ___"
+WHY IT'S BAD: Unclear what she was aiming at. "Arm" is confusing — was that the target or not?
+
+GOOD PROMPTS (this style):
+- "Chef Rodriguez's secret ingredient was ___." (clear: what's IN the food)
+- "Tourist Tim was so lost, he asked a ___ for directions." (clear: who he asked)
+- "Old Man Henderson showed up to his date wearing nothing but ___." (clear: what he wore)
+- "Professor Bumbleworth forgot to wear ___ to class again." (clear: what was missing)
+- "Grandma Ethel's famous pie always had ___ in it." (clear: the secret ingredient)
+- "Rookie Randy was so nervous, he ___ right before the big game." (clear: what he did)
+
+STRUCTURE RULES:
+- Vary the structure — don't use the same sentence pattern for both prompts
+- The blank must be at the END or clearly defined in the middle
+- Keep it PG-13 — cheeky is fine, crude is not
+- 10-20 words total per prompt
 
 Return JSON: {"promptA": "...", "promptB": "...", "charA": "${charA}", "charB": "${charB}"}`,
-    400, true
+    500, true
   );
   const parsed = extractJSON(text);
   return {
-    promptA: parsed.promptA || `${charA} couldn't believe how much ___ they needed.`,
-    promptB: parsed.promptB || `${charB} forgot their ___ at home.`,
+    promptA: parsed.promptA || `${charA} forgot to bring ___ to the party.`,
+    promptB: parsed.promptB || `${charB}'s doctor said they needed more ___ in their life.`,
     charA, charB,
   };
 };
@@ -516,6 +523,16 @@ app.post('/api/room/:code/supermatch-pick', async (req, res) => {
     room.phase = 'error';
     bump(room);
   }
+});
+
+// ─── API: SUPER MATCH — ADVANCE REVEAL ───────────────────────
+// Called by display after each celeb answer plays, so phone knows when all are revealed
+app.post('/api/room/:code/supermatch-reveal-next', (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  room.superMatchRevealIndex = (room.superMatchRevealIndex || -1) + 1;
+  bump(room);
+  res.json({ room });
 });
 
 // ─── API: SUPER MATCH — CONTESTANT ANSWER ─────────────────────
