@@ -1,15 +1,12 @@
 {
-  "name": "match-game-server",
-  "version": "1.0.0",
-  "type": "module",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js"
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "npm run build"
   },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^4.21.1",
-    "openai": "^4.77.0"
+  "deploy": {
+    "startCommand": "npm start",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
   }
 }

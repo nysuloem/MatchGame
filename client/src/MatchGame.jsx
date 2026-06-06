@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import CelebAvatar from './CelebAvatar.jsx';
 
 // ─────────────────────────────────────────────────────────────
 // THE MATCH GAME
@@ -92,11 +93,13 @@ const PHASE_LABELS = {
   lobby: 'Waiting for players…',
   cointoss: 'Flipping the coin…',
   generating: 'Preparing the round…',
-  pick_prompt: 'Contestant is choosing their question…',
-  answering: 'Contestant is writing their answer…',
+  pick_prompt: 'Choose your question!',
+  answering: 'Fill in the blank!',
   generating_answers: 'The panel is conferring…',
   revealing: 'Reveal!',
-  round_end: 'Round complete — moving on…',
+  round_end: 'Round complete…',
+  tiebreaker: "It's a tie — tiebreaker round!",
+  intro: 'Meet the panel!',
   superMatch_pickCelebs: 'Super Match — choose your celebrities!',
   superMatch_generating: 'Panel is preparing…',
   superMatch_revealing: 'The panel reveals…',
@@ -242,66 +245,93 @@ function DisplayView({ room, roomCode }) {
   const [revealIndex, setRevealIndex] = useState(-1);
   const [coinFlipping, setCoinFlipping] = useState(false);
   const [coinResult, setCoinResult] = useState(null);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [introIndex, setIntroIndex] = useState(-1);
+  const introRunRef = useRef(false);
+
+  const unlockAudio = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.connect(ctx.destination); src.start(0); ctx.resume();
+    } catch {}
+    setAudioUnlocked(true);
+  };
 
   useEffect(() => {
-    if (!room) return;
+    if (!room || !audioUnlocked) return;
     if (room.version === prevVersionRef.current) return;
     prevVersionRef.current = room.version;
-
     const phase = room.phase;
     const prevPhase = prevPhaseRef.current;
     prevPhaseRef.current = phase;
 
-    // Coin toss animation
+    if (phase === 'lobby' && prevPhase !== 'lobby' && !introRunRef.current && room.panel?.length > 0) {
+      introRunRef.current = true;
+      runIntro(room);
+    }
     if (phase === 'cointoss' && prevPhase !== 'cointoss') {
-      setCoinFlipping(true);
-      setCoinResult(null);
+      setCoinFlipping(true); setCoinResult(null);
       setTimeout(() => {
-        setCoinFlipping(false);
-        setCoinResult(room.triangleSlot);
-        if (room.triangleSlot) {
-          const winner = room.players[room.triangleSlot];
-          speakTTS({ text: `${winner} wins the toss and plays first!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-        }
+        setCoinFlipping(false); setCoinResult(room.triangleSlot);
+        if (room.triangleSlot)
+          speakTTS({ text: `${room.players[room.triangleSlot]} wins the toss and plays first!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
       }, 2500);
     }
-
-    // Read the prompt aloud when answering begins (display is the speaker)
     if (phase === 'answering' && prevPhase !== 'answering' && room.chosenPrompt) {
-      speakTTS({ text: room.chosenPrompt, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      setTimeout(() => speakTTS({ text: room.chosenPrompt, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE }), 800);
     }
-
-    // New reveal
     if (phase === 'revealing' && prevPhase !== 'revealing') {
-      setRevealIndex(-1);
-      runReveal(room);
+      setRevealIndex(-1); runReveal(room);
     }
+    if (phase === 'tiebreaker' && prevPhase !== 'tiebreaker') {
+      speakTTS({ text: "It's a tie! Scores reset — tiebreaker round!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+    }
+  }, [room?.version, audioUnlocked]);
 
-    // Super match celeb reveal
-    if (phase === 'superMatch_revealing' && prevPhase !== 'superMatch_revealing') {
-      // reveal index is tracked server-side now
+  // Also run intro when audio gets unlocked if panel is already ready
+  useEffect(() => {
+    if (audioUnlocked && room?.panel?.length > 0 && !introRunRef.current) {
+      introRunRef.current = true;
+      runIntro(room);
     }
-  }, [room?.version]);
+  }, [audioUnlocked]);
+
+  const runIntro = async (r) => {
+    await delay(600);
+    await speakTTS({ text: "It's time to match the stars!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+    await delay(500);
+    for (let i = 0; i < r.panel.length; i++) {
+      setIntroIndex(i);
+      await speakTTS({ text: r.panel[i].name, code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length] });
+      await delay(400);
+    }
+  };
 
   const runReveal = async (r) => {
     for (let i = 0; i < r.panel.length; i++) {
       setRevealIndex(i);
-      await speakTTS({
-        text: r.panel[i].answer,
-        code: roomCode, slot: i,
-        fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length],
-      });
+      await speakTTS({ text: r.panel[i].answer, code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length] });
       await delay(350);
     }
-    // After reveal done, tell server
     try { await api.revealDone(roomCode); } catch {}
   };
 
   if (!room) return (
-    <div className="mg-root">
-      <div className="mg-display-waiting">
-        <h1 className="mg-title">The Match Game</h1>
-        <p className="mg-status">Connecting…</p>
+    <div className="mg-root display-mode" style={{alignItems:'center',justifyContent:'center'}}>
+      <div className="mg-display-waiting"><h1 className="mg-title">The Match Game</h1><p className="mg-status">Connecting…</p></div>
+    </div>
+  );
+
+  if (!audioUnlocked) return (
+    <div className="mg-root display-mode" style={{cursor:'pointer'}} onClick={unlockAudio}>
+      <div className="mg-display-waiting" style={{justifyContent:'center',alignItems:'center',flexDirection:'column',gap:24}}>
+        <h1 className="mg-title">The<br/>Match Game</h1>
+        <div style={{background:'var(--orange)',color:'var(--cream)',fontFamily:'Bowlby One,sans-serif',fontSize:28,padding:'24px 48px',border:'4px solid var(--brown)',boxShadow:'6px 6px 0 var(--brown)',letterSpacing:'0.08em',textAlign:'center'}}>
+          TAP ANYWHERE TO BEGIN
+        </div>
+        <p className="mg-help" style={{fontSize:16}}>Tap once to enable audio — game starts automatically</p>
       </div>
     </div>
   );
@@ -309,124 +339,89 @@ function DisplayView({ room, roomCode }) {
   const phase = room.phase;
   const p1name = room.players[1] || '—';
   const p2name = room.players[2] || 'Waiting…';
+  const isActive = (slot) => room.activeSlot === slot && ['pick_prompt','answering','generating_answers'].includes(phase);
+
+  const activeStyle = (slot) => {
+    if (!isActive(slot)) return {};
+    const isTriangle = slot === room.triangleSlot;
+    return isTriangle
+      ? {background:'rgba(76,175,80,0.22)',borderTop:'5px solid var(--tri-green)',transition:'background 0.4s'}
+      : {background:'rgba(211,47,47,0.22)',borderTop:'5px solid var(--cir-red)',transition:'background 0.4s'};
+  };
 
   return (
     <div className="mg-root display-mode">
-      {/* ── HEADER ── */}
       <div className="mg-display-header">
-        <div className="mg-display-contestant left">
-          <div className={`mg-contestant-symbol ${slotClass(room,1)}`}>{slotSymbol(room,1) || '▲'}</div>
+        <div className="mg-display-contestant left" style={activeStyle(1)}>
+          <div className={`mg-contestant-symbol ${slotClass(room,1)}`}>{slotSymbol(room,1)||'▲'}</div>
           <div className="mg-contestant-name">{p1name}</div>
           <div className="mg-contestant-num">{room.scores[1]}</div>
-          {room.activeSlot === 1 && ['pick_prompt','answering','generating_answers'].includes(phase) &&
-            <div className="mg-active-badge">● ON AIR</div>}
+          {isActive(1) && <div className="mg-your-turn" style={{color:room.triangleSlot===1?'var(--tri-green)':'var(--cir-red)'}}>{p1name}, it's your turn!</div>}
         </div>
-
         <div className="mg-display-title-center">
           <div className="mg-display-show-title">The Match Game</div>
-          <div className="mg-display-phase">{PHASE_LABELS[phase] || phase}</div>
-          {room.round > 0 && room.round <= 2 &&
-            <div className="mg-display-round">Round {room.round}</div>}
-          {room.round === 3 && <div className="mg-display-round super">★ Super Match ★</div>}
-          {room.round === 4 && <div className="mg-display-round final">★★ Final Match ★★</div>}
+          <div className="mg-display-phase">{PHASE_LABELS[phase]||phase}</div>
+          {room.round>0 && room.round<=2 && <div className="mg-display-round">Round {room.round}</div>}
+          {room.round>2 && !phase.startsWith('superMatch') && !phase.startsWith('finalMatch') && phase!=='tiebreaker' && <div className="mg-display-round">Tiebreaker</div>}
+          {phase==='tiebreaker' && <div className="mg-display-round" style={{color:'var(--pink)'}}>⚡ Tiebreaker!</div>}
+          {phase.startsWith('superMatch') && <div className="mg-display-round super">★ Super Match ★</div>}
+          {phase.startsWith('finalMatch') && <div className="mg-display-round final">★★ Final Match ★★</div>}
           <div className="mg-display-code">Room: {roomCode}</div>
         </div>
-
-        <div className="mg-display-contestant right">
-          <div className={`mg-contestant-symbol ${slotClass(room,2)}`}>{slotSymbol(room,2) || '●'}</div>
+        <div className="mg-display-contestant right" style={activeStyle(2)}>
+          <div className={`mg-contestant-symbol ${slotClass(room,2)}`}>{slotSymbol(room,2)||'●'}</div>
           <div className="mg-contestant-name">{p2name}</div>
           <div className="mg-contestant-num">{room.scores[2]}</div>
-          {room.activeSlot === 2 && ['pick_prompt','answering','generating_answers'].includes(phase) &&
-            <div className="mg-active-badge">● ON AIR</div>}
+          {isActive(2) && <div className="mg-your-turn" style={{color:room.triangleSlot===2?'var(--tri-green)':'var(--cir-red)'}}>{p2name}, it's your turn!</div>}
         </div>
       </div>
 
-      {/* ── MAIN CONTENT ── */}
       <div className="mg-display-main">
-
-        {/* Lobby */}
-        {phase === 'lobby' && (
+        {(phase==='lobby'||phase==='intro') && (
           <div className="mg-display-center-msg">
-            <p className="mg-status" style={{fontSize:20}}>Both contestants: open the URL on your phone and enter this code</p>
-            <div className="mg-roomcode" style={{fontSize:80,padding:'24px 40px',letterSpacing:'0.3em'}}>{roomCode}</div>
-            <p className="mg-status">Game starts automatically once both players join</p>
-            {room.panel?.length > 0 && (
-              <>
-                <p className="mg-label" style={{textAlign:'center',marginTop:20}}>Tonight's Panel</p>
-                <DisplayPanelGrid room={room} revealIndex={-1} />
-              </>
-            )}
+            {!room.players[2] && <>
+              <p className="mg-status" style={{fontSize:20}}>Both contestants: open the URL on your phone and enter this code</p>
+              <div className="mg-roomcode" style={{fontSize:80,padding:'24px 40px',letterSpacing:'0.3em'}}>{roomCode}</div>
+              <p className="mg-status">Game starts automatically once both players join</p>
+            </>}
+            {room.panel?.length>0 && <>
+              <p className="mg-label" style={{textAlign:'center',marginTop:12}}>Tonight's Panel</p>
+              <DisplayPanelGrid room={room} revealIndex={-1} introIndex={introIndex}/>
+            </>}
           </div>
         )}
-
-        {/* Coin toss */}
-        {phase === 'cointoss' && (
+        {phase==='cointoss' && (
           <div className="mg-display-center-msg">
-            <div className={`mg-coin ${coinFlipping ? 'flipping' : ''}`}>
-              {coinFlipping || !coinResult ? '?' : (coinResult === room.triangleSlot ? '▲' : '●')}
-            </div>
-            {!coinFlipping && coinResult && (
-              <p className="mg-status" style={{fontSize:24}}>
-                <strong>{room.players[coinResult]}</strong> wins the toss and plays first!
-              </p>
-            )}
+            <div className={`mg-coin ${coinFlipping?'flipping':''}`}>{coinFlipping||!coinResult?'?':(coinResult===room.triangleSlot?'▲':'●')}</div>
+            {!coinFlipping&&coinResult&&<p className="mg-status" style={{fontSize:24}}><strong>{room.players[coinResult]}</strong> wins the toss and plays first!</p>}
           </div>
         )}
-
-        {/* Generating */}
-        {['generating','generating_answers','round_end','superMatch_generating','finalMatch_generating','finalMatch_generating_celeb'].includes(phase) && (
+        {['generating','generating_answers','round_end','superMatch_generating','finalMatch_generating','finalMatch_generating_celeb','tiebreaker'].includes(phase) && (
           <div className="mg-display-center-msg">
             <div className="mg-loading">
-              {phase === 'generating' && 'Preparing questions'}
-              {phase === 'generating_answers' && 'The panel is conferring'}
-              {phase === 'round_end' && 'Calculating scores'}
-              {phase === 'superMatch_generating' && 'Consulting the panel'}
-              {phase === 'finalMatch_generating' && 'Preparing the Final Match'}
-              {phase === 'finalMatch_generating_celeb' && `${room.panel[room.finalMatchCelebIndex]?.name} is thinking hard`}
+              {phase==='generating'&&'Preparing questions'}
+              {phase==='generating_answers'&&'The panel is conferring'}
+              {phase==='round_end'&&'Calculating scores'}
+              {phase==='tiebreaker'&&"It's a tie — resetting scores"}
+              {phase==='superMatch_generating'&&'Consulting the panel'}
+              {phase==='finalMatch_generating'&&'Preparing the Final Match'}
+              {phase==='finalMatch_generating_celeb'&&`${room.panel[room.finalMatchCelebIndex]?.name} is thinking hard`}
             </div>
-            {room.round <= 2 && <DisplayPanelGrid room={room} revealIndex={-1} />}
+            <DisplayPanelGrid room={room} revealIndex={-1}/>
           </div>
         )}
-
-        {/* Prompt + panel for active rounds */}
-        {['pick_prompt','answering'].includes(phase) && room.round <= 2 && (
-          <DisplayRoundActive room={room} />
-        )}
-
-        {/* Revealing */}
-        {phase === 'revealing' && (
-          <DisplayReveal room={room} revealIndex={revealIndex} roomCode={roomCode} />
-        )}
-
-        {/* Super Match */}
-        {phase === 'superMatch_pickCelebs' && (
-          <DisplaySuperMatchPickCelebs room={room} />
-        )}
-        {phase === 'superMatch_revealing' && (
-          <DisplaySuperMatchReveal room={room} roomCode={roomCode} />
-        )}
-        {['superMatch_won','superMatch_lost'].includes(phase) && (
-          <DisplaySuperMatchResult room={room} />
-        )}
-
-        {/* Final Match */}
-        {['finalMatch_pickCeleb','finalMatch_answering'].includes(phase) && (
-          <DisplayFinalMatchActive room={room} />
-        )}
-        {phase === 'finalMatch_reveal' && (
-          <DisplayFinalMatchReveal room={room} />
-        )}
-
-        {/* Game Over */}
-        {phase === 'gameOver' && (
+        {['pick_prompt','answering'].includes(phase) && <DisplayRoundActive room={room}/>}
+        {phase==='revealing' && <DisplayReveal room={room} revealIndex={revealIndex} roomCode={roomCode}/>}
+        {phase==='superMatch_pickCelebs' && <DisplaySuperMatchPickCelebs room={room}/>}
+        {phase==='superMatch_revealing' && <DisplaySuperMatchReveal room={room} roomCode={roomCode}/>}
+        {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room}/>}
+        {['finalMatch_pickCeleb','finalMatch_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
+        {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room}/>}
+        {phase==='gameOver' && (
           <div className="mg-display-center-msg">
             <div className="mg-bigsymbol" style={{fontSize:60}}>🎉</div>
             <h2 style={{fontFamily:'Bowlby One,sans-serif',fontSize:40,color:'var(--orange-deep)',textAlign:'center'}}>
-              {room.finalMatchResult === 'win'
-                ? `${room.players[room.activeSlot]} wins ${fmt$(room.finalMatchWinnings)}!`
-                : room.superMatchWinnings > 0
-                  ? `${room.players[room.activeSlot]} wins ${fmt$(room.superMatchWinnings)}!`
-                  : 'Thanks for playing!'}
+              {room.finalMatchResult==='win'?`${room.players[room.activeSlot]} wins ${fmt$(room.finalMatchWinnings)}!`:room.superMatchWinnings>0?`${room.players[room.activeSlot]} wins ${fmt$(room.superMatchWinnings)}!`:'Thanks for playing!'}
             </h2>
           </div>
         )}
@@ -435,10 +430,9 @@ function DisplayView({ room, roomCode }) {
   );
 }
 
-function DisplayPanelGrid({ room, revealIndex, roomCode, matches }) {
+function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) {
   const activeIsTriangle = room?.activeSlot === room?.triangleSlot;
-  // In round 2: celebs already matched by the current contestant in round 1 are pre-lit
-  const round1MatchedByActive = room?.round === 2
+  const round1MatchedByActive = room?.round >= 2
     ? (room?.round1Matches?.[room?.activeSlot] || [])
     : [];
 
@@ -447,11 +441,16 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches }) {
       {(room?.panel || []).map((p, i) => {
         const shown = revealIndex != null && i <= revealIndex;
         const matched = matches && shown && matches[i];
-        const prelit = round1MatchedByActive.includes(i); // already claimed in round 1
+        const prelit = round1MatchedByActive.includes(i);
         const litAsTriangle = (matched && activeIsTriangle) || (prelit && room?.triangleSlot === room?.activeSlot);
         const litAsCircle   = (matched && !activeIsTriangle) || (prelit && room?.triangleSlot !== room?.activeSlot);
+        // For intro: cards pop in one by one
+        const introduced = introIndex === undefined || introIndex === -1 || i <= introIndex;
         return (
-          <div key={i} className={`mg-panelist ${shown ? 'revealed' : ''} ${matched ? 'matched' : ''} ${prelit ? 'prelit' : ''}`}>
+          <div key={i}
+            className={`mg-panelist ${shown ? 'revealed' : ''} ${matched ? 'matched' : ''} ${prelit ? 'prelit' : ''}`}
+            style={{ opacity: introduced ? 1 : 0, transform: introduced ? 'scale(1)' : 'scale(0.8)', transition: 'opacity 0.4s, transform 0.4s' }}>
+            <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={70} />
             <div className="mg-panelist-name">{p.name}</div>
             <div className="mg-panelist-tag">{p.tag}</div>
             <div className={`mg-panelist-answer ${shown ? '' : 'blank'}`}>

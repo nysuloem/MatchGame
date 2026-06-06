@@ -81,20 +81,23 @@ const generatePanel = async () => {
 
 For each panelist provide:
 - "name": full name
-- "tag": 3-5 word description of their public persona  
-- "voice": best matching OpenAI TTS voice from: ${TTS_VOICES.join(', ')}. Match gender/pitch/tone. (onyx=deep authoritative male, nova=bright friendly female, fable=animated British male, coral=warm expressive female, shimmer=bright female, echo=calm male)
-- "voiceInstructions": 1-2 sentences on HOW to deliver lines as this person — pace, energy, accent, mannerisms. Be specific.
+- "tag": 3-5 word description of their public persona
+- "avatarType": one of these sketch styles that best fits them visually: "man_young", "man_middle", "man_older", "woman_young", "woman_middle", "woman_older", "person_athletic", "person_glamorous"
+- "voice": best matching OpenAI TTS voice from: ${TTS_VOICES.join(', ')}. (onyx=deep authoritative male, nova=bright friendly female, fable=animated British male, coral=warm expressive female, shimmer=bright female, echo=calm male, alloy=neutral)
+- "voiceInstructions": 1-2 sentences on HOW to deliver lines as this person — pace, energy, accent, mannerisms.
 
 Assign DIFFERENT voices to different panelists.
 
-Return JSON: {"panel": [{"name":"...","tag":"...","voice":"...","voiceInstructions":"..."}, ...]}`,
+Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"...","voiceInstructions":"..."}, ...]}`,
     1500, true
   );
   const parsed = extractJSON(text);
   const panel = Array.isArray(parsed) ? parsed : (parsed.panel || []);
+  const validAvatarTypes = ['man_young','man_middle','man_older','woman_young','woman_middle','woman_older','person_athletic','person_glamorous'];
   return panel.slice(0, 6).map(p => ({
     name: p.name,
     tag: p.tag,
+    avatarType: validAvatarTypes.includes(p.avatarType) ? p.avatarType : 'man_middle',
     voice: TTS_VOICES.includes(p.voice) ? p.voice : 'alloy',
     voiceInstructions: p.voiceInstructions || '',
     answer: null,
@@ -147,12 +150,16 @@ Return JSON: {"promptA": "...", "promptB": "...", "charA": "${charA}", "charB": 
 const generatePanelAnswers = async (panel, promptText, contestantName) => {
   const panelStr = panel.map((p, i) => `${i+1}. ${p.name} (${p.tag})`).join('\n');
   const text = await callLLM(
-    `Match Game show. The contestant is ${contestantName}. The fill-in-the-blank prompt is:
-"${promptText}"
+    `You are running a Match Game. The prompt is: "${promptText}"
 
-Each of these 6 celebrities gives a SHORT answer IN CHARACTER — but they are ACTIVELY TRYING TO MATCH what ${contestantName} would write. They balance their own personality with strategic thinking about what's most obvious/common.
+STEP 1 — Identify the 2-3 most obvious, common answers most people would give for this blank. Think of what a general audience would say most often.
 
-CRITICAL: Each answer must be 1-2 WORDS MAXIMUM. No exceptions.
+STEP 2 — Each celebrity below gives their answer. IMPORTANT RULES:
+- At least 4 of the 6 celebrities MUST pick one of those 2-3 obvious answers (this is how contestants score matches)
+- The remaining 1-2 celebrities can be more creative/in-character
+- Each answer reflects the celebrity's personality in HOW they'd say it, but most still aim for the obvious answer
+- 1-2 WORDS MAXIMUM per answer, no exceptions
+- Celebrities are trying to match ${contestantName}'s answer, so they lean toward the most common response
 
 Panel:
 ${panelStr}
@@ -167,20 +174,30 @@ Return JSON: {"answers": ["word","word","word","word","word","word"]}`,
 
 const generateSuperMatchPrompt = async () => {
   const text = await callLLM(
-    `Generate a Super Match style fill-in-the-blank prompt. These are SHORT partial phrases where the blank has multiple obvious popular answers.
+    `Generate ONE Super Match fill-in-the-blank phrase. 
 
-Rules:
-- 2-5 words total including the blank ___
-- No character names
-- Should have clear "most popular" answers that most people would agree on
-- Either "___ Dog" style (blank at start) or "Television ___" style (blank at end) or "Hot ___" etc.
+STRICT FORMAT: A single short phrase with exactly one blank marked as ___
+STRICT LENGTH: 2-5 words total (including the blank)
+NO character names, NO sentences, NO punctuation at end
+Return ONLY the phrase — nothing else, no explanation, no options, no numbering
 
-Examples: "Television ___", "___ Dog", "Birthday ___", "___ Party", "School ___", "___ Star", "Baby ___"
+GOOD examples (return exactly this style):
+Television ___
+___ Dog  
+Birthday ___
+___ Party
+Hot ___
+Baby ___
+Rock ___
+Christmas ___
+___ Star
 
-Return just the prompt text, nothing else.`,
-    100
+Return one phrase only:`,
+    60
   );
-  return text.trim().replace(/^["']|["']$/g, '');
+  // Take only the first line to prevent multi-prompt responses
+  const firstLine = text.trim().split('\n')[0].trim();
+  return firstLine.replace(/^["'\d.\-\s]+|["']+$/g, '').trim();
 };
 
 const generateSuperMatchAnswers = async (prompt, celebNames) => {
@@ -352,12 +369,13 @@ app.get('/api/room/:code', (req, res) => {
 
 // ─── ROUND LOGIC ──────────────────────────────────────────────
 const startNewRound = async (room, roundNum) => {
-  room.round = roundNum;
+  const isSuper = roundNum === 'super';
+  if (!isSuper) room.round = roundNum;
   room.phase = 'generating';
   bump(room);
 
-  if (roundNum <= 2) {
-    // Generate two prompts
+  if (!isSuper) {
+    // Regular round (1, 2, or tiebreaker 3+)
     const { promptA, promptB, charA, charB } = await generateRoundPrompts(room.usedCharacters);
     room.promptA = promptA;
     room.promptB = promptB;
@@ -367,15 +385,14 @@ const startNewRound = async (room, roundNum) => {
     if (roundNum === 1) {
       room.activeSlot = room.cointossWinner;
     } else {
-      // Lower score picks first in round 2
+      // Lower score picks first (or slot 1 if tied after wipe)
       const s1 = room.scores[1], s2 = room.scores[2];
       room.activeSlot = s1 <= s2 ? 1 : 2;
     }
     room.turnInRound = 1;
     room.phase = 'pick_prompt';
     bump(room);
-  }
-  else if (roundNum === 3) {
+  } else {
     // Super Match
     const prompt = await generateSuperMatchPrompt();
     room.superMatchPrompt = prompt;
@@ -468,26 +485,35 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
   } else {
     // Both contestants done this round
     if (room.round === 1) {
-      // Move to round 2
       setTimeout(async () => {
         try { await startNewRound(room, 2); }
         catch(e) { console.error('start round 2:', e); }
       }, 3000);
-    } else if (room.round === 2) {
-      // Check early out + determine winner
+    } else if (room.round >= 2) {
       const s1 = room.scores[1], s2 = room.scores[2];
-      const leader = s1 > s2 ? 1 : 2;
-      const trailer = otherSlot(leader);
-      // Early out: if trailer already lost (leader can't be caught)
-      // Winner goes to superMatch
-      room.activeSlot = leader;
-      room.panel = room.panel.map(p => ({ ...p, answer: null }));
-      room.phase = 'round_end';
-      bump(room);
-      setTimeout(async () => {
-        try { await startNewRound(room, 3); }
-        catch(e) { console.error('start super match:', e); }
-      }, 4000);
+      if (s1 === s2) {
+        // TIE — run a tiebreaker round: wipe scores, start fresh round
+        room.scores = { 1: 0, 2: 0 };
+        room.round1Matches = { 1: [], 2: [] };
+        room.panel = room.panel.map(p => ({ ...p, answer: null }));
+        room.phase = 'tiebreaker';
+        bump(room);
+        setTimeout(async () => {
+          try { await startNewRound(room, room.round + 1); }
+          catch(e) { console.error('start tiebreaker:', e); }
+        }, 4000);
+      } else {
+        // Winner determined — go to super match
+        const leader = s1 > s2 ? 1 : 2;
+        room.activeSlot = leader;
+        room.panel = room.panel.map(p => ({ ...p, answer: null }));
+        room.phase = 'round_end';
+        bump(room);
+        setTimeout(async () => {
+          try { await startNewRound(room, 'super'); }
+          catch(e) { console.error('start super match:', e); }
+        }, 4000);
+      }
     }
   }
 });
