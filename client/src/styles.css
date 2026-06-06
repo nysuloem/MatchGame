@@ -756,3 +756,96 @@ body { margin: 0; }
   font-size: 11px !important;
   margin-top: 8px !important;
 }
+
+/* ── Fullscreen TV fit patch ─────────────────────────────────
+   In fullscreen/TV layouts, the prompt and answer strip share the
+   vertical column with the 2x3 panel grid. The old grid used height:100%,
+   which could overflow below the viewport once prompt text was present.
+   These rules let the grid take only the remaining space and scale card
+   contents down on shorter displays. */
+.mg-root.display-mode {
+  height: 100dvh;
+  max-height: 100dvh;
+}
+.mg-root.display-mode .mg-display-header {
+  height: clamp(64px, 9vh, 90px);
+}
+.mg-root.display-mode .mg-display-main {
+  padding: clamp(4px, 0.8vh, 8px) 10px;
+}
+.mg-root.display-mode .mg-display-center-msg,
+.mg-root.display-mode .mg-display-round-active {
+  overflow: hidden;
+  gap: clamp(3px, 0.6vh, 8px);
+}
+.mg-root.display-mode .mg-prompt {
+  font-size: clamp(18px, 2.35vh, 28px);
+  padding: clamp(8px, 1.3vh, 18px) 30px;
+  margin: clamp(4px, 0.8vh, 10px) 0;
+  line-height: 1.22;
+  flex: 0 0 auto;
+}
+.mg-root.display-mode .mg-contestant-answer-display {
+  font-size: clamp(16px, 2.2vh, 20px);
+  padding: clamp(5px, 0.9vh, 8px) 18px;
+  margin: clamp(4px, 0.8vh, 8px) 0;
+  flex: 0 0 auto;
+}
+.mg-root.display-mode .mg-panel-grid.display {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: clamp(3px, 0.7vh, 8px) auto 0;
+  gap: clamp(4px, 0.8vh, 8px);
+  align-self: stretch;
+}
+.mg-root.display-mode .mg-panelist {
+  padding: clamp(3px, 0.7vh, 6px) 7px clamp(2px, 0.5vh, 4px);
+  border-width: clamp(2px, 0.35vh, 3px);
+}
+.mg-root.display-mode .mg-panelist svg {
+  width: clamp(42px, 8vh, 70px) !important;
+  height: clamp(42px, 8vh, 70px) !important;
+  flex: 0 0 auto;
+}
+.mg-root.display-mode .mg-panelist-name {
+  font-size: clamp(10px, 1.85vh, 18px);
+  line-height: 1.02;
+  margin-bottom: clamp(1px, 0.3vh, 2px);
+}
+.mg-root.display-mode .mg-panelist-tag {
+  font-size: clamp(8px, 1.35vh, 12px);
+  line-height: 1.05;
+  margin-bottom: clamp(2px, 0.5vh, 5px);
+}
+.mg-root.display-mode .mg-panelist-answer {
+  font-size: clamp(14px, 2.2vh, 22px);
+  line-height: 1.05;
+  min-height: clamp(16px, 2.5vh, 24px);
+}
+.mg-root.display-mode .mg-symbol-row {
+  margin-top: auto;
+  padding-top: clamp(1px, 0.4vh, 4px);
+}
+.mg-root.display-mode .mg-symbol {
+  font-size: clamp(30px, 5.6vh, 64px);
+}
+
+@media (max-height: 760px) {
+  .mg-root.display-mode .mg-display-phase,
+  .mg-root.display-mode .mg-display-code {
+    display: none;
+  }
+  .mg-root.display-mode .mg-panelist-tag {
+    display: none;
+  }
+  .mg-root.display-mode .mg-prompt {
+    font-size: clamp(16px, 2.4vh, 22px);
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+  .mg-root.display-mode .mg-panelist svg {
+    width: clamp(36px, 7.2vh, 58px) !important;
+    height: clamp(36px, 7.2vh, 58px) !important;
+  }
+}
