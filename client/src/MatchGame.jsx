@@ -27,7 +27,7 @@ const req = async (path, opts = {}) => {
 };
 
 const api = {
-  createRoom:   (playerName, playerCount=2) => req('/api/room', { method:'POST', body:{playerName, playerCount} }),
+  createRoom:   (playerName, playerCount=2, soloTest=false) => req('/api/room', { method:'POST', body:{playerName, playerCount, soloTest} }),
   joinRoom:     (code, playerName, signMessage='', rolePreference='surprise') => req(`/api/room/${code}/join`, { method:'POST', body:{playerName, signMessage, rolePreference} }),
   getRoom:      (code) => req(`/api/room/${code}`),
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
@@ -173,7 +173,7 @@ const startIntroMusic = () => {
   try {
     introMusicAudio = new Audio(THEME_TRACK);
     introMusicAudio.loop = true;
-    introMusicAudio.volume = 0.22;
+    introMusicAudio.volume = 0.14;
     safePlayAudio(introMusicAudio);
   } catch { playRetroSting(); }
 };
@@ -391,6 +391,7 @@ export default function MatchGame() {
   const [loading, setLoading] = useState(false);
   const [joinFromQr, setJoinFromQr] = useState(false);
   const [playerCount, setPlayerCount] = useState(2);
+  const [soloTest, setSoloTest] = useState(false);
   const pollRef = useRef(null);
   const lastVersionRef = useRef(null);
 
@@ -436,7 +437,7 @@ export default function MatchGame() {
       // The Start Display click is a user gesture, so use it to prime browser audio before the QR screen appears.
       try { const ctx = getAudioCtx(); if (ctx?.state === 'suspended') ctx.resume(); } catch {}
       // Create room with a placeholder name for the display device
-      const { room: r } = await api.createRoom('__display__', playerCount);
+      const { room: r } = await api.createRoom('__display__', soloTest ? 1 : playerCount, soloTest);
       lastVersionRef.current = r.version;
       setRoomCode(r.code);
       setRoom(r);
@@ -469,7 +470,7 @@ export default function MatchGame() {
     <div className="mg-root">
       <div className="mg-card">
         <h1 className="mg-title">The<br/>Match Game</h1>
-        <p className="mg-subtitle">— a family game show for 1–8 players —</p>
+        <p className="mg-subtitle">— a family game show for 2–8 players —</p>
         {error && <div className="mg-error" onClick={()=>setError('')}>{error}</div>}
 
         {joinFromQr ? (
@@ -507,11 +508,12 @@ export default function MatchGame() {
             {/* TV DISPLAY */}
             <div className="mg-home-section">
               <div className="mg-home-section-title">📺 TV Screen (Laptop)</div>
-              <p className="mg-help">Open this on the laptop everyone can see. Everyone scans the QR code. With 1 player, you play against an AI contestant and the panel is all AI; with 2–8 players, the game randomly chooses 2 contestants and makes the rest celebrity panelists.</p>
+              <p className="mg-help">Open this on the laptop everyone can see. Everyone scans the QR code. The game randomly chooses 2 contestants and makes the rest celebrity panelists. Use Solo Test when you just want to test the flow alone.</p>
               <label className="mg-label">How many people are playing?</label>
               <select className="mg-input" value={playerCount} onChange={e=>setPlayerCount(Number(e.target.value))}>
-                {[1,2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}</option>)}
+                {[2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}</option>)}
               </select>
+              <label className="mg-check" style={{marginTop:14}}><input type="checkbox" checked={soloTest} onChange={e=>setSoloTest(e.target.checked)} /> Solo test mode</label>
               <div className="mg-row" style={{marginTop:24}}>
                 <button className="mg-btn secondary" onClick={startAsDisplay} disabled={loading}>
                   {loading ? 'Starting…' : 'Start Display'}
@@ -583,6 +585,7 @@ function DisplayView({ room, roomCode }) {
   const [coinResult, setCoinResult] = useState(null);
   const [audioUnlocked, setAudioUnlocked] = useState(true);
   const [introIndex, setIntroIndex] = useState(-1);
+  const [introStage, setIntroStage] = useState('waiting');
   const [introComplete, setIntroComplete] = useState(false);
   const [promptReadyFor, setPromptReadyFor] = useState(null);
   const [superPromptReady, setSuperPromptReady] = useState(false);
@@ -695,6 +698,7 @@ function DisplayView({ room, roomCode }) {
 
   const runIntro = async (r) => {
     setIntroComplete(false);
+    setIntroStage('waiting');
     setIntroIndex(-1);
     await delay(500);
     startIntroMusic();
@@ -703,12 +707,18 @@ function DisplayView({ room, roomCode }) {
     await delay(450);
     // Classic opening: the announcer introduces exactly one star at a time.
     for (let i = 0; i < r.panel.length; i++) {
+      setIntroStage('celeb');
       setIntroIndex(i);
       await delay(120);
       await speakTTS({ text: r.panel[i].name, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
       playAudience(i % 2 === 0 ? 'applause' : 'cheer');
       await delay(950);
     }
+    setIntroStage('finale');
+    setIntroIndex(r.panel.length);
+    await delay(250);
+    await speakTTS({ text: 'As we get ready to play the star-studded Big Money Match Game!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+    await delay(2200);
     stopIntroMusic();
     setIntroComplete(true);
     try { await api.introDone(roomCode); } catch {}
@@ -759,7 +769,7 @@ function DisplayView({ room, roomCode }) {
 
   const phase = room.phase;
   const p1name = room.players[1] || '—';
-  const p2name = room.players[2] || 'Waiting…';
+  const p2name = room.soloTest ? 'Solo Test' : (room.players[2] || 'Waiting…');
   const isActive = (slot) => room.activeSlot === slot && ['pick_prompt','answering','generating_answers'].includes(phase);
 
   const activeStyle = (slot) => {
@@ -822,7 +832,7 @@ function DisplayView({ room, roomCode }) {
                 <p className="mg-help tiny-fallback">Fallback code: {roomCode}</p>
               </>
             )}
-            {phase === 'intro' && !introComplete && <DisplayIntroSpotlight room={room} introIndex={introIndex} />}
+            {phase === 'intro' && !introComplete && <DisplayIntroSpotlight room={room} introIndex={introIndex} introStage={introStage} />}
             
           </div>
         )}
@@ -862,8 +872,17 @@ function DisplayView({ room, roomCode }) {
 }
 
 
-function DisplayIntroSpotlight({ room, introIndex }) {
+function DisplayIntroSpotlight({ room, introIndex, introStage }) {
   const p = room?.panel?.[introIndex];
+  if (introStage === 'finale') {
+    return (
+      <div className="mg-intro-stage finale">
+        <div className="mg-big-money-logo-wrap">
+          <img className="mg-big-money-logo" src="/images/match-game-logo.png" alt="Match Game" />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="mg-intro-stage">
       {!p ? (
@@ -878,6 +897,7 @@ function DisplayIntroSpotlight({ room, introIndex }) {
     </div>
   );
 }
+
 
 
 function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) {
@@ -905,7 +925,6 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) 
             }}>
             <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={100} />
             <div className="mg-panelist-name">{p.name}</div>
-            <div className="mg-panelist-tag">{p.signMessage || 'Hi Mom!'}</div>
             <div className={`mg-panelist-answer hand-${i % 6} ${shown ? 'blue-card' : 'blank'}`}>
               {shown ? (p.answer || (prelit ? 'Matched' : '')) : ''}
             </div>

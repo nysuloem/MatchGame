@@ -1234,4 +1234,4 @@ body { margin: 0; }
   border: 4px solid rgba(255,244,214,0.25);
   box-shadow: inset 0 0 50px rgba(0,0,0,0.8), 0 0 26px rgba(255,210,63,0.16);
 }
-.mg-intro-stage.finale, .mg-big-money-logo-wrap, .mg-big-money-logo { display: none !important; }
+/* v26: finale logo restored after celebrity intros. */

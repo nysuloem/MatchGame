@@ -172,9 +172,9 @@ const WACKY_SIGNS = [
 const randomSign = () => WACKY_SIGNS[Math.floor(Math.random() * WACKY_SIGNS.length)];
 
 const AI_CONTESTANT_NAMES = [
-  'Maggie Malone', 'Eddie Sparks', 'Linda Lou', 'Tony Bananas', 'Sally Sunshine',
-  'Frankie Flash', 'Rita Rocket', 'Bobby Buttons', 'Connie Cash', 'Vinnie Velvet',
-  'Diane Dynamite', 'Marty Moon'
+  'Maggie', 'Eddie', 'Linda', 'Tony', 'Sally',
+  'Frankie', 'Rita', 'Bobby', 'Connie', 'Vinnie',
+  'Diane', 'Marty'
 ];
 const randomAiContestantName = (taken = []) => {
   const lowerTaken = new Set(taken.map(x => String(x || '').toLowerCase()));
@@ -1137,13 +1137,13 @@ const assignRolesAndStart = async (room) => {
     ...shuffle(ids.filter(id => prefs[id] === 'celebrity')),
   ];
   const c1 = contestantPool[0];
-  const c2 = contestantPool.find(id => id !== c1) || null;
+  const c2 = room.soloTest ? null : (contestantPool.find(id => id !== c1) || null);
   room.playerIds = { 1: c1, 2: c2 };
   room.players = { 1: room.participants[c1] || 'Player 1', 2: c2 ? room.participants[c2] : randomAiContestantName(Object.values(room.participants || {})) };
   room.roles = {};
   if (c1) room.roles[c1] = { role: 'contestant', contestantSlot: 1 };
   if (c2) room.roles[c2] = { role: 'contestant', contestantSlot: 2 };
-  room.aiContestantSlots = c2 ? [] : [2];
+  room.aiContestantSlots = []; // v26: no AI opponent in normal play; solo test uses one contestant only
 
   const remaining = ids.filter(id => id !== c1 && id !== c2);
   const humanCelebIds = [
@@ -1218,16 +1218,18 @@ const maybeFinishAnswerPhase = async (room) => {
 };
 
 app.post('/api/room', async (req, res) => {
-  const { playerName, playerCount } = req.body;
+  const { playerName, playerCount, soloTest } = req.body;
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
   const isDisplay = playerName.trim() === '__display__';
   try {
     const code = makeRoomCode();
-    const maxPlayers = clampInt(playerCount || 2, 1, 8);
+    const isSoloTest = Boolean(soloTest);
+    const maxPlayers = isSoloTest ? 1 : clampInt(playerCount || 2, 2, 8);
     const room = {
       code, version: 1, lastActivity: Date.now(),
       phase: 'lobby',
       maxPlayers,
+      soloTest: isSoloTest,
       participants: {},
       participantMessages: {},
       participantPreferences: {},
@@ -1461,6 +1463,18 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
   }
   room.pendingScoreDelta = 0;
   room.pendingMatches = [];
+
+  if (room.soloTest && room.turnInRound === 1) {
+    // Solo test mode: one human contestant plays a single regular-round turn, then moves on.
+    room.phase = 'round_end';
+    bump(room);
+    res.json({ room });
+    setTimeout(async () => {
+      try { await startNewRound(room, 'super'); }
+      catch(e) { console.error('start super match:', e); }
+    }, 3000);
+    return;
+  }
 
   if (room.turnInRound === 1) {
     // First contestant done. In Round 2+, if the second contestant is already ahead,
