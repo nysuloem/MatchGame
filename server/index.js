@@ -694,36 +694,90 @@ Return JSON exactly: {"prompt":"... ___ ..."}`,
 const generateSuperMatchAnswers = async (prompt, celebNames) => {
   const fallback = FALLBACK_SUPER_PROMPTS.find(p => p.prompt.toLowerCase() === String(prompt).toLowerCase())
     || FALLBACK_SUPER_PROMPTS[Math.floor(Math.random() * FALLBACK_SUPER_PROMPTS.length)];
-  const text = await callLLM(
-    `Super Match game show round. Prompt: "${prompt}"
 
-Generate the TOP 3 most popular/obvious survey answers for adults and 17+ teenagers. Classic Match Game survey logic: obvious beats clever.
+  // IMPORTANT: The survey board and celebrity suggestions are generated in two separate calls.
+  // The celebrities are NOT shown the top-three survey answers. This prevents the AI panel
+  // from suspiciously giving the exact $500/$250/$100 answers every time.
+  let topAnswers = fallback.topAnswers.map((ta, i) => ({
+    rank: i + 1,
+    answer: String(ta.answer).split(/\s+/).slice(0,2).join(' '),
+    value: [500,250,100][i]
+  }));
 
-Also generate suggested answers for these celebrities: ${celebNames.join(', ')}. They are helping the contestant, so at least 2 of the 3 celebrities should suggest one of the top 3 answers exactly.
+  try {
+    const surveyText = await callLLM(
+      `Super Match survey board. Prompt: "${prompt}"
 
-Prize values must be exactly:
-- Rank 1: 500
-- Rank 2: 250
-- Rank 3: 100
+Generate the TOP 3 most popular/obvious survey answers for adults and 17+ teenagers.
+Classic Match Game survey logic: obvious beats clever. These are the hidden studio-audience results, NOT celebrity guesses.
 
-Return JSON:
+Rules:
+- Each answer must be 1-2 words.
+- Answers must fit the blank naturally.
+- The three answers should be distinct.
+- Prize values must be exactly 500, 250, 100.
+
+Return JSON only:
 {
   "topAnswers": [
     {"rank": 1, "answer": "...", "value": 500},
     {"rank": 2, "answer": "...", "value": 250},
     {"rank": 3, "answer": "...", "value": 100}
-  ],
-  "celebAnswers": ["answer for celeb 1", "answer for celeb 2", "answer for celeb 3"]
+  ]
 }`,
-    500, true
-  );
-  const parsed = extractJSON(text);
-  const topAnswers = (Array.isArray(parsed.topAnswers) && parsed.topAnswers.length >= 3 ? parsed.topAnswers : fallback.topAnswers)
-    .slice(0, 3)
-    .map((ta, i) => ({ rank: i + 1, answer: String(ta.answer || fallback.topAnswers[i].answer).split(/\s+/).slice(0,2).join(' '), value: [500,250,100][i] }));
-  let celebAnswers = Array.isArray(parsed.celebAnswers) ? parsed.celebAnswers : [];
-  celebAnswers = celebAnswers.slice(0, 3).map((a, i) => String(a || topAnswers[i % topAnswers.length].answer).split(/\s+/).slice(0,2).join(' '));
-  while (celebAnswers.length < 3) celebAnswers.push(topAnswers[celebAnswers.length % topAnswers.length].answer);
+      350, true
+    );
+    const parsedSurvey = extractJSON(surveyText);
+    if (Array.isArray(parsedSurvey.topAnswers) && parsedSurvey.topAnswers.length >= 3) {
+      topAnswers = parsedSurvey.topAnswers.slice(0, 3).map((ta, i) => ({
+        rank: i + 1,
+        answer: String(ta.answer || fallback.topAnswers[i].answer).split(/\s+/).slice(0,2).join(' '),
+        value: [500,250,100][i]
+      }));
+    }
+  } catch (e) {
+    console.warn('super survey generation failed:', e.message);
+  }
+
+  let celebAnswers = [];
+  try {
+    const celebText = await callLLM(
+      `Super Match celebrity advice. Prompt: "${prompt}"
+
+Celebrities selected by the contestant: ${celebNames.join(', ')}
+
+Generate ONE suggested answer from each celebrity. They are trying to help the contestant guess what a studio audience might have said, but they DO NOT know the survey board.
+
+Rules:
+- 1-2 WORDS max per answer.
+- Answers must fit the blank naturally.
+- Make the suggestions plausible and helpful, but not magically perfect.
+- Avoid making all three celebrities give the same answer.
+- It is okay if one celebrity gives the obvious answer and another gives a plausible second-choice or funny in-character answer.
+- Do NOT mention ranks, money, or survey positions.
+
+Return JSON only: {"celebAnswers": ["answer for celeb 1", "answer for celeb 2", "answer for celeb 3"]}`,
+      300, true
+    );
+    const parsedCelebs = extractJSON(celebText);
+    celebAnswers = Array.isArray(parsedCelebs.celebAnswers) ? parsedCelebs.celebAnswers : [];
+  } catch (e) {
+    console.warn('super celeb suggestion generation failed:', e.message);
+  }
+
+  // Fallback: if celebrity generation fails, give plausible but not perfect suggestions.
+  // Prefer not to hand them the entire board; mix in fallback alternatives and shuffle.
+  const fallbackSuggestions = shuffle([
+    ...(fallback.answers || []),
+    ...(fallback.topAnswers || []).map(a => a.answer),
+    topAnswers[0]?.answer,
+    topAnswers[1]?.answer,
+    topAnswers[2]?.answer
+  ].filter(Boolean));
+
+  celebAnswers = celebAnswers.slice(0, 3).map((a, i) => String(a || fallbackSuggestions[i] || topAnswers[i % topAnswers.length].answer).split(/\s+/).slice(0,2).join(' '));
+  while (celebAnswers.length < 3) celebAnswers.push(String(fallbackSuggestions[celebAnswers.length] || topAnswers[celebAnswers.length % topAnswers.length].answer).split(/\s+/).slice(0,2).join(' '));
+
   return { topAnswers, celebAnswers };
 };
 
@@ -932,6 +986,123 @@ const scoreAnswerAsync = async (playerAnswer, panel, prompt = '') => {
   return results;
 };
 
+
+// ─── AI SOLO-PLAYER HELPERS ───────────────────────────────────
+const isAiContestantSlot = (room, slot) => (room?.aiContestantSlots || []).includes(Number(slot));
+
+const aiContestantAnswer = async (prompt, answerKey = []) => {
+  const key = (answerKey || []).filter(Boolean);
+  if (key.length) {
+    const r = Math.random();
+    if (r < 0.62) return key[0];
+    if (r < 0.84) return key[1] || key[0];
+    return key[2] || key[1] || key[0];
+  }
+  try {
+    const text = await callLLM(
+      `Give ONE short Match Game contestant answer for this prompt. Use 1-2 words only.\nPrompt: "${prompt}"\nReturn JSON: {"answer":"..."}`,
+      80, true
+    );
+    const parsed = extractJSON(text);
+    return String(parsed.answer || 'answer').trim().split(/\s+/).slice(0,2).join(' ');
+  } catch {
+    return 'answer';
+  }
+};
+
+const scheduleAi = (room, kind, delayMs, fn) => {
+  if (!room) return;
+  const key = `${kind}|${room.phase}|${room.round}|${room.turnInRound}|${room.activeSlot}|${room.chosenPrompt || room.superMatchPrompt || room.finalMatchPrompt || ''}`;
+  if (room.aiActionKey === key) return;
+  room.aiActionKey = key;
+  setTimeout(async () => {
+    try {
+      const liveRoom = rooms.get(room.code);
+      if (!liveRoom || liveRoom !== room) return;
+      await fn();
+    } catch (e) {
+      console.error('AI solo action failed:', e);
+      room.phase = 'error';
+      bump(room);
+    }
+  }, delayMs);
+};
+
+const maybeScheduleAiAction = (room) => {
+  if (!room || !isAiContestantSlot(room, room.activeSlot)) return;
+
+  if (room.phase === 'pick_prompt') {
+    scheduleAi(room, 'pickPrompt', 1200, async () => {
+      if (room.phase !== 'pick_prompt' || !isAiContestantSlot(room, room.activeSlot)) return;
+      const choice = Math.random() < 0.5 ? 'A' : 'B';
+      room.chosenPrompt = choice === 'A' ? room.promptA : room.promptB;
+      room.chosenAnswerKey = choice === 'A' ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
+      room.phase = 'answering';
+      bump(room);
+      maybeScheduleAiAction(room);
+    });
+  }
+
+  if (room.phase === 'answering') {
+    scheduleAi(room, 'answerPrompt', 2600, async () => {
+      if (room.phase !== 'answering' || !isAiContestantSlot(room, room.activeSlot) || room.contestantAnswer) return;
+      room.contestantAnswer = await aiContestantAnswer(room.chosenPrompt, room.chosenAnswerKey || []);
+      bump(room);
+      await maybeFinishAnswerPhase(room);
+    });
+  }
+
+  if (room.phase === 'superMatch_pickCelebs') {
+    scheduleAi(room, 'superPick', 1500, async () => {
+      if (room.phase !== 'superMatch_pickCelebs' || !isAiContestantSlot(room, room.activeSlot)) return;
+      room.superMatchCelebIndices = shuffle([0,1,2,3,4,5]).slice(0,3);
+      room.superMatchHumanAnswers = {};
+      const humanSelected = room.superMatchCelebIndices.filter(i => room.panel[i]?.isHuman);
+      if (humanSelected.length) {
+        room.phase = 'superMatch_human_answering';
+        bump(room);
+      } else {
+        await completeSuperMatchGeneration(room);
+      }
+    });
+  }
+
+  if (room.phase === 'superMatch_answering' && !room.superMatchContestantAnswer) {
+    scheduleAi(room, 'superAnswer', 1500, async () => {
+      if (room.phase !== 'superMatch_answering' || !isAiContestantSlot(room, room.activeSlot) || room.superMatchContestantAnswer) return;
+      const choices = (room.superMatchCelebIndices || []).map(i => room.panel[i]?.answer).filter(Boolean);
+      const top = (room.superMatchTopAnswers || []).map(a => a.answer).filter(Boolean);
+      const answer = choices[0] || top[0] || 'answer';
+      await completeSuperMatchContestantAnswer(room, answer);
+    });
+  }
+
+  if (room.phase === 'finalMatch_pickCeleb') {
+    scheduleAi(room, 'finalPick', 1400, async () => {
+      if (room.phase !== 'finalMatch_pickCeleb' || !isAiContestantSlot(room, room.activeSlot)) return;
+      room.finalMatchCelebIndex = Math.floor(Math.random() * (room.panel?.length || 6));
+      room.finalMatchHumanAnswers = {};
+      room.phase = 'finalMatch_answering';
+      bump(room);
+      maybeScheduleAiAction(room);
+    });
+  }
+
+  if (room.phase === 'finalMatch_answering' && !room.finalMatchContestantAnswer) {
+    scheduleAi(room, 'finalAnswer', 1800, async () => {
+      if (room.phase !== 'finalMatch_answering' || !isAiContestantSlot(room, room.activeSlot) || room.finalMatchContestantAnswer) return;
+      room.finalMatchContestantAnswer = await aiContestantAnswer(room.finalMatchPrompt, room.finalMatchAnswerKey || []);
+      const celeb = room.panel[room.finalMatchCelebIndex];
+      if (celeb?.isHuman && !room.finalMatchHumanAnswers?.[room.finalMatchCelebIndex]) {
+        room.phase = 'finalMatch_human_celeb_answering';
+        bump(room);
+      } else {
+        await completeFinalMatchReveal(room);
+      }
+    });
+  }
+};
+
 // ─── API: HEALTH & CONFIG ──────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ ok: true, rooms: rooms.size }));
 app.get('/api/config', (req, res) => res.json({ ttsEnabled: true }));
@@ -952,12 +1123,14 @@ const assignRolesAndStart = async (room) => {
     ...shuffle(ids.filter(id => !prefs[id] || prefs[id] === 'surprise')),
     ...shuffle(ids.filter(id => prefs[id] === 'celebrity')),
   ];
-  const c1 = contestantPool[0], c2 = contestantPool.find(id => id !== c1);
+  const c1 = contestantPool[0];
+  const c2 = contestantPool.find(id => id !== c1) || null;
   room.playerIds = { 1: c1, 2: c2 };
-  room.players = { 1: room.participants[c1], 2: room.participants[c2] };
+  room.players = { 1: room.participants[c1] || 'Player 1', 2: c2 ? room.participants[c2] : 'AI Contestant' };
   room.roles = {};
-  room.roles[c1] = { role: 'contestant', contestantSlot: 1 };
-  room.roles[c2] = { role: 'contestant', contestantSlot: 2 };
+  if (c1) room.roles[c1] = { role: 'contestant', contestantSlot: 1 };
+  if (c2) room.roles[c2] = { role: 'contestant', contestantSlot: 2 };
+  room.aiContestantSlots = c2 ? [] : [2];
 
   const remaining = ids.filter(id => id !== c1 && id !== c2);
   const humanCelebIds = [
@@ -1037,7 +1210,7 @@ app.post('/api/room', async (req, res) => {
   const isDisplay = playerName.trim() === '__display__';
   try {
     const code = makeRoomCode();
-    const maxPlayers = clampInt(playerCount || 2, 2, 8);
+    const maxPlayers = clampInt(playerCount || 2, 1, 8);
     const room = {
       code, version: 1, lastActivity: Date.now(),
       phase: 'lobby',
@@ -1053,6 +1226,8 @@ app.post('/api/room', async (req, res) => {
       activeSlot: null,
       turnInRound: 1,
       players: { 1: null, 2: null },
+      aiContestantSlots: [],
+      aiActionKey: null,
       hasDisplay: isDisplay,
       scores: { 1: 0, 2: 0 },
       pendingScoreDelta: 0,
@@ -1135,6 +1310,7 @@ app.get('/api/room/:code', (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
   room.lastActivity = Date.now();
+  maybeScheduleAiAction(room);
   res.json({ room });
 });
 
@@ -1175,6 +1351,7 @@ const startNewRound = async (room, roundNum) => {
     room.turnInRound = 1;
     room.phase = 'pick_prompt';
     bump(room);
+    maybeScheduleAiAction(room);
   } else {
     // Super Match
     room.chosenPrompt = null;
@@ -1195,6 +1372,7 @@ const startNewRound = async (room, roundNum) => {
     room.superMatchTopRevealIndex = -1;
     room.phase = 'superMatch_pickCelebs';
     bump(room);
+    maybeScheduleAiAction(room);
   }
 };
 
@@ -1293,6 +1471,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     room.matches = [];
     room.phase = 'answering';
     bump(room);
+    maybeScheduleAiAction(room);
     return res.json({ room });
   }
 
@@ -1424,16 +1603,13 @@ app.post('/api/room/:code/supermatch-reveal-next', (req, res) => {
     room.phase = 'superMatch_answering';
   }
   bump(room);
+  maybeScheduleAiAction(room);
   res.json({ room });
 });
 
 // ─── API: SUPER MATCH — CONTESTANT ANSWER ─────────────────────
-app.post('/api/room/:code/supermatch-answer', async (req, res) => {
-  const room = rooms.get(req.params.code.toUpperCase());
-  if (!room) return res.status(404).json({ error: 'Room not found' });
-  const { answer } = req.body;
-  if (!answer?.trim()) return res.status(400).json({ error: 'answer required' });
-  room.superMatchContestantAnswer = answer.trim().slice(0, 50);
+const completeSuperMatchContestantAnswer = async (room, answer) => {
+  room.superMatchContestantAnswer = String(answer || '').trim().slice(0, 50);
 
   // Score against top answers
   const topAnswers = room.superMatchTopAnswers || [];
@@ -1448,6 +1624,14 @@ app.post('/api/room/:code/supermatch-answer', async (req, res) => {
   room.superMatchTopRevealIndex = -1;
   room.phase = winnings > 0 ? 'superMatch_won' : 'superMatch_lost';
   bump(room);
+};
+
+app.post('/api/room/:code/supermatch-answer', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  const { answer } = req.body;
+  if (!answer?.trim()) return res.status(400).json({ error: 'answer required' });
+  await completeSuperMatchContestantAnswer(room, answer);
   res.json({ room });
 });
 
@@ -1490,6 +1674,7 @@ app.post('/api/room/:code/finalmatch-start', async (req, res) => {
     room.finalMatchHumanAnswers = {};
     room.phase = 'finalMatch_pickCeleb';
     bump(room);
+    maybeScheduleAiAction(room);
   } catch(e) {
     console.error('finalmatch start:', e);
     room.phase = 'error';
@@ -1508,6 +1693,7 @@ app.post('/api/room/:code/finalmatch-pick', async (req, res) => {
   room.finalMatchHumanAnswers = {};
   room.phase = 'finalMatch_answering';
   bump(room);
+  maybeScheduleAiAction(room);
   res.json({ room });
 });
 

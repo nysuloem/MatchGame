@@ -384,6 +384,8 @@ export default function MatchGame() {
   const startAsDisplay = async () => {
     setLoading(true); setError('');
     try {
+      // The Start Display click is a user gesture, so use it to prime browser audio before the QR screen appears.
+      try { const ctx = getAudioCtx(); if (ctx?.state === 'suspended') ctx.resume(); } catch {}
       // Create room with a placeholder name for the display device
       const { room: r } = await api.createRoom('__display__', playerCount);
       lastVersionRef.current = r.version;
@@ -418,9 +420,7 @@ export default function MatchGame() {
     <div className="mg-root">
       <div className="mg-card">
         <h1 className="mg-title">The<br/>Match Game</h1>
-        <p className="mg-subtitle">— a family game show for 2–8 players —</p>
-        <div className="mg-stars">★ ★ ★ ★ ★ ★ ★</div>
-
+        <p className="mg-subtitle">— a family game show for 1–8 players —</p>
         {error && <div className="mg-error" onClick={()=>setError('')}>{error}</div>}
 
         {joinFromQr ? (
@@ -458,10 +458,10 @@ export default function MatchGame() {
             {/* TV DISPLAY */}
             <div className="mg-home-section">
               <div className="mg-home-section-title">📺 TV Screen (Laptop)</div>
-              <p className="mg-help">Open this on the laptop everyone can see. Everyone scans the QR code, then the game randomly chooses 2 contestants and makes the rest celebrity panelists.</p>
+              <p className="mg-help">Open this on the laptop everyone can see. Everyone scans the QR code. With 1 player, you play against an AI contestant and the panel is all AI; with 2–8 players, the game randomly chooses 2 contestants and makes the rest celebrity panelists.</p>
               <label className="mg-label">How many people are playing?</label>
               <select className="mg-input" value={playerCount} onChange={e=>setPlayerCount(Number(e.target.value))}>
-                {[2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}</option>)}
+                {[1,2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}</option>)}
               </select>
               <div className="mg-row" style={{marginTop:24}}>
                 <button className="mg-btn secondary" onClick={startAsDisplay} disabled={loading}>
@@ -532,7 +532,7 @@ function DisplayView({ room, roomCode }) {
   const [revealIndex, setRevealIndex] = useState(-1);
   const [coinFlipping, setCoinFlipping] = useState(false);
   const [coinResult, setCoinResult] = useState(null);
-  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [audioUnlocked, setAudioUnlocked] = useState(true);
   const [introIndex, setIntroIndex] = useState(-1);
   const [introComplete, setIntroComplete] = useState(false);
   const [promptReadyFor, setPromptReadyFor] = useState(null);
@@ -615,6 +615,9 @@ function DisplayView({ room, roomCode }) {
       (async () => {
         await speakTTS({ text: `${room.players[room.activeSlot]}, you're moving on to the Super Match!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         await delay(250);
+        await speakTTS({ text: `Time for the Super Match. We polled a recent studio audience and got their best responses to this...`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+        await delay(250);
+        await readGamePrompt(room.superMatchPrompt, roomCode);
         setSuperPromptReady(true);
       })();
     }
@@ -733,9 +736,10 @@ function DisplayView({ room, roomCode }) {
           <div className="mg-display-code">{['lobby','intro'].includes(phase) ? 'Scan QR to join' : ''}</div>
         </div>
         <div className="mg-display-contestant right" style={activeStyle(2)}>
-          <div className={`mg-contestant-symbol ${slotClass(room,2)}`}>{slotSymbol(room,2)||'●'}</div>
+          <div className={`mg-contestant-score-shape ${slotClass(room,2)}`}>
+            <span className="mg-contestant-num">{displayScores[2]}</span>
+          </div>
           <div className="mg-contestant-name">{p2name}</div>
-          <div className="mg-contestant-num">{displayScores[2]}</div>
           {isActive(2) && <div className="mg-your-turn" style={{color:room.triangleSlot===2?'var(--tri-green)':'var(--cir-red)'}}>{p2name}, it's your turn!</div>}
         </div>
       </div>
@@ -792,14 +796,7 @@ function DisplayView({ room, roomCode }) {
         {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room} roomCode={roomCode}/>}
         {['finalMatch_pickCeleb','finalMatch_answering','finalMatch_human_celeb_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
         {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room} roomCode={roomCode}/>}
-        {phase==='gameOver' && (
-          <div className="mg-display-center-msg">
-            <div className="mg-bigsymbol" style={{fontSize:60}}>🎉</div>
-            <h2 style={{fontFamily:'Bowlby One,sans-serif',fontSize:40,color:'var(--orange-deep)',textAlign:'center'}}>
-              {room.finalMatchResult==='win'?`${room.players[room.activeSlot]} wins ${fmt$(room.finalMatchWinnings)}!`:room.superMatchWinnings>0?`${room.players[room.activeSlot]} wins ${fmt$(room.superMatchWinnings)}!`:'Thanks for playing!'}
-            </h2>
-          </div>
-        )}
+        {phase==='gameOver' && <DisplayGameOver room={room} />}
       </div>
     </div>
   );
@@ -827,7 +824,7 @@ function DisplayIntroSpotlight({ room, introIndex }) {
           <div className="mg-intro-sign">{p.signMessage || 'Hi Mom!'}</div>
         </div>
       ) : (
-        <div className="mg-intro-card waiting"><div className="mg-loading">Cue the stars</div></div>
+        <div className="mg-intro-card waiting"><div className="mg-loading">The stars are arriving...</div></div>
       )}
     </div>
   );
@@ -996,6 +993,7 @@ function DisplaySuperMatchResult({ room, roomCode }) {
   const winnings = room.superMatchWinnings;
   const [visibleCount, setVisibleCount] = useState(0);
   const [celebrated, setCelebrated] = useState(false);
+  const [matchedValue, setMatchedValue] = useState(null);
   const ranRef = useRef(false);
 
   useEffect(() => {
@@ -1004,6 +1002,7 @@ function DisplaySuperMatchResult({ room, roomCode }) {
     let cancelled = false;
     (async () => {
       await delay(500);
+      let foundMatch = false;
       for (let i = 0; i < topAnswers.length; i++) {
         if (cancelled) return;
         const ta = topAnswers[i];
@@ -1011,22 +1010,27 @@ function DisplaySuperMatchResult({ room, roomCode }) {
         await delay(450);
         await speakTTS({ text: `For ${fmt$(ta.value)}... ${ta.answer}`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         setVisibleCount(i + 1);
-        const isMatch = quickFuzzyMatch(contestantAnswer, ta.answer);
-        if (isMatch && winnings > 0) {
+        const isMatch = winnings > 0 && ta.value === winnings;
+        if (isMatch) {
+          foundMatch = true;
+          setMatchedValue(ta.value);
           playAudience('win');
           setCelebrated(true);
           await speakTTS({ text: `It's a match! ${room.players[room.activeSlot]} wins ${fmt$(winnings)}!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-          if (!cancelled) {
-            await delay(1800);
-            if (!cancelled) {
-              try { await api.finalMatchStart(roomCode); } catch {}
-            }
+          if (i < topAnswers.length - 1) {
+            await delay(750);
+            await speakTTS({ text: `But let's see the rest of the board!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
           }
-          return;
         } else {
           playAudience(i === topAnswers.length - 1 ? 'groan' : 'applause');
         }
-        await delay(650);
+        await delay(750);
+      }
+      if (!cancelled && foundMatch && winnings > 0) {
+        await delay(1800);
+        if (!cancelled) {
+          try { await api.finalMatchStart(roomCode); } catch {}
+        }
       }
       if (!cancelled && winnings <= 0) {
         await speakTTS({ text: `No match this time.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
@@ -1042,7 +1046,7 @@ function DisplaySuperMatchResult({ room, roomCode }) {
       <p className="mg-status">{room.players[room.activeSlot]} said: <strong>"{contestantAnswer}"</strong></p>
       <div className="mg-top-answers">
         {topAnswers.slice(0, visibleCount).map((ta, i) => {
-          const isMatch = quickFuzzyMatch(contestantAnswer, ta.answer);
+          const isMatch = winnings > 0 && ta.value === winnings;
           return (
             <div key={i} className={`mg-top-answer ${isMatch ? 'matched' : ''}`}>
               <span className="mg-top-answer-value">{fmt$(ta.value)}</span>
@@ -1055,7 +1059,9 @@ function DisplaySuperMatchResult({ room, roomCode }) {
         ? <div className="mg-super-win">
             <div className="mg-bigsymbol" style={{fontSize:72,color:'var(--tri-green)',textShadow:'0 0 24px currentColor'}}>MATCH!</div>
             <div>{fmt$(winnings)}!!!</div>
-            <p className="mg-status" style={{fontSize:20,marginTop:12}}>Moving on to the Final Match...</p>
+            {visibleCount < topAnswers.length
+              ? <p className="mg-status" style={{fontSize:20,marginTop:12}}>Let's see the rest of the board...</p>
+              : <p className="mg-status" style={{fontSize:20,marginTop:12}}>Moving on to the Final Match...</p>}
           </div>
         : visibleCount >= topAnswers.length && winnings <= 0
           ? <p className="mg-status" style={{fontSize:20}}>No match this time.</p>
@@ -1063,6 +1069,50 @@ function DisplaySuperMatchResult({ room, roomCode }) {
     </div>
   );
 }
+
+function DisplayGameOver({ room }) {
+  const ranRef = useRef(false);
+  useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
+    (async () => {
+      await delay(600);
+      playAudience('applause');
+      await speakTTS({
+        text: 'Match Game is a collaboration between Jason Brown, Claude AI, and ChatGPT.',
+        isAnnouncer: true,
+        fallbackProfile: ANNOUNCER_PROFILE,
+      });
+    })();
+  }, []);
+  const headline = room.finalMatchResult==='win'
+    ? `${room.players[room.activeSlot]} wins ${fmt$(room.finalMatchWinnings)}!`
+    : room.superMatchWinnings>0
+      ? `${room.players[room.activeSlot]} wins ${fmt$(room.superMatchWinnings)}!`
+      : 'Thanks for playing!';
+  return (
+    <div className="mg-display-center-msg mg-credits-screen">
+      <div className="mg-bigsymbol" style={{fontSize:60}}>🎉</div>
+      <h2 style={{fontFamily:'Bowlby One,sans-serif',fontSize:40,color:'var(--orange-deep)',textAlign:'center'}}>{headline}</h2>
+      <div className="mg-credit-roll">
+        <div className="mg-credit-content">
+          <p>Match Game</p>
+          <p>A mostly serious production</p>
+          <p>Created by Jason Brown</p>
+          <p>Question chaos by Claude AI</p>
+          <p>Code wrangling by ChatGPT</p>
+          <p>Audience gasps by one tiny synthesizer</p>
+          <p>Wardrobe by Someone's Closet</p>
+          <p>Blue cards supplied by imagination</p>
+          <p>Celebrity handwriting approved by nobody</p>
+          <p>No actual celebrities were harmed</p>
+          <p>Good night, stars!</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function DisplayFinalMatchActive({ room }) {
   return (
