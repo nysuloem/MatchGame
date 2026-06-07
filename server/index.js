@@ -116,6 +116,7 @@ const normalizePromptBlank = (prompt = '') => String(prompt || '')
   .trim();
 
 const blankCount = (prompt = '') => (String(prompt || '').match(/_{3,}/g) || []).length;
+const isDumbDoraPrompt = (prompt = '') => /\bDumb Dora\b/i.test(String(prompt || ''));
 
 const promptIsUsable = (prompt, kind = 'round') => {
   const t = normalizePromptBlank(prompt);
@@ -559,7 +560,7 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
   }));
 };
 
-const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], usedRoundPrompts = []) => {
+const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], usedRoundPrompts = [], allowDumbDora = true) => {
   const availableChars = CHARACTER_ARCHETYPES.filter(c => !usedCharacters.includes(c));
   const shuffled = shuffle(availableChars);
   const charA = shuffled[0] || 'Old Timer Terry';
@@ -570,7 +571,7 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], us
     ...usedPromptSamples('round', 120)
   ];
   const avoidList = localUsed.slice(-80).map(p => `- ${p}`).join('\n');
-  const categories = shuffle(PROMPT_CATEGORIES).slice(0, 6).join(', ');
+  const categories = shuffle(PROMPT_CATEGORIES.filter(c => allowDumbDora || !/dumb/i.test(c))).slice(0, 6).join(', ');
 
   // GenAI should be the engine, but the database/history is still essential as a guardrail:
   // generate fresh prompts, reject repeats/similar prompts, and only fall back to curated prompts if needed.
@@ -583,7 +584,7 @@ IMPORTANT: These must not repeat or closely resemble any prior prompt listed bel
 Avoid prior prompts:\n${avoidList || '(none)'}
 
 Use fresh situations from these areas: ${categories}.
-Include classic Match Game recurring-character styles sometimes, especially Dumb Dora. A valid Dumb Dora prompt should look like: "Dumb Dora is so dumb, she thought a Hoover was a __________." The screen prompt should NOT include the audience callback; the TV host will pause after "Dumb Dora is so dumb" so the audience can yell "How dumb is she?"
+${allowDumbDora ? 'You may include AT MOST ONE Dumb Dora prompt in this pair. A valid Dumb Dora prompt should look like: \"Dumb Dora is so dumb, she thought a Hoover was a __________.\" The screen prompt should NOT include the audience callback; the TV host will pause after \"Dumb Dora is so dumb\" so the audience can yell \"How dumb is she?\"' : 'Do NOT generate a Dumb Dora prompt in this pair; this game has already used that style.'}
 Do NOT use generic "Favourite __________" prompts.
 Do NOT use trivia, niche references, or questions that are too wide open.
 Each prompt needs a "definitive" best answer: not obvious to everyone, but constrained enough that several people might match. Keep the setup to one sentence, usually 10-20 words. Put the blank almost always at the END. Use exactly one blank marker, written as __________. Never write the word blank in the prompt. For Dumb Dora prompts, use exactly this pattern: "Dumb Dora is so dumb, she thought [a thing/phrase] was a __________."
@@ -599,9 +600,14 @@ Return JSON exactly:
         .map(x => ({ ...x, prompt: normalizePromptBlank(x.prompt) }))
         .filter(x => promptIsUsable(x.prompt) && Array.isArray(x.answers) && x.answers.length >= 2);
       const fresh = [];
+      let dumbCountInPair = 0;
       for (const pr of prompts) {
+        const isDumb = isDumbDoraPrompt(pr.prompt);
+        if (isDumb && !allowDumbDora) continue;
+        if (isDumb && dumbCountInPair >= 1) continue;
         if (promptAlreadyUsedOrSimilar('round', pr.prompt, [...localUsed, ...fresh.map(f => f.prompt)])) continue;
         fresh.push(pr);
+        if (isDumb) dumbCountInPair += 1;
       }
       if (fresh.length >= 2) {
         const [a,b] = fresh;
@@ -622,12 +628,17 @@ Return JSON exactly:
   }
 
   // Fallback only: curated bank still exists so the game never crashes if API generation fails.
-  let unused = FALLBACK_ROUND_PROMPTS.filter(p => !promptAlreadyUsedOrSimilar('round', p.prompt, localUsed));
-  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => !localUsed.some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
+  let unused = FALLBACK_ROUND_PROMPTS
+    .filter(p => allowDumbDora || !isDumbDoraPrompt(p.prompt))
+    .filter(p => !promptAlreadyUsedOrSimilar('round', p.prompt, localUsed));
+  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS
+    .filter(p => allowDumbDora || !isDumbDoraPrompt(p.prompt))
+    .filter(p => !localUsed.some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
+  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => allowDumbDora || !isDumbDoraPrompt(p.prompt));
   if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS;
   const pool = shuffle(unused);
   const a = { ...pool[0], prompt: normalizePromptBlank(pool[0].prompt) };
-  const b0 = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
+  const b0 = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt) && !(isDumbDoraPrompt(a.prompt) && isDumbDoraPrompt(p.prompt))) || pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
   const b = { ...b0, prompt: normalizePromptBlank(b0.prompt) };
   markPromptUsed('round', a.prompt);
   markPromptUsed('round', b.prompt);
@@ -1223,6 +1234,61 @@ const assignRolesAndStart = async (room) => {
   bump(room);
 };
 
+
+const resetRoomForPlayAgain = (room) => {
+  const preservedUsedRoundPrompts = room.usedRoundPrompts || [];
+  const preservedUsedSuperPrompts = room.usedSuperPrompts || [];
+  const preservedUsedFinalPrompts = room.usedFinalPrompts || [];
+  room.rolesAssigned = false;
+  room.roles = {};
+  room.playerIds = { 1: null, 2: null };
+  room.round = 0;
+  room.activeSlot = null;
+  room.turnInRound = 1;
+  room.players = { 1: null, 2: null };
+  room.aiContestantSlots = [];
+  room.aiActionKey = null;
+  room.scores = { 1: 0, 2: 0 };
+  room.pendingScoreDelta = 0;
+  room.pendingMatches = [];
+  room.triangleSlot = null;
+  room.cointossWinner = null;
+  room.panel = [];
+  room.round1Matches = { 1: [], 2: [] };
+  room.promptA = null; room.promptB = null; room.chosenPrompt = null;
+  room.usedCharacters = [];
+  room.usedCategories = [];
+  room.usedRoundPrompts = preservedUsedRoundPrompts;
+  room.usedSuperPrompts = preservedUsedSuperPrompts;
+  room.usedFinalPrompts = preservedUsedFinalPrompts;
+  room.dumbDoraUsed = false;
+  room.chosenAnswerKey = [];
+  room.contestantAnswer = null;
+  room.panelAnswers = [];
+  room.humanPanelAnswers = {};
+  room.matches = [];
+  room.superMatchPrompt = null;
+  room.superMatchTopAnswers = null;
+  room.superMatchCelebIndices = [];
+  room.superMatchCelebAnswers = [];
+  room.superMatchRevealIndex = -1;
+  room.superMatchContestantAnswer = null;
+  room.superMatchWinnings = 0;
+  room.superMatchPromptReady = false;
+  room.finalMatchPrompt = null;
+  room.finalMatchAnswerKey = [];
+  room.finalMatchCelebIndex = null;
+  room.finalMatchContestantAnswer = null;
+  room.finalMatchCelebAnswer = null;
+  room.finalMatchHumanAnswers = {};
+  room.finalMatchResult = null;
+  room.finalMatchWinnings = 0;
+  room.finalMatchPromptReady = false;
+  room.phase = 'lobby';
+  room.introCompleted = false;
+  room.introStartedAt = null;
+};
+
 const maybeFinishAnswerPhase = async (room) => {
   if (!room || room.phase !== 'answering' || !room.contestantAnswer) return;
   const inactiveCelebIndices = room.round === 2 ? (room.round1Matches?.[room.activeSlot] || []) : [];
@@ -1296,6 +1362,7 @@ app.post('/api/room', async (req, res) => {
       usedCategories: [],
       usedSuperPrompts: [],
       usedFinalPrompts: [],
+      dumbDoraUsed: false,
       chosenAnswerKey: [],
       contestantAnswer: null,
       panelAnswers: [],
@@ -1399,7 +1466,7 @@ const startNewRound = async (room, roundNum) => {
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
-    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || [], room.usedRoundPrompts || []);
+    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || [], room.usedRoundPrompts || [], !room.dumbDoraUsed);
     room.promptA = promptA;
     room.promptB = promptB;
     room.promptAnswerKeys = { A: answersA, B: answersB };
@@ -1407,6 +1474,7 @@ const startNewRound = async (room, roundNum) => {
     room.usedCharacters.push(charA, charB);
     room.usedCategories = [...(room.usedCategories || []), categoryA, categoryB];
     room.usedRoundPrompts = [...(room.usedRoundPrompts || []), promptA, promptB];
+    if (isDumbDoraPrompt(promptA) || isDumbDoraPrompt(promptB)) room.dumbDoraUsed = true;
 
     // Determine who picks first
     if (room.soloTest) {
@@ -1859,6 +1927,23 @@ app.post('/api/room/:code/finalmatch-done', (req, res) => {
   room.phase = 'gameOver';
   bump(room);
   res.json({ room });
+});
+
+
+app.post('/api/room/:code/play-again', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (!['gameOver','error'].includes(room.phase)) return res.status(400).json({ error: 'Play Again is only available after the game ends' });
+  try {
+    resetRoomForPlayAgain(room);
+    bump(room);
+    res.json({ room });
+    setTimeout(() => assignRolesAndStart(room).catch(e => { console.error('play again:', e); room.phase = 'error'; bump(room); }), 400);
+  } catch (e) {
+    console.error('play again:', e);
+    room.phase = 'error'; bump(room);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── API: TTS ─────────────────────────────────────────────────

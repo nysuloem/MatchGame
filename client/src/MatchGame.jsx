@@ -45,6 +45,7 @@ const api = {
   finalMatchPromptRead:(code) => req(`/api/room/${code}/finalmatch-prompt-read`, { method:'POST' }),
   finalMatchCelebAnswer:(code, slot, answer) => req(`/api/room/${code}/finalmatch-celeb-answer`, { method:'POST', body:{slot,answer} }),
   finalMatchDone:  (code) => req(`/api/room/${code}/finalmatch-done`, { method:'POST' }),
+  playAgain: (code) => req(`/api/room/${code}/play-again`, { method:'POST' }),
   speak: (params) => fetch('/api/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(params) }),
 };
 
@@ -838,7 +839,7 @@ function DisplayView({ room, roomCode }) {
         {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room} roomCode={roomCode}/>}
         {['finalMatch_pickCeleb','finalMatch_answering','finalMatch_human_celeb_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
         {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room} roomCode={roomCode}/>}
-        {phase==='gameOver' && <DisplayGameOver room={room} />}
+        {phase==='gameOver' && <DisplayGameOver room={room} roomCode={roomCode} setRoom={setRoom} />}
       </div>
     </div>
   );
@@ -1113,7 +1114,7 @@ function DisplaySuperMatchResult({ room, roomCode }) {
   );
 }
 
-function DisplayGameOver({ room }) {
+function DisplayGameOver({ room, roomCode, setRoom }) {
   const ranRef = useRef(false);
   useEffect(() => {
     if (ranRef.current) return;
@@ -1134,10 +1135,20 @@ function DisplayGameOver({ room }) {
     : room.superMatchWinnings>0
       ? `${room.players[room.activeSlot]} wins ${fmt$(room.superMatchWinnings)}!`
       : 'Thanks for playing!';
+  const handlePlayAgain = async () => {
+    try {
+      stopCreditsMusic();
+      const { room: updated } = await api.playAgain(roomCode);
+      setRoom?.(updated);
+    } catch (e) {
+      alert(e.message || 'Could not start a new game');
+    }
+  };
   return (
     <div className="mg-display-center-msg mg-credits-screen">
       <div className="mg-bigsymbol" style={{fontSize:60}}>🎉</div>
       <h2 style={{fontFamily:'Bowlby One,sans-serif',fontSize:40,color:'var(--orange-deep)',textAlign:'center'}}>{headline}</h2>
+      <button className="mg-btn" style={{margin:'10px auto 18px', maxWidth:260}} onClick={handlePlayAgain}>Play Again</button>
       <div className="mg-credit-roll">
         <div className="mg-credit-content">
           <p>Match Game</p>
