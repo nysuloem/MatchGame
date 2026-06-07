@@ -132,6 +132,25 @@ const playAudience = (kind = 'applause') => {
 };
 
 let thinkingMusicTimer = null;
+let thinkingMusicAudio = null;
+let introMusicAudio = null;
+const THEME_TRACK = '/audio/match-game-73.mp3';
+const REGULAR_TRACK = '/audio/regular-music.mp3';
+const safePlayAudio = (audio) => audio.play().catch(() => {});
+const fadeAndStop = (audio, ms = 450) => {
+  if (!audio) return;
+  const startVol = audio.volume || 0.01;
+  const steps = 12;
+  let n = 0;
+  const id = setInterval(() => {
+    n += 1;
+    audio.volume = Math.max(0, startVol * (1 - n / steps));
+    if (n >= steps) {
+      clearInterval(id);
+      try { audio.pause(); audio.currentTime = 0; } catch {}
+    }
+  }, Math.max(25, ms / steps));
+};
 const playRetroSting = () => {
   const ctx = getAudioCtx();
   if (!ctx) return;
@@ -142,14 +161,40 @@ const playRetroSting = () => {
     osc.type = 'square';
     osc.frequency.value = freq;
     gain.gain.setValueAtTime(0.0001, now + i * 0.12);
-    gain.gain.exponentialRampToValueAtTime(0.14, now + i * 0.12 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.12, now + i * 0.12 + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.12 + 0.16);
     osc.connect(gain).connect(ctx.destination);
     osc.start(now + i * 0.12);
     osc.stop(now + i * 0.12 + 0.18);
   });
 };
+const startIntroMusic = () => {
+  if (introMusicAudio) return;
+  try {
+    introMusicAudio = new Audio(THEME_TRACK);
+    introMusicAudio.loop = true;
+    introMusicAudio.volume = 0.58;
+    safePlayAudio(introMusicAudio);
+  } catch { playRetroSting(); }
+};
+const stopIntroMusic = () => {
+  if (!introMusicAudio) return;
+  fadeAndStop(introMusicAudio, 650);
+  introMusicAudio = null;
+};
 const startThinkingMusic = () => {
+  if (thinkingMusicAudio || thinkingMusicTimer) return;
+  try {
+    thinkingMusicAudio = new Audio(REGULAR_TRACK);
+    thinkingMusicAudio.loop = true;
+    thinkingMusicAudio.volume = 0.28;
+    thinkingMusicAudio.play().catch(() => {
+      thinkingMusicAudio = null;
+      startSyntheticThinkingMusic();
+    });
+  } catch { startSyntheticThinkingMusic(); }
+};
+const startSyntheticThinkingMusic = () => {
   if (thinkingMusicTimer) return;
   const tick = () => {
     const ctx = getAudioCtx();
@@ -174,6 +219,10 @@ const startThinkingMusic = () => {
 const stopThinkingMusic = () => {
   if (thinkingMusicTimer) clearInterval(thinkingMusicTimer);
   thinkingMusicTimer = null;
+  if (thinkingMusicAudio) {
+    fadeAndStop(thinkingMusicAudio, 350);
+    thinkingMusicAudio = null;
+  }
 };
 const ttsCache = new Map();
 const ttsKey = ({ text, code, slot, isAnnouncer }) => `${code || ''}|${slot ?? ''}|${isAnnouncer ? 'announcer' : 'panel'}|${text}`;
@@ -634,22 +683,26 @@ function DisplayView({ room, roomCode }) {
   const runIntro = async (r) => {
     setIntroComplete(false);
     setIntroIndex(-1);
-    await delay(700);
-    playRetroSting();
-    await speakTTS({ text: "Get ready to match the stars!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     await delay(500);
-    // Host announces each celebrity by name — exactly one card is spotlighted at a time.
+    startIntroMusic();
+    await delay(500);
+    await speakTTS({ text: "Get ready to match the stars!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+    await delay(450);
+    // Classic opening: the announcer introduces exactly one star at a time.
     for (let i = 0; i < r.panel.length; i++) {
       setIntroIndex(i);
-      playRetroSting();
+      await delay(120);
       await speakTTS({ text: r.panel[i].name, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
       playAudience(i % 2 === 0 ? 'applause' : 'cheer');
-      await delay(850);
+      await delay(950);
     }
-    // The intro is complete only after every celebrity has been introduced.
-    setIntroIndex(-1);
-    playAudience('applause');
-    await delay(900);
+    // After the last star, reveal the glowing title logo out of the darkness.
+    setIntroIndex(-2);
+    await delay(250);
+    await speakTTS({ text: "As we get ready to play the big money Match Game!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+    playAudience('cheer');
+    await delay(2200);
+    stopIntroMusic();
     setIntroComplete(true);
     try { await api.introDone(roomCode); } catch {}
   };
@@ -720,9 +773,12 @@ function DisplayView({ room, roomCode }) {
     <div className="mg-root display-mode">
       <div className="mg-display-header">
         <div className="mg-display-contestant left" style={activeStyle(1)}>
-          <div className={`mg-contestant-symbol ${slotClass(room,1)}`}>{slotSymbol(room,1)||'▲'}</div>
-          <div className="mg-contestant-name">{p1name}</div>
-          <div className="mg-contestant-num">{displayScores[1]}</div>
+          <div className="mg-contestant-score-block">
+            <div className={`mg-contestant-score-shape ${slotClass(room,1) || 'tri'}`}>
+              <span className="mg-contestant-num">{displayScores[1]}</span>
+            </div>
+            <div className="mg-contestant-name-side">{p1name}</div>
+          </div>
           {isActive(1) && <div className="mg-your-turn" style={{color:room.triangleSlot===1?'var(--tri-green)':'var(--cir-red)'}}>{p1name}, it's your turn!</div>}
         </div>
         <div className="mg-display-title-center">
@@ -736,10 +792,12 @@ function DisplayView({ room, roomCode }) {
           <div className="mg-display-code">{['lobby','intro'].includes(phase) ? 'Scan QR to join' : ''}</div>
         </div>
         <div className="mg-display-contestant right" style={activeStyle(2)}>
-          <div className={`mg-contestant-score-shape ${slotClass(room,2)}`}>
-            <span className="mg-contestant-num">{displayScores[2]}</span>
+          <div className="mg-contestant-score-block reverse">
+            <div className="mg-contestant-name-side">{p2name}</div>
+            <div className={`mg-contestant-score-shape ${slotClass(room,2) || 'cir'}`}>
+              <span className="mg-contestant-num">{displayScores[2]}</span>
+            </div>
           </div>
-          <div className="mg-contestant-name">{p2name}</div>
           {isActive(2) && <div className="mg-your-turn" style={{color:room.triangleSlot===2?'var(--tri-green)':'var(--cir-red)'}}>{p2name}, it's your turn!</div>}
         </div>
       </div>
@@ -758,13 +816,7 @@ function DisplayView({ room, roomCode }) {
               </>
             )}
             {phase === 'intro' && !introComplete && <DisplayIntroSpotlight room={room} introIndex={introIndex} />}
-            {phase === 'intro' && introComplete && <p className="mg-status" style={{fontSize:22}}>Here we go!</p>}
-            {phase === 'intro' && introComplete && room.panel?.length>0 && (
-              <>
-                <p className="mg-label" style={{textAlign:'center',marginTop:12}}>Tonight's Panel</p>
-                <DisplayPanelGrid room={room} revealIndex={-1}/>
-              </>
-            )}
+            {phase === 'intro' && introComplete && <div className="mg-intro-title-card small"><div className="mg-intro-title-main">MATCH GAME</div></div>}
           </div>
         )}
         {phase==='cointoss' && (
@@ -803,28 +855,24 @@ function DisplayView({ room, roomCode }) {
 }
 
 
-function HostAvatar() {
-  return (
-    <div className="mg-host-figure">
-      <div className="mg-host-head">🎤</div>
-      <div className="mg-host-body">Ray<br/>Geneburn</div>
-    </div>
-  );
-}
-
 function DisplayIntroSpotlight({ room, introIndex }) {
   const p = room?.panel?.[introIndex];
   return (
-    <div className="mg-intro-stage">
-      <div className="mg-intro-marquee">Get Ready to Match the Stars!</div>
-      {p ? (
+    <div className={`mg-intro-stage ${introIndex === -2 ? 'finale' : ''}`}>
+      {introIndex === -2 ? (
+        <div className="mg-big-money-logo-wrap">
+          <img src="/images/match-game-logo.png" className="mg-big-money-logo" alt="Match Game logo" />
+        </div>
+      ) : !p ? (
+        <div className="mg-intro-title-card prelude">
+          <div className="mg-intro-title-main">MATCH GAME</div>
+        </div>
+      ) : (
         <div className="mg-intro-card" key={introIndex}>
-          <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={230} />
+          <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={260} />
           <div className="mg-intro-name">{p.name}</div>
           <div className="mg-intro-sign">{p.signMessage || 'Hi Mom!'}</div>
         </div>
-      ) : (
-        <div className="mg-intro-card waiting"><div className="mg-loading">The stars are arriving...</div></div>
       )}
     </div>
   );
