@@ -1269,6 +1269,7 @@ app.post('/api/room', async (req, res) => {
       superMatchRevealIndex: -1,
       superMatchContestantAnswer: null,
       superMatchWinnings: 0,
+      superMatchPromptReady: false,
       finalMatchPrompt: null,
       finalMatchAnswerKey: [],
       finalMatchCelebIndex: null,
@@ -1277,6 +1278,7 @@ app.post('/api/room', async (req, res) => {
       finalMatchHumanAnswers: {},
       finalMatchResult: null,
       finalMatchWinnings: 0,
+      finalMatchPromptReady: false,
     };
     rooms.set(code, room);
     res.json({ room, slot: null });
@@ -1313,6 +1315,12 @@ app.post('/api/room/:code/intro-done', async (req, res) => {
   if (room.phase !== 'intro') return res.json({ room });
   if (room.introCompleted) return res.json({ room });
   room.introCompleted = true;
+  if (room.soloTest) {
+    res.json({ room });
+    try { await startNewRound(room, 1); }
+    catch(e) { console.error('start solo round 1:', e); room.phase = 'error'; bump(room); }
+    return;
+  }
   room.phase = 'cointoss';
   room.coinTossStartedAt = Date.now();
   bump(room);
@@ -1676,6 +1684,27 @@ app.post('/api/room/:code/supermatch-answer', async (req, res) => {
 });
 
 
+
+app.post('/api/room/:code/supermatch-prompt-read', (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.phase === 'superMatch_pickCelebs') {
+    room.superMatchPromptReady = true;
+    bump(room);
+  }
+  res.json({ room });
+});
+
+app.post('/api/room/:code/finalmatch-prompt-read', (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.phase === 'finalMatch_answering' || room.phase === 'finalMatch_human_celeb_answering') {
+    room.finalMatchPromptReady = true;
+    bump(room);
+  }
+  res.json({ room });
+});
+
 const completeFinalMatchReveal = async (room) => {
   const celeb = room.panel[room.finalMatchCelebIndex];
   let celebAnswer = null;
@@ -1712,6 +1741,7 @@ app.post('/api/room/:code/finalmatch-start', async (req, res) => {
     room.finalMatchContestantAnswer = null;
     room.finalMatchCelebAnswer = null;
     room.finalMatchHumanAnswers = {};
+    room.finalMatchPromptReady = false;
     room.phase = 'finalMatch_pickCeleb';
     bump(room);
     maybeScheduleAiAction(room);
@@ -1731,6 +1761,7 @@ app.post('/api/room/:code/finalmatch-pick', async (req, res) => {
   }
   room.finalMatchCelebIndex = Number(celebIndex);
   room.finalMatchHumanAnswers = {};
+  room.finalMatchPromptReady = false;
   room.phase = 'finalMatch_answering';
   bump(room);
   maybeScheduleAiAction(room);
