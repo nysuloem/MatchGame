@@ -1252,3 +1252,19 @@ body { margin: 0; }
   border-width: 4px;
   border-radius: 14px;
 }
+
+.mg-selfie-preview {
+  margin: 10px 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.mg-selfie-preview img {
+  width: 72px;
+  height: 92px;
+  object-fit: cover;
+  object-position: center top;
+  border: 3px solid var(--brown);
+  border-radius: 8px;
+  background: var(--cream);
+}

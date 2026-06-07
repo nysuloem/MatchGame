@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '6mb' }));
 
 const PORT = process.env.PORT || 3001;
 const LLM_MODEL = process.env.OPENAI_LLM_MODEL || 'gpt-4o-mini';
@@ -654,7 +654,7 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
   return await enrichPanelWithWikipediaImages(normalizedPanel);
 };
 
-const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], usedRoundPrompts = [], allowDumbDora = true) => {
+const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], usedRoundPrompts = [], allowDumbDora = true, roundNum = 1) => {
   const availableChars = CHARACTER_ARCHETYPES.filter(c => !usedCharacters.includes(c));
   const shuffled = shuffle(availableChars);
   const charA = shuffled[0] || 'Old Timer Terry';
@@ -666,13 +666,16 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], us
   ];
   const avoidList = localUsed.slice(-80).map(p => `- ${p}`).join('\n');
   const categories = shuffle(PROMPT_CATEGORIES.filter(c => allowDumbDora || !/dumb/i.test(c))).slice(0, 6).join(', ');
+  const roundSpecificGuidance = roundNum >= 2
+    ? 'ROUND 2 MUST BE MORE MATCHABLE: write prompts with a clearer, more definitive best answer. The #1 answer should be something an ordinary player and at least 4 celebrities could plausibly converge on. Still funny, but less ambiguous than Round 1.'
+    : 'ROUND 1 can allow a little more variety, but it still needs a clear answer neighborhood with one best answer.';
 
   // GenAI should be the engine, but the database/history is still essential as a guardrail:
   // generate fresh prompts, reject repeats/similar prompts, and only fall back to curated prompts if needed.
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       const text = await callLLM(
-        `Generate TWO brand-new Match Game-style fill-in-the-blank prompts for a family game with adults and 17+ teens. Keep each prompt SHORT and punchy.
+        `Generate TWO brand-new Match Game-style fill-in-the-blank prompts for a family game with adults and 17+ teens. Keep each prompt SHORT and punchy. ${roundSpecificGuidance}
 
 IMPORTANT: These must not repeat or closely resemble any prior prompt listed below.
 Avoid prior prompts:\n${avoidList || '(none)'}
@@ -681,10 +684,11 @@ Use fresh situations from these areas: ${categories}.
 ${allowDumbDora ? 'You may include AT MOST ONE Dumb Dora prompt in this pair. A valid Dumb Dora prompt should look like: \"Dumb Dora is so dumb, she thought a Hoover was a __________.\" The screen prompt should NOT include the audience callback; the TV host will pause after \"Dumb Dora is so dumb\" so the audience can yell \"How dumb is she?\"' : 'Do NOT generate a Dumb Dora prompt in this pair; this game has already used that style.'}
 Do NOT use generic "Favourite __________" prompts.
 Do NOT use trivia, niche references, or questions that are too wide open.
-Each prompt needs a "definitive" best answer: not obvious to everyone, but constrained enough that several people might match. Keep the setup to one sentence, usually 10-20 words. Put the blank almost always at the END. Use exactly one blank marker, written as __________. Never write the word blank in the prompt. For Dumb Dora prompts, use exactly this pattern: "Dumb Dora is so dumb, she thought [a thing/phrase] was a __________."
+Avoid prompts where the blank could be almost any object/body part/food/place. Avoid purely random scenarios.
+Each prompt needs a "definitive" best answer: constrained enough that several people might match. The #1 answer must complete the sentence naturally and feel like the obvious survey answer once revealed. Keep the setup to one sentence, usually 10-20 words. Put the blank almost always at the END. Use exactly one blank marker, written as __________. Never write the word blank in the prompt. For Dumb Dora prompts, use exactly this pattern: "Dumb Dora is so dumb, she thought [a thing/phrase] was a __________."
 Light innuendo is okay; keep it TV-PG/PG-13, playful, not explicit.
 
-For each prompt return 3 likely answers in order. The #1 answer should be the answer the panel can cluster around.
+For each prompt return 3 likely answers in order. The #1 answer should be the answer the panel can cluster around. For Round 2, make the #1 answer especially strong and concrete.
 Return JSON exactly:
 {"prompts":[{"prompt":"short setup ending with __________","answers":["best","second","third"],"category":"...","character":"..."},{"prompt":"short setup ending with __________","answers":["best","second","third"],"category":"...","character":"..."}]}`,
         700, true
@@ -750,8 +754,8 @@ const generatePanelAnswers = async (panel, promptText, contestantName, roundNum 
   const key = (answerKey || []).filter(Boolean).slice(0, 3);
   const order = [0,1,2,3,4,5].sort(() => Math.random() - 0.5);
   const funnyIndex = order[0];
-  const topSlots = new Set(order.slice(roundNum === 1 ? 1 : 0, roundNum === 1 ? 3 : 4));
-  const alternateSlots = new Set(order.slice(roundNum === 1 ? 3 : 4, roundNum === 1 ? 5 : 5));
+  const topSlots = new Set(order.slice(roundNum === 1 ? 1 : 0, roundNum === 1 ? 3 : 5));
+  const alternateSlots = new Set(order.slice(roundNum === 1 ? 3 : 5, roundNum === 1 ? 5 : 6));
 
   const text = await callLLM(
     `You are writing celebrity panel answers for Match Game.
@@ -772,7 +776,7 @@ ANSWER RULES:
 - Use simple concrete words, not explanations.
 - The answer must fit the blank naturally when read in the prompt.
 - Round 1: answers may vary, but they must stay in the same answer neighborhood. About 2 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, 1 should give a plausible in-character answer, and 1 should give a funny answer.
-- Round 2: increase matching strongly. At least 4 eligible celebrities should use the #1 answer or an obvious synonym. One celebrity may use #2/#3. One may be funny/adult-innuendo-based, but still plausibly matchable.
+- Round 2: make matching VERY likely. At least 5 eligible celebrities should use the #1 answer or a very close variant. If there is a funny/adult-innuendo answer, it should still usually be the #1 answer with a playful adjective, not a totally different answer.
 - The funny answer should be a quick laugh. Lean into classic Match Game double-entendre and adult innuendo when the prompt allows it, but keep it non-explicit and TV-PG/PG-13.
 - Do NOT make the same celebrity type the oddball every time; follow the designated funny position.
 - Do NOT make every celebrity different. That ruins the game.
@@ -1334,7 +1338,7 @@ const assignRolesAndStart = async (room) => {
       signMessage: room.participantMessages?.[pid] || randomSign(),
       isHuman: true,
       playerId: pid,
-      imageUrl: null,
+      imageUrl: room.participantPhotos?.[pid] || null,
       imageTitle: null,
       imagePageUrl: null,
       imageSource: null,
@@ -1464,6 +1468,7 @@ app.post('/api/room', async (req, res) => {
       participants: {},
       participantMessages: {},
       participantPreferences: {},
+      participantPhotos: {},
       nextParticipantId: 1,
       rolesAssigned: false,
       roles: {},
@@ -1524,7 +1529,7 @@ app.post('/api/room', async (req, res) => {
 app.post('/api/room/:code/join', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'No room with that code' });
-  const { playerName, signMessage, rolePreference } = req.body;
+  const { playerName, signMessage, rolePreference, selfieData } = req.body;
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
   if (room.rolesAssigned) return res.status(409).json({ error: 'Game already started' });
   if (Object.keys(room.participants || {}).length >= room.maxPlayers) return res.status(409).json({ error: 'Room is full' });
@@ -1534,6 +1539,11 @@ app.post('/api/room/:code/join', async (req, res) => {
   room.participantMessages[slot] = String(signMessage || '').trim().slice(0, 32) || randomSign();
   room.participantPreferences = room.participantPreferences || {};
   room.participantPreferences[slot] = ['contestant','celebrity','surprise'].includes(rolePreference) ? rolePreference : 'surprise';
+  room.participantPhotos = room.participantPhotos || {};
+  const photo = String(selfieData || '');
+  if (/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(photo) && photo.length < 5_000_000) {
+    room.participantPhotos[slot] = photo;
+  }
   bump(room);
   res.json({ room, slot });
   if (Object.keys(room.participants).length >= room.maxPlayers) {
@@ -1593,7 +1603,7 @@ const startNewRound = async (room, roundNum) => {
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
-    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || [], room.usedRoundPrompts || [], !room.dumbDoraUsed);
+    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || [], room.usedRoundPrompts || [], !room.dumbDoraUsed, roundNum);
     room.promptA = promptA;
     room.promptB = promptB;
     room.promptAnswerKeys = { A: answersA, B: answersB };
@@ -2047,6 +2057,16 @@ app.post('/api/room/:code/finalmatch-celeb-answer', async (req, res) => {
     try { await completeFinalMatchReveal(room); }
     catch(e) { console.error('finalmatch human celeb answer:', e); room.phase = 'error'; bump(room); }
   }
+});
+
+
+app.post('/api/room/:code/supermatch-lost-done', (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.phase !== 'superMatch_lost') return res.json({ room });
+  room.phase = 'gameOver';
+  bump(room);
+  res.json({ room });
 });
 
 app.post('/api/room/:code/finalmatch-done', (req, res) => {

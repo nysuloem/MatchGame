@@ -28,7 +28,7 @@ const req = async (path, opts = {}) => {
 
 const api = {
   createRoom:   (playerName, playerCount=2, soloTest=false) => req('/api/room', { method:'POST', body:{playerName, playerCount, soloTest} }),
-  joinRoom:     (code, playerName, signMessage='', rolePreference='surprise') => req(`/api/room/${code}/join`, { method:'POST', body:{playerName, signMessage, rolePreference} }),
+  joinRoom:     (code, playerName, signMessage='', rolePreference='surprise', selfieData='') => req(`/api/room/${code}/join`, { method:'POST', body:{playerName, signMessage, rolePreference, selfieData} }),
   getRoom:      (code) => req(`/api/room/${code}`),
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
   submitAnswer: (code, slot, answer) => req(`/api/room/${code}/answer`, { method:'POST', body:{slot,answer} }),
@@ -45,6 +45,7 @@ const api = {
   finalMatchPromptRead:(code) => req(`/api/room/${code}/finalmatch-prompt-read`, { method:'POST' }),
   finalMatchCelebAnswer:(code, slot, answer) => req(`/api/room/${code}/finalmatch-celeb-answer`, { method:'POST', body:{slot,answer} }),
   finalMatchDone:  (code) => req(`/api/room/${code}/finalmatch-done`, { method:'POST' }),
+  superMatchLostDone: (code) => req(`/api/room/${code}/supermatch-lost-done`, { method:'POST' }),
   playAgain: (code) => req(`/api/room/${code}/play-again`, { method:'POST' }),
   speak: (params) => fetch('/api/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(params) }),
 };
@@ -329,6 +330,7 @@ export default function MatchGame() {
   const [playerName, setPlayerName] = useState('');
   const [signMessage, setSignMessage] = useState('');
   const [rolePreference, setRolePreference] = useState('surprise');
+  const [selfieData, setSelfieData] = useState('');
   const [playerSlot, setPlayerSlot] = useState(null);
   const [room, setRoom] = useState(null);
   const [error, setError] = useState('');
@@ -390,6 +392,26 @@ export default function MatchGame() {
     setLoading(false);
   };
 
+  const handleSelfieFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxSide = 520;
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        setSelfieData(canvas.toDataURL('image/jpeg', 0.78));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const joinAsContestant = async () => {
     if (!playerName.trim()) { setError('Enter your name'); return; }
     if (roomCode.length !== 4) { setError('Enter the 4-letter room code'); return; }
@@ -397,7 +419,7 @@ export default function MatchGame() {
     try {
       const code = roomCode.toUpperCase();
       // Slot 1 is reserved for display — join as slot 2 or 3
-      const { room: r, slot } = await api.joinRoom(code, playerName.trim(), signMessage.trim(), rolePreference);
+      const { room: r, slot } = await api.joinRoom(code, playerName.trim(), signMessage.trim(), rolePreference, selfieData);
       setRoom(r); setPlayerSlot(slot);
       lastVersionRef.current = r.version;
       setRoomCode(code);
@@ -436,6 +458,20 @@ export default function MatchGame() {
                 <option value="contestant">I'd rather be a contestant</option>
                 <option value="celebrity">I'd rather be a celebrity</option>
               </select>
+              <label className="mg-label">Optional selfie for the panel</label>
+              <input className="mg-input" type="file" accept="image/*" capture="user"
+                onChange={e=>handleSelfieFile(e.target.files?.[0])} />
+              {selfieData && <div className="mg-selfie-preview">
+                <img src={selfieData} alt="Selfie preview" />
+                <button className="mg-linkbtn" type="button" onClick={()=>setSelfieData('')}>Remove selfie</button>
+              </div>}
+              <label className="mg-label">Optional selfie for the panel</label>
+              <input className="mg-input" type="file" accept="image/*" capture="user"
+                onChange={e=>handleSelfieFile(e.target.files?.[0])} />
+              {selfieData && <div className="mg-selfie-preview">
+                <img src={selfieData} alt="Selfie preview" />
+                <button className="mg-linkbtn" type="button" onClick={()=>setSelfieData('')}>Remove selfie</button>
+              </div>}
               <div className="mg-row">
                 <button className="mg-btn" onClick={joinAsContestant}
                   disabled={loading || !playerName.trim() || roomCode.length !== 4}>
@@ -1105,7 +1141,7 @@ function DisplaySuperMatchResult({ room, roomCode }) {
           fallbackProfile: { rate: 1.03, pitch: 1.15 },
         });
         await delay(1600);
-        if (!cancelled) { try { await api.finalMatchDone(roomCode); } catch {} }
+        if (!cancelled) { try { await api.superMatchLostDone(roomCode); } catch { try { await api.finalMatchDone(roomCode); } catch {} } }
       }
     })();
     return () => { cancelled = true; };
