@@ -47,6 +47,16 @@ const bump = (room) => { room.version++; room.lastActivity = Date.now(); return 
 const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
 const clampInt = (n, min, max) => Math.max(min, Math.min(max, Number.parseInt(n, 10) || min));
 
+const normalizePromptKey = (prompt) => String(prompt || '')
+  .toLowerCase()
+  .replace(/[“”]/g, '"')
+  .replace(/[’]/g, "'")
+  .replace(/\s+/g, ' ')
+  .trim();
+// In-memory no-repeat database for the current server process. Each room also tracks
+// its own used prompts so a family play-through never sees an exact repeat.
+const GLOBAL_USED_ROUND_PROMPTS = new Set();
+
 
 // ─── LLM HELPERS ──────────────────────────────────────────────
 const callLLM = async (prompt, maxTokens = 1200, jsonMode = false) => {
@@ -298,88 +308,39 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
   }));
 };
 
-const generateRoundPrompts = async (usedCharacters = [], usedCategories = []) => {
+const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], usedRoundPrompts = []) => {
   const availableChars = CHARACTER_ARCHETYPES.filter(c => !usedCharacters.includes(c));
-  const shuffled = availableChars.sort(() => Math.random() - 0.5);
+  const shuffled = shuffle(availableChars);
   const charA = shuffled[0] || 'Old Timer Terry';
   const charB = shuffled[1] || 'Newcomer Nick';
-  const availableCategories = PROMPT_CATEGORIES.filter(c => !usedCategories.includes(c));
-  const cats = (availableCategories.length ? availableCategories : PROMPT_CATEGORIES).sort(() => Math.random() - 0.5).slice(0, 2);
-  const seed = Math.random().toString(36).slice(2, 8);
-  const usedPromptSet = new Set((usedCategories || []).filter(x => String(x).startsWith('PROMPT:')).map(x => String(x).slice(7).toLowerCase()));
-  // Most family playtests work better with a curated Match Game bank than with fully free-form questions.
-  // Use the LLM only some of the time; otherwise draw from no-repeat curated prompts.
-  if (Math.random() < 0.65) {
-    const unused = FALLBACK_ROUND_PROMPTS.filter(p => !usedPromptSet.has(p.prompt.toLowerCase()));
-    const pool = unused.length >= 2 ? shuffle(unused) : shuffle(FALLBACK_ROUND_PROMPTS);
-    return {
-      promptA: pool[0].prompt, promptB: pool[1].prompt,
-      answersA: pool[0].answers, answersB: pool[1].answers,
-      categoryA: 'PROMPT:' + pool[0].prompt, categoryB: 'PROMPT:' + pool[1].prompt,
-      charA: pool[0].prompt.match(/^([^'’]+)'/)?.[1] || charA,
-      charB: pool[1].prompt.match(/^([^'’]+)'/)?.[1] || charB,
-    };
-  }
 
-  const text = await callLLM(
-    `Generate exactly 2 Match Game fill-in-the-blank prompts with "definitive" answers.
+  const roomUsed = new Set([
+    ...(usedRoundPrompts || []),
+    ...(usedCategories || []).filter(x => String(x).startsWith('PROMPT:')).map(x => String(x).slice(7))
+  ].map(normalizePromptKey));
 
-Use character names "${charA}" and "${charB}" — one per prompt.
-Use two DIFFERENT comedy categories: "${cats[0]}" and "${cats[1]}".
-Variety seed: ${seed}
+  // Strong no-repeat rule: first avoid all prompts used in this room and this server session.
+  let unused = FALLBACK_ROUND_PROMPTS.filter(p => !roomUsed.has(normalizePromptKey(p.prompt)) && !GLOBAL_USED_ROUND_PROMPTS.has(normalizePromptKey(p.prompt)));
+  // If the global pool is getting exhausted, still protect the current room from repeats.
+  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => !roomUsed.has(normalizePromptKey(p.prompt)));
+  // Only after the entire curated bank has been used in the room do we allow reuse.
+  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS;
 
-VERY IMPORTANT: "DEFINITIVE" DOES NOT MEAN BORINGLY OBVIOUS.
-A great prompt should make players think, "Oh, there are a few possibilities, but one answer is clearly the Match Game answer."
-The blank should NOT be wide open. The top 3 likely answers should be in the same semantic neighborhood.
+  const pool = shuffle(unused);
+  const a = pool[0];
+  const b = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
+  GLOBAL_USED_ROUND_PROMPTS.add(normalizePromptKey(a.prompt));
+  GLOBAL_USED_ROUND_PROMPTS.add(normalizePromptKey(b.prompt));
 
-CRITICAL OUTPUT REQUIREMENT:
-For each prompt, include an "answers" array containing the 3 most likely short answers that normal contestants would give, ordered by likelihood.
-Also include a "definitiveScore" from 1-10. Only return prompts scoring 8-10.
-
-PROMPT RULES:
-- The top answer must be concrete and easy to imagine.
-- The #2/#3 answers should be plausible alternatives, not totally different interpretations.
-- The setup should be funny, classic Match Game-ish, and family 17+/PG-13.
-- Light innuendo is welcome; no explicit sexual content, slurs, or cruelty.
-- Avoid very broad blanks like "something", "stuff", "thing", or "place".
-- Avoid clues where almost any noun could fit.
-- Avoid answers that create awkward redundant phrases.
-- 10-22 words per prompt.
-- Answers must be 1-2 words each.
-
-GOOD DEFINITIVE EXAMPLES:
-- "Grandma Ethel's dating profile said she wanted a man with a big ___." answers: wallet, heart, truck
-- "At the office party, Steve accidentally photocopied his ___." answers: butt, face, hand
-- "Rookie Randy got nervous at the gym and dropped a ___ on his foot." answers: weight, dumbbell, barbell
-- "Tiny Tina's phone autocorrected 'love you' to 'send ___." answers: money, cash, pizza
-
-BAD WIDE-OPEN EXAMPLES:
-- "Dumb Dave found a ___ in his kitchen." Too many answers.
-- "The teacher brought a ___ to class." Too many answers.
-- "On vacation, Linda wanted a ___." Too broad.
-
-Return JSON exactly with keys: promptA, answersA, definitiveScoreA, categoryA, promptB, answersB, definitiveScoreB, categoryB, charA, charB`,
-    900, true
-  );
-  const parsed = extractJSON(text);
-  const fallbackA = FALLBACK_ROUND_PROMPTS[Math.floor(Math.random() * FALLBACK_ROUND_PROMPTS.length)];
-  const fallbackB = FALLBACK_ROUND_PROMPTS.filter(p => p.prompt !== fallbackA.prompt)[Math.floor(Math.random() * Math.max(1, FALLBACK_ROUND_PROMPTS.length - 1))] || fallbackA;
-  const cleanAnswers = (arr, fb) => (Array.isArray(arr) ? arr : fb.answers).map(a => String(a || '').trim()).filter(Boolean).slice(0, 3);
-  const scoreA = Number(parsed.definitiveScoreA || 0);
-  const scoreB = Number(parsed.definitiveScoreB || 0);
-  const validPrompt = (prompt, answers, score) => typeof prompt === 'string' && prompt.includes('___') && answers.length >= 2 && score >= 7;
-  const answersA = cleanAnswers(parsed.answersA, fallbackA);
-  const answersB = cleanAnswers(parsed.answersB, fallbackB);
   return {
-    promptA: validPrompt(parsed.promptA, answersA, scoreA) ? parsed.promptA : fallbackA.prompt,
-    promptB: validPrompt(parsed.promptB, answersB, scoreB) ? parsed.promptB : fallbackB.prompt,
-    answersA: validPrompt(parsed.promptA, answersA, scoreA) ? answersA : fallbackA.answers,
-    answersB: validPrompt(parsed.promptB, answersB, scoreB) ? answersB : fallbackB.answers,
-    categoryA: parsed.categoryA || fallbackA.category,
-    categoryB: parsed.categoryB || fallbackB.category,
-    charA, charB,
+    promptA: a.prompt, promptB: b.prompt,
+    answersA: a.answers, answersB: b.answers,
+    categoryA: 'PROMPT:' + a.prompt, categoryB: 'PROMPT:' + b.prompt,
+    charA: a.prompt.match(/^([^'’]+)'/)?.[1] || charA,
+    charB: b.prompt.match(/^([^'’]+)'/)?.[1] || charB,
   };
 };
+
 
 const generatePanelAnswers = async (panel, promptText, contestantName, roundNum = 1, answerKey = []) => {
   const panelStr = panel.map((p, i) => `${i+1}. ${p.name} (${p.tag}; style=${p.answerStyle || 'obvious'}; matchBias=${p.matchBias ?? 0.8})`).join('\n');
@@ -812,13 +773,14 @@ const startNewRound = async (room, roundNum) => {
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
-    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || []);
+    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || [], room.usedRoundPrompts || []);
     room.promptA = promptA;
     room.promptB = promptB;
     room.promptAnswerKeys = { A: answersA, B: answersB };
     room.chosenAnswerKey = [];
     room.usedCharacters.push(charA, charB);
-    room.usedCategories = [...(room.usedCategories || []), categoryA, categoryB].slice(-10);
+    room.usedCategories = [...(room.usedCategories || []), categoryA, categoryB];
+    room.usedRoundPrompts = [...(room.usedRoundPrompts || []), promptA, promptB];
 
     // Determine who picks first
     if (roundNum === 1) {

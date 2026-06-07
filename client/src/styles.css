@@ -978,3 +978,47 @@ body { margin: 0; }
   line-height: 1.05;
   text-align: center;
 }
+
+/* ── v13: blue handwritten answer-card vibe ───────── */
+.mg-panelist-answer.blue-card {
+  background: #bfefff;
+  border: 2px solid var(--brown);
+  box-shadow: 2px 2px 0 rgba(43,24,16,0.6);
+  color: #1d3f78;
+  width: 94%;
+  min-height: clamp(32px, 5vh, 54px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(4px, 0.8vh, 8px) clamp(8px, 1.2vw, 14px);
+  margin: clamp(3px, 0.6vh, 6px) auto 0;
+  transform: rotate(-1.3deg);
+  letter-spacing: 0.02em;
+}
+.mg-panelist-answer.hand-0 { font-family: "Comic Sans MS", "Bradley Hand", cursive; }
+.mg-panelist-answer.hand-1 { font-family: "Brush Script MT", "Segoe Script", cursive; }
+.mg-panelist-answer.hand-2 { font-family: "Marker Felt", "Comic Sans MS", cursive; }
+.mg-panelist-answer.hand-3 { font-family: "Segoe Print", "Comic Sans MS", cursive; }
+.mg-panelist-answer.hand-4 { font-family: "Lucida Handwriting", "Brush Script MT", cursive; }
+.mg-panelist-answer.hand-5 { font-family: "Bradley Hand", "Segoe Print", cursive; }
+.mg-panelist:nth-child(even) .mg-panelist-answer.blue-card { transform: rotate(1.2deg); }
+.mg-root.display-mode .mg-panelist-answer.blue-card {
+  font-size: clamp(18px, 3.0vh, 32px);
+  line-height: 1.0;
+}
+
+/* Make the panel sketches fill their cards better while preserving the fullscreen fit. */
+.mg-root.display-mode .mg-panelist svg {
+  width: clamp(86px, 14.5vh, 146px) !important;
+  height: clamp(86px, 14.5vh, 146px) !important;
+}
+@media (max-height: 760px) {
+  .mg-root.display-mode .mg-panelist svg {
+    width: clamp(68px, 11.2vh, 104px) !important;
+    height: clamp(68px, 11.2vh, 104px) !important;
+  }
+  .mg-root.display-mode .mg-panelist-answer.blue-card {
+    min-height: clamp(28px, 4.1vh, 42px);
+    font-size: clamp(16px, 2.45vh, 24px);
+  }
+}

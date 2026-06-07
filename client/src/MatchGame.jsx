@@ -559,11 +559,10 @@ function DisplayView({ room, roomCode }) {
       await speakTTS({ text: r.panel[i].name, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
       await delay(850);
     }
-    await delay(500);
-    setIntroIndex(r.panel.length);
+    // The intro is complete only after every celebrity has been introduced.
+    setIntroIndex(-1);
     playAudience('applause');
-    await speakTTS({ text: "And now, here's the host of Match Game... Ray Geneburn!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-    await delay(1400);
+    await delay(900);
     setIntroComplete(true);
     try { await api.introDone(roomCode); } catch {}
   };
@@ -733,20 +732,13 @@ function HostAvatar() {
 }
 
 function DisplayIntroSpotlight({ room, introIndex }) {
-  const isHost = introIndex >= (room?.panel?.length || 0) && introIndex >= 0;
   const p = room?.panel?.[introIndex];
   return (
     <div className="mg-intro-stage">
       <div className="mg-intro-marquee">Get Ready to Match the Stars!</div>
-      {isHost ? (
-        <div className="mg-intro-card host" key="host">
-          <div className="mg-curtain-wrap"><div className="mg-curtain left"></div><div className="mg-curtain right"></div><HostAvatar /></div>
-          <div className="mg-intro-name">Ray Geneburn</div>
-          <div className="mg-intro-sign">Let's match!</div>
-        </div>
-      ) : p ? (
+      {p ? (
         <div className="mg-intro-card" key={introIndex}>
-          <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={190} />
+          <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={230} />
           <div className="mg-intro-name">{p.name}</div>
           <div className="mg-intro-sign">{p.signMessage || 'Hi Mom!'}</div>
         </div>
@@ -756,6 +748,7 @@ function DisplayIntroSpotlight({ room, introIndex }) {
     </div>
   );
 }
+
 
 function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) {
   const activeIsTriangle = room?.activeSlot === room?.triangleSlot;
@@ -783,7 +776,7 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) 
             <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={100} />
             <div className="mg-panelist-name">{p.name}</div>
             <div className="mg-panelist-tag">{p.signMessage || 'Hi Mom!'}</div>
-            <div className={`mg-panelist-answer ${shown ? '' : 'blank'}`}>
+            <div className={`mg-panelist-answer hand-${i % 6} ${shown ? 'blue-card' : 'blank'}`}>
               {shown ? (p.answer || (prelit ? 'Matched' : '')) : ''}
             </div>
             <div className="mg-symbol-row">
@@ -1115,14 +1108,14 @@ function PhoneView({ room, roomCode, playerSlot }) {
   // Reset submitted flag when phase changes
   useEffect(() => {
     if (!room) return;
-    const phase = room.phase;
-    if (phase !== prevPhaseRef.current) {
-      prevPhaseRef.current = phase;
+    const key = `${room.phase}|${room.round}|${room.turnInRound}|${room.activeSlot}|${room.chosenPrompt || ''}|${room.superMatchPrompt || ''}|${room.finalMatchPrompt || ''}`;
+    if (key !== prevPhaseRef.current) {
+      prevPhaseRef.current = key;
       setSubmitted(false);
       setMyAnswer('');
       setSelectedCelebs([]);
     }
-  }, [room?.phase]);
+  }, [room?.phase, room?.round, room?.turnInRound, room?.activeSlot, room?.chosenPrompt, room?.superMatchPrompt, room?.finalMatchPrompt]);
 
   if (!room) return <PhoneWaiting />;
 
@@ -1253,7 +1246,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
         {/* Pick prompt — only for the active contestant */}
         {phase === 'pick_prompt' && (
           <div className="mg-phone-body">
-            {isMyTurn && !submitted ? (
+            {isMyTurn && !room.contestantAnswer ? (
               <>
                 <p className="mg-status" style={{fontSize:18}}>Choose your question:</p>
                 <div className="mg-row" style={{flexDirection:'column', gap:16, marginTop:24}}>
@@ -1275,7 +1268,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
         {/* Answering */}
         {phase === 'answering' && (
           <div className="mg-phone-body">
-            {isMyTurn && !submitted ? (
+            {isMyTurn && !room.contestantAnswer ? (
               <>
                 <p className="mg-status" style={{fontSize:18,marginBottom:8}}>
                   Fill in the blank:
@@ -1292,7 +1285,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
                 </div>
                 <p className="mg-help" style={{marginTop:12}}>Listen to the TV for the question!</p>
               </>
-            ) : isHumanCeleb && room.panel?.[celebIndex] && !(room.round === 2 && (room.round1Matches?.[room.activeSlot] || []).includes(celebIndex)) && !room.humanPanelAnswers?.[celebIndex] && !submitted ? (
+            ) : isHumanCeleb && room.panel?.[celebIndex] && !(room.round === 2 && (room.round1Matches?.[room.activeSlot] || []).includes(celebIndex)) && !room.humanPanelAnswers?.[celebIndex] ? (
               <>
                 <p className="mg-status" style={{fontSize:18,marginBottom:8}}>
                   You are a celebrity panelist. Write your answer before the contestant is revealed:
