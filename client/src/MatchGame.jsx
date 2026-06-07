@@ -28,7 +28,7 @@ const req = async (path, opts = {}) => {
 
 const api = {
   createRoom:   (playerName, playerCount=2) => req('/api/room', { method:'POST', body:{playerName, playerCount} }),
-  joinRoom:     (code, playerName, signMessage='') => req(`/api/room/${code}/join`, { method:'POST', body:{playerName, signMessage} }),
+  joinRoom:     (code, playerName, signMessage='', rolePreference='surprise') => req(`/api/room/${code}/join`, { method:'POST', body:{playerName, signMessage, rolePreference} }),
   getRoom:      (code) => req(`/api/room/${code}`),
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
   submitAnswer: (code, slot, answer) => req(`/api/room/${code}/answer`, { method:'POST', body:{slot,answer} }),
@@ -41,6 +41,7 @@ const api = {
   finalMatchStart: (code) => req(`/api/room/${code}/finalmatch-start`, { method:'POST' }),
   finalMatchPick:  (code, celebIndex) => req(`/api/room/${code}/finalmatch-pick`, { method:'POST', body:{celebIndex} }),
   finalMatchAnswer:(code, answer) => req(`/api/room/${code}/finalmatch-answer`, { method:'POST', body:{answer} }),
+  finalMatchCelebAnswer:(code, slot, answer) => req(`/api/room/${code}/finalmatch-celeb-answer`, { method:'POST', body:{slot,answer} }),
   finalMatchDone:  (code) => req(`/api/room/${code}/finalmatch-done`, { method:'POST' }),
   speak: (params) => fetch('/api/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(params) }),
 };
@@ -254,6 +255,7 @@ const PHASE_LABELS = {
   finalMatch_pickCeleb: 'Final Match — choose one celebrity!',
   finalMatch_answering: 'Final Match — writing answers…',
   finalMatch_generating_celeb: 'The celebrity is thinking…',
+  finalMatch_human_celeb_answering: 'Final Match — celebrity is writing…',
   finalMatch_reveal: 'Final Match Reveal!',
   gameOver: 'Game Over!',
   error: 'Something went wrong.',
@@ -265,6 +267,7 @@ export default function MatchGame() {
   const [roomCode, setRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
   const [signMessage, setSignMessage] = useState('');
+  const [rolePreference, setRolePreference] = useState('surprise');
   const [playerSlot, setPlayerSlot] = useState(null);
   const [room, setRoom] = useState(null);
   const [error, setError] = useState('');
@@ -330,7 +333,7 @@ export default function MatchGame() {
     try {
       const code = roomCode.toUpperCase();
       // Slot 1 is reserved for display — join as slot 2 or 3
-      const { room: r, slot } = await api.joinRoom(code, playerName.trim(), signMessage.trim());
+      const { room: r, slot } = await api.joinRoom(code, playerName.trim(), signMessage.trim(), rolePreference);
       setRoom(r); setPlayerSlot(slot);
       lastVersionRef.current = r.version;
       setRoomCode(code);
@@ -365,6 +368,12 @@ export default function MatchGame() {
               <input className="mg-input" value={signMessage}
                 onChange={e=>setSignMessage(e.target.value)}
                 placeholder="e.g. Hi Mom!" maxLength={32} />
+              <label className="mg-label">What would you prefer?</label>
+              <select className="mg-input" value={rolePreference} onChange={e=>setRolePreference(e.target.value)}>
+                <option value="surprise">Surprise me</option>
+                <option value="contestant">I'd rather be a contestant</option>
+                <option value="celebrity">I'd rather be a celebrity</option>
+              </select>
               <div className="mg-row">
                 <button className="mg-btn" onClick={joinAsContestant}
                   disabled={loading || !playerName.trim() || roomCode.length !== 4}>
@@ -407,6 +416,12 @@ export default function MatchGame() {
               <input className="mg-input" value={signMessage}
                 onChange={e=>setSignMessage(e.target.value)}
                 placeholder="e.g. Hi Mom!" maxLength={32} />
+              <label className="mg-label">What would you prefer?</label>
+              <select className="mg-input" value={rolePreference} onChange={e=>setRolePreference(e.target.value)}>
+                <option value="surprise">Surprise me</option>
+                <option value="contestant">I'd rather be a contestant</option>
+                <option value="celebrity">I'd rather be a celebrity</option>
+              </select>
               <label className="mg-label">Room Code</label>
               <input className="mg-input big" value={roomCode}
                 onChange={e=>setRoomCode(e.target.value.toUpperCase().slice(0,4))}
@@ -706,7 +721,7 @@ function DisplayView({ room, roomCode }) {
         {phase==='superMatch_revealing' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
         {phase==='superMatch_answering' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
         {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room} roomCode={roomCode}/>}
-        {['finalMatch_pickCeleb','finalMatch_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
+        {['finalMatch_pickCeleb','finalMatch_answering','finalMatch_human_celeb_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
         {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room} roomCode={roomCode}/>}
         {phase==='gameOver' && (
           <div className="mg-display-center-msg">
@@ -1108,7 +1123,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
   // Reset submitted flag when phase changes
   useEffect(() => {
     if (!room) return;
-    const key = `${room.phase}|${room.round}|${room.turnInRound}|${room.activeSlot}|${room.chosenPrompt || ''}|${room.superMatchPrompt || ''}|${room.finalMatchPrompt || ''}`;
+    const key = `${room.phase}|${room.round}|${room.turnInRound}|${room.activeSlot}|${room.chosenPrompt || ''}|${room.superMatchPrompt || ''}|${room.finalMatchPrompt || ''}|${room.finalMatchCelebIndex ?? ''}`;
     if (key !== prevPhaseRef.current) {
       prevPhaseRef.current = key;
       setSubmitted(false);
@@ -1180,6 +1195,13 @@ function PhoneView({ room, roomCode, playerSlot }) {
     if (!myAnswer.trim()) return;
     setSubmitted(true);
     try { await api.finalMatchAnswer(roomCode, myAnswer); }
+    catch(e) { setSubmitted(false); }
+  };
+
+  const handleFinalMatchCelebAnswer = async () => {
+    if (!myAnswer.trim()) return;
+    setSubmitted(true);
+    try { await api.finalMatchCelebAnswer(roomCode, playerSlot, myAnswer); }
     catch(e) { setSubmitted(false); }
   };
 
@@ -1439,7 +1461,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
           </div>
         )}
 
-        {/* Final Match — write answer */}
+        {/* Final Match — contestant writes answer */}
         {phase === 'finalMatch_answering' && isMyTurn && !submitted && (
           <div className="mg-phone-body">
             <div className="mg-prompt phone">{room.finalMatchPrompt}</div>
@@ -1457,6 +1479,31 @@ function PhoneView({ room, roomCode, playerSlot }) {
                 Lock It In!
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Final Match — selected human celebrity writes answer */}
+        {['finalMatch_answering','finalMatch_human_celeb_answering'].includes(phase) && isHumanCeleb && celebIndex === room.finalMatchCelebIndex && !room.finalMatchHumanAnswers?.[celebIndex] && !submitted && (
+          <div className="mg-phone-body">
+            <div className="mg-display-round final">★★ Final Match ★★</div>
+            <div className="mg-prompt phone">{room.finalMatchPrompt}</div>
+            <p className="mg-status">You were chosen for the Final Match. Write your answer now:</p>
+            <input className="mg-input" value={myAnswer}
+              onChange={e => setMyAnswer(e.target.value)}
+              placeholder="Your Final Match answer" maxLength={30}
+              onKeyDown={e => { if (e.key==='Enter') handleFinalMatchCelebAnswer(); }}
+              autoFocus />
+            <div className="mg-row">
+              <button className="mg-btn" onClick={handleFinalMatchCelebAnswer} disabled={!myAnswer.trim()}>
+                Lock In Celeb Answer
+              </button>
+            </div>
+          </div>
+        )}
+
+        {phase === 'finalMatch_human_celeb_answering' && !(isHumanCeleb && celebIndex === room.finalMatchCelebIndex && !room.finalMatchHumanAnswers?.[celebIndex] && !submitted) && (
+          <div className="mg-phone-body">
+            <p className="mg-status">Waiting for {room.panel[room.finalMatchCelebIndex]?.name} to write their Final Match answer. Watch the TV!</p>
           </div>
         )}
 
@@ -1482,7 +1529,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
         )}
 
         {/* Waiting states for non-active player */}
-        {!isMyTurn && ['superMatch_pickCelebs','finalMatch_pickCeleb','finalMatch_answering'].includes(phase) && (
+        {!isMyTurn && ['superMatch_pickCelebs','finalMatch_pickCeleb','finalMatch_answering'].includes(phase) && !(phase==='finalMatch_answering' && isHumanCeleb && celebIndex === room.finalMatchCelebIndex) && (
           <div className="mg-phone-body">
             <p className="mg-status">Watch the TV — {room.players[room.activeSlot]} is playing the {
               phase.startsWith('finalMatch') ? 'Final Match' : 'Super Match'
@@ -1496,7 +1543,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
           </div>
         )}
 
-        {submitted && !['superMatch_pickCelebs','finalMatch_pickCeleb','finalMatch_answering','finalMatch_reveal'].includes(phase) && (
+        {submitted && !['superMatch_pickCelebs','finalMatch_pickCeleb','finalMatch_answering','finalMatch_human_celeb_answering','finalMatch_reveal'].includes(phase) && (
           <div className="mg-phone-locked">✓ Locked in — watch the TV!</div>
         )}
       </div>

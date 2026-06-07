@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import OpenAI from 'openai';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -58,6 +59,37 @@ const normalizePromptKey = (prompt) => String(prompt || '')
 const GLOBAL_USED_ROUND_PROMPTS = new Set();
 
 
+const DATA_DIR = path.join(__dirname, 'data');
+const PROMPT_HISTORY_FILE = path.join(DATA_DIR, 'prompt-history.json');
+const loadPromptHistory = () => {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!fs.existsSync(PROMPT_HISTORY_FILE)) return { round: {}, super: {} };
+    const parsed = JSON.parse(fs.readFileSync(PROMPT_HISTORY_FILE, 'utf8'));
+    return { round: parsed.round || {}, super: parsed.super || {} };
+  } catch (err) {
+    console.warn('Could not load prompt history:', err.message);
+    return { round: {}, super: {} };
+  }
+};
+const PROMPT_HISTORY = loadPromptHistory();
+const savePromptHistory = () => {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(PROMPT_HISTORY_FILE, JSON.stringify(PROMPT_HISTORY, null, 2));
+  } catch (err) {
+    console.warn('Could not save prompt history:', err.message);
+  }
+};
+const hasPromptBeenUsed = (kind, prompt) => Boolean(PROMPT_HISTORY[kind]?.[normalizePromptKey(prompt)]);
+const markPromptUsed = (kind, prompt) => {
+  const key = normalizePromptKey(prompt);
+  if (!PROMPT_HISTORY[kind]) PROMPT_HISTORY[kind] = {};
+  PROMPT_HISTORY[kind][key] = { prompt, usedAt: new Date().toISOString() };
+  savePromptHistory();
+};
+
+
 // ─── LLM HELPERS ──────────────────────────────────────────────
 const callLLM = async (prompt, maxTokens = 1200, jsonMode = false) => {
   const params = {
@@ -74,6 +106,38 @@ const extractJSON = (text) => {
   const clean = text.replace(/```json|```/g, '').trim();
   const match = clean.match(/[\[{][\s\S]*[\]}]/);
   return JSON.parse(match ? match[0] : clean);
+};
+
+
+const promptIsUsable = (prompt) => {
+  const t = String(prompt || '').trim();
+  if (!t.includes('___')) return false;
+  if (t.length < 40 || t.length > 150) return false;
+  if (/favo[u]?rite/i.test(t)) return false; // this became repetitive and too generic
+  if ((t.match(/___/g) || []).length !== 1) return false;
+  return true;
+};
+
+const promptsTooSimilar = (a, b) => {
+  const na = normalizePromptKey(a).replace(/[^a-z0-9 ]/g, ' ');
+  const nb = normalizePromptKey(b).replace(/[^a-z0-9 ]/g, ' ');
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const wa = new Set(na.split(/\s+/).filter(w => w.length > 3));
+  const wb = new Set(nb.split(/\s+/).filter(w => w.length > 3));
+  if (!wa.size || !wb.size) return false;
+  const overlap = [...wa].filter(w => wb.has(w)).length;
+  return overlap / Math.min(wa.size, wb.size) >= 0.72;
+};
+
+const usedPromptSamples = (kind, limit = 80) => Object.values(PROMPT_HISTORY[kind] || {})
+  .slice(-limit)
+  .map(x => x.prompt)
+  .filter(Boolean);
+
+const promptAlreadyUsedOrSimilar = (kind, prompt, localUsed = []) => {
+  const all = [...localUsed, ...usedPromptSamples(kind, 250)];
+  return all.some(p => promptsTooSimilar(prompt, p));
 };
 
 // ─── GAME GENERATION ──────────────────────────────────────────
@@ -167,7 +231,81 @@ const FALLBACK_ROUND_PROMPTS = [
   { prompt: "On movie night, Dad cried when someone ate the last ___.", answers: ['popcorn','chip','cookie'], category: 'family' },
   { prompt: "The yoga class got awkward when Steve's pose revealed his ___.", answers: ['butt','underwear','belly'], category: 'gym' },
   { prompt: "The teenager said the family vacation was ruined because there was no ___.", answers: ['wifi','signal','phone'], category: 'vacation' },
-  { prompt: "The bachelor party ended early when the groom lost his ___.", answers: ['pants','ring','wallet'], category: 'wedding' }
+  { prompt: "The bachelor party ended early when the groom lost his ___.", answers: ['pants','ring','wallet'], category: 'wedding' },
+  { prompt: 'Dumb Donald thought a selfie stick was something you used to stir ___.', answers: ['coffee', 'soup', 'paint'], category: 'phones' },
+  { prompt: 'At the casino, Aunt Linda bet her entire paycheck on ___.', answers: ['black', 'red', 'horses'], category: 'money' },
+  { prompt: 'The dentist told me to floss more, so I tried flossing with ___.', answers: ['string', 'spaghetti', 'hair'], category: 'health' },
+  { prompt: 'The dating app said Brenda matched with someone who loved long walks and short ___.', answers: ['pants', 'texts', 'relationships'], category: 'dating' },
+  { prompt: 'The food delivery driver got confused and brought us a bag full of ___.', answers: ['fries', 'napkins', 'socks'], category: 'food delivery' },
+  { prompt: 'The teenager said the worst punishment was losing access to ___.', answers: ['wifi', 'phone', 'TikTok'], category: 'family' },
+  { prompt: 'At Thanksgiving, Grandpa carved the turkey with a ___.', answers: ['chainsaw', 'knife', 'fork'], category: 'family' },
+  { prompt: 'The new smart toilet refused to flush until it heard a ___.', answers: ['compliment', 'password', 'song'], category: 'home' },
+  { prompt: 'The bride threw her bouquet and knocked over the ___.', answers: ['cake', 'grandma', 'photographer'], category: 'wedding' },
+  { prompt: 'The lifeguard said no running, no diving, and absolutely no ___.', answers: ['peeing', 'screaming', 'dancing'], category: 'pool' },
+  { prompt: 'At the office meeting, Karen accidentally shared her screen and everyone saw her ___.', answers: ['emails', 'shopping cart', 'calendar'], category: 'work' },
+  { prompt: 'The hotel room was romantic until we found a ___ in the bed.', answers: ['sock', 'bug', 'sandwich'], category: 'travel' },
+  { prompt: 'The yoga instructor told everyone to breathe deeply, but Bob smelled like ___.', answers: ['garlic', 'cheese', 'feet'], category: 'gym' },
+  { prompt: 'At the school dance, the DJ only played songs about ___.', answers: ['love', 'breakups', 'ducks'], category: 'school' },
+  { prompt: 'The mechanic said my car was making that noise because it needed a new ___.', answers: ['belt', 'muffler', 'attitude'], category: 'cars' },
+  { prompt: 'The dog looked guilty because he had eaten the ___.', answers: ['homework', 'steak', 'shoe'], category: 'pets' },
+  { prompt: 'At karaoke, Grandma brought the house down singing into a ___.', answers: ['microphone', 'hairbrush', 'banana'], category: 'parties' },
+  { prompt: 'The doctor told me I was allergic to ___.', answers: ['cats', 'work', 'exercise'], category: 'health' },
+  { prompt: 'At the fancy restaurant, Dad embarrassed us by asking for extra ___.', answers: ['ketchup', 'gravy', 'cheese'], category: 'restaurants' },
+  { prompt: "The bachelor party got quiet when the stripper turned out to be the groom's ___.", answers: ['mother', 'teacher', 'boss'], category: 'wedding' },
+  { prompt: 'The new gym opened with treadmills, weights, and a juice bar full of ___.', answers: ['protein', 'smoothies', 'regret'], category: 'gym' },
+  { prompt: 'The substitute teacher knew it was going to be a bad day when a student brought a ___.', answers: ['snake', 'drum', 'megaphone'], category: 'school' },
+  { prompt: 'My phone died right before I could send a text that said ___.', answers: ['sorry', 'help', 'yes'], category: 'phones' },
+  { prompt: 'The influencer said her breakfast routine starts with coffee and ends with ___.', answers: ['crying', 'selfies', 'eggs'], category: 'social media' },
+  { prompt: 'The camping trip was ruined when Dad forgot the ___.', answers: ['tent', 'matches', 'beer'], category: 'vacation' },
+  { prompt: 'The family dog joined the Zoom call and showed everyone his ___.', answers: ['tail', 'butt', 'toy'], category: 'pets' },
+  { prompt: 'The mall Santa got fired after asking every kid for a ___.', answers: ['tip', 'beer', 'hug'], category: 'holiday' },
+  { prompt: 'The real estate agent said the house had charm, character, and a family of ___.', answers: ['mice', 'ghosts', 'raccoons'], category: 'home' },
+  { prompt: 'The magician asked for a volunteer and accidentally sawed the ___ in half.', answers: ['table', 'assistant', 'sandwich'], category: 'parties' },
+  { prompt: 'The wedding DJ announced the first dance, then played the theme from ___.', answers: ['Jaws', 'Rocky', 'Jeopardy'], category: 'wedding' },
+  { prompt: 'The teenager cleaned his room only after we threatened to cancel his ___.', answers: ['wifi', 'data', 'allowance'], category: 'family' },
+  { prompt: 'The restaurant called it a seafood platter, but it was mostly ___.', answers: ['shrimp', 'fish', 'ice'], category: 'restaurants' },
+  { prompt: 'The office Christmas party ended when someone photocopied the ___.', answers: ['boss', 'ham', 'mistletoe'], category: 'work' },
+  { prompt: 'The school principal banned phones, hats, and anything shaped like a ___.', answers: ['banana', 'weapon', 'duck'], category: 'school' },
+  { prompt: 'On the first date, she knew he was cheap when he split the ___.', answers: ['bill', 'fries', 'coupon'], category: 'dating' },
+  { prompt: 'The GPS said turn left, but Uncle Frank drove into a ___.', answers: ['ditch', 'lake', 'driveway'], category: 'cars' },
+  { prompt: 'The baby shower got awkward when everyone brought the same ___.', answers: ['diapers', 'blanket', 'cake'], category: 'family' },
+  { prompt: 'The hot tub party ended when someone dropped in a ___.', answers: ['phone', 'sandwich', 'dog'], category: 'parties' },
+  { prompt: 'The new restaurant serves fusion food: sushi, tacos, and ___.', answers: ['pizza', 'poutine', 'regret'], category: 'restaurants' },
+  { prompt: 'The fitness tracker congratulated Dad for walking to the ___.', answers: ['fridge', 'bathroom', 'couch'], category: 'gym' },
+  { prompt: "The cruise director said tonight's entertainment is karaoke and competitive ___.", answers: ['dancing', 'bingo', 'napping'], category: 'vacation' },
+  { prompt: 'The barber asked what I wanted, and I said anything except a ___.', answers: ['mullet', 'buzzcut', 'perm'], category: 'hair' },
+  { prompt: 'The dog trainer said the problem was not the dog, it was the ___.', answers: ['owner', 'leash', 'treats'], category: 'pets' },
+  { prompt: 'The dentist said I needed a crown, but I thought he meant a ___.', answers: ['king', 'hat', 'tiara'], category: 'health' },
+  { prompt: 'The new dating show is called Love Is Blind, Deaf, and ___.', answers: ['confused', 'hungry', 'broke'], category: 'dating' },
+  { prompt: 'The fortune teller looked at my palm and said I would soon lose my ___.', answers: ['money', 'hair', 'patience'], category: 'weird' },
+  { prompt: 'The chef cried when the critic compared his soup to ___.', answers: ['dishwater', 'gravy', 'mud'], category: 'food' },
+  { prompt: 'The babysitter quit after the children taught the parrot to say ___.', answers: ['no', 'help', 'bad words'], category: 'family' },
+  { prompt: 'At the picnic, ants ignored the watermelon and went straight for the ___.', answers: ['cake', 'beer', 'chips'], category: 'food' },
+  { prompt: 'The gym posted a sign: please wipe down equipment and do not flirt with the ___.', answers: ['mirror', 'trainer', 'weights'], category: 'gym' },
+  { prompt: 'My online order said discreet packaging, but the box was shaped like a giant ___.', answers: ['heart', 'banana', 'toilet'], category: 'shopping' },
+  { prompt: 'The boss tried to boost morale by replacing bonuses with ___.', answers: ['pizza', 'coupons', 'hugs'], category: 'work' },
+  { prompt: 'The party was BYOB, but Ted thought that meant bring your own ___.', answers: ['blanket', 'banana', 'boss'], category: 'parties' },
+  { prompt: 'The airport security guard opened my suitcase and found twelve ___.', answers: ['socks', 'bananas', 'cheeses'], category: 'travel' },
+  { prompt: 'The doctor said my blood pressure was high because I watch too much ___.', answers: ['news', 'sports', 'reality TV'], category: 'health' },
+  { prompt: 'The family game night ended when Grandma accused everyone of cheating at ___.', answers: ['cards', 'Monopoly', 'bingo'], category: 'family' },
+  { prompt: 'The romantic picnic was ruined when it started raining ___.', answers: ['bugs', 'frogs', 'hotdogs'], category: 'dating' },
+  { prompt: 'The teacher said my essay was original because no one else wrote about ___.', answers: ['pizza', 'aliens', 'laundry'], category: 'school' },
+  { prompt: "The influencer's apology video was sponsored by ___.", answers: ['makeup', 'pizza', 'therapy'], category: 'social media' },
+  { prompt: 'The new luxury car has leather seats and a built-in ___.', answers: ['espresso machine', 'massage', 'toaster'], category: 'cars' },
+  { prompt: 'The plumber said he found the problem: someone flushed a ___.', answers: ['toy', 'phone', 'sandwich'], category: 'home' },
+  { prompt: 'The groom said his vows from the heart, but read them off his ___.', answers: ['phone', 'hand', 'napkin'], category: 'wedding' },
+  { prompt: 'The waitress said the soup of the day was ___.', answers: ['chicken', 'tomato', 'mystery'], category: 'restaurants' },
+  { prompt: 'The teenager said he was doing homework, but his laptop was open to ___.', answers: ['games', 'YouTube', 'Netflix'], category: 'school' },
+  { prompt: 'The camping guide said to scare bears away by waving your ___.', answers: ['arms', 'flashlight', 'sandwich'], category: 'vacation' },
+  { prompt: 'The family group chat exploded when Mom sent a picture of her ___.', answers: ['cat', 'dinner', 'feet'], category: 'phones' },
+  { prompt: 'The haunted house was scary until the ghost asked for my ___.', answers: ['password', 'number', 'WiFi'], category: 'weird' },
+  { prompt: 'The personal trainer said my core was weak, especially my ___.', answers: ['abs', 'back', 'willpower'], category: 'gym' },
+  { prompt: 'The bride wanted something blue, so Uncle Lou painted the ___.', answers: ['cake', 'dog', 'car'], category: 'wedding' },
+  { prompt: 'The waiter said the special comes with fries and a side of ___.', answers: ['salad', 'sauce', 'judgment'], category: 'restaurants' },
+  { prompt: 'The new app helps you find parking, romance, and lost ___.', answers: ['keys', 'dogs', 'dignity'], category: 'phones' },
+  { prompt: 'The nurse said the thermometer was broken because it read ___.', answers: ['hot', 'dead', 'pizza'], category: 'health' },
+  { prompt: 'The reality show was cancelled when all the contestants fell in love with the ___.', answers: ['host', 'producer', 'camera man'], category: 'tv' },
+  { prompt: 'The family vacation photo was perfect until Dad lost his ___.', answers: ['pants', 'hat', 'glasses'], category: 'vacation' }
 ];
 
 const FALLBACK_SUPER_PROMPTS = [
@@ -206,7 +344,47 @@ const FALLBACK_SUPER_PROMPTS = [
   { prompt:'___ Check', topAnswers:[{rank:1,answer:'Rain',value:500},{rank:2,answer:'Blank',value:250},{rank:3,answer:'Pay',value:100}] },
   { prompt:'Kitchen ___', topAnswers:[{rank:1,answer:'Sink',value:500},{rank:2,answer:'Table',value:250},{rank:3,answer:'Knife',value:100}] },
   { prompt:'Party ___', topAnswers:[{rank:1,answer:'Animal',value:500},{rank:2,answer:'Hat',value:250},{rank:3,answer:'Favor',value:100}] },
-  { prompt:'___ Bag', topAnswers:[{rank:1,answer:'Garbage',value:500},{rank:2,answer:'Gym',value:250},{rank:3,answer:'Tea',value:100}] }
+  { prompt:'___ Bag', topAnswers:[{rank:1,answer:'Garbage',value:500},{rank:2,answer:'Gym',value:250},{rank:3,answer:'Tea',value:100}] },
+  { prompt:'Blue ___', topAnswers:[{rank:1,answer:'Moon',value:500},{rank:2,answer:'Jeans',value:250},{rank:3,answer:'Cheese',value:100}] },
+  { prompt:'Rain ___', topAnswers:[{rank:1,answer:'Coat',value:500},{rank:2,answer:'Check',value:250},{rank:3,answer:'Drop',value:100}] },
+  { prompt:'Pay ___', topAnswers:[{rank:1,answer:'Check',value:500},{rank:2,answer:'Day',value:250},{rank:3,answer:'Phone',value:100}] },
+  { prompt:'Dream ___', topAnswers:[{rank:1,answer:'Job',value:500},{rank:2,answer:'House',value:250},{rank:3,answer:'Girl',value:100}] },
+  { prompt:'Chicken ___', topAnswers:[{rank:1,answer:'Soup',value:500},{rank:2,answer:'Wing',value:250},{rank:3,answer:'Dance',value:100}] },
+  { prompt:'Cold ___', topAnswers:[{rank:1,answer:'Beer',value:500},{rank:2,answer:'Water',value:250},{rank:3,answer:'Feet',value:100}] },
+  { prompt:'Big ___', topAnswers:[{rank:1,answer:'Mouth',value:500},{rank:2,answer:'Deal',value:250},{rank:3,answer:'Mac',value:100}] },
+  { prompt:'Fast ___', topAnswers:[{rank:1,answer:'Food',value:500},{rank:2,answer:'Car',value:250},{rank:3,answer:'Money',value:100}] },
+  { prompt:'Slow ___', topAnswers:[{rank:1,answer:'Dance',value:500},{rank:2,answer:'Motion',value:250},{rank:3,answer:'Cooker',value:100}] },
+  { prompt:'Dirty ___', topAnswers:[{rank:1,answer:'Laundry',value:500},{rank:2,answer:'Dancing',value:250},{rank:3,answer:'Joke',value:100}] },
+  { prompt:'Sweet ___', topAnswers:[{rank:1,answer:'Tooth',value:500},{rank:2,answer:'Heart',value:250},{rank:3,answer:'Tea',value:100}] },
+  { prompt:'Bad ___', topAnswers:[{rank:1,answer:'Boy',value:500},{rank:2,answer:'Dog',value:250},{rank:3,answer:'News',value:100}] },
+  { prompt:'Good ___', topAnswers:[{rank:1,answer:'Luck',value:500},{rank:2,answer:'Night',value:250},{rank:3,answer:'Boy',value:100}] },
+  { prompt:'Private ___', topAnswers:[{rank:1,answer:'Eye',value:500},{rank:2,answer:'School',value:250},{rank:3,answer:'Party',value:100}] },
+  { prompt:'Secret ___', topAnswers:[{rank:1,answer:'Agent',value:500},{rank:2,answer:'Santa',value:250},{rank:3,answer:'Sauce',value:100}] },
+  { prompt:'House ___', topAnswers:[{rank:1,answer:'Party',value:500},{rank:2,answer:'Key',value:250},{rank:3,answer:'Cat',value:100}] },
+  { prompt:'Pool ___', topAnswers:[{rank:1,answer:'Party',value:500},{rank:2,answer:'Table',value:250},{rank:3,answer:'Boy',value:100}] },
+  { prompt:'Beach ___', topAnswers:[{rank:1,answer:'Ball',value:500},{rank:2,answer:'House',value:250},{rank:3,answer:'Bum',value:100}] },
+  { prompt:'Office ___', topAnswers:[{rank:1,answer:'Party',value:500},{rank:2,answer:'Chair',value:250},{rank:3,answer:'Romance',value:100}] },
+  { prompt:'Remote ___', topAnswers:[{rank:1,answer:'Control',value:500},{rank:2,answer:'Work',value:250},{rank:3,answer:'Island',value:100}] },
+  { prompt:'Text ___', topAnswers:[{rank:1,answer:'Message',value:500},{rank:2,answer:'Book',value:250},{rank:3,answer:'Bubble',value:100}] },
+  { prompt:'Group ___', topAnswers:[{rank:1,answer:'Chat',value:500},{rank:2,answer:'Photo',value:250},{rank:3,answer:'Hug',value:100}] },
+  { prompt:'Video ___', topAnswers:[{rank:1,answer:'Game',value:500},{rank:2,answer:'Call',value:250},{rank:3,answer:'Tape',value:100}] },
+  { prompt:'Credit ___', topAnswers:[{rank:1,answer:'Card',value:500},{rank:2,answer:'Score',value:250},{rank:3,answer:'Union',value:100}] },
+  { prompt:'Paper ___', topAnswers:[{rank:1,answer:'Towel',value:500},{rank:2,answer:'Bag',value:250},{rank:3,answer:'Boy',value:100}] },
+  { prompt:'Back ___', topAnswers:[{rank:1,answer:'Seat',value:500},{rank:2,answer:'Door',value:250},{rank:3,answer:'Pain',value:100}] },
+  { prompt:'Front ___', topAnswers:[{rank:1,answer:'Door',value:500},{rank:2,answer:'Seat',value:250},{rank:3,answer:'Page',value:100}] },
+  { prompt:'Side ___', topAnswers:[{rank:1,answer:'Dish',value:500},{rank:2,answer:'Eye',value:250},{rank:3,answer:'Hustle',value:100}] },
+  { prompt:'Power ___', topAnswers:[{rank:1,answer:'Nap',value:500},{rank:2,answer:'Tool',value:250},{rank:3,answer:'Couple',value:100}] },
+  { prompt:'Love ___', topAnswers:[{rank:1,answer:'Song',value:500},{rank:2,answer:'Letter',value:250},{rank:3,answer:'Bird',value:100}] },
+  { prompt:'Money ___', topAnswers:[{rank:1,answer:'Bag',value:500},{rank:2,answer:'Tree',value:250},{rank:3,answer:'Talks',value:100}] },
+  { prompt:'Sports ___', topAnswers:[{rank:1,answer:'Car',value:500},{rank:2,answer:'Bar',value:250},{rank:3,answer:'Bra',value:100}] },
+  { prompt:'Dinner ___', topAnswers:[{rank:1,answer:'Party',value:500},{rank:2,answer:'Table',value:250},{rank:3,answer:'Plate',value:100}] },
+  { prompt:'Kitchen ___', topAnswers:[{rank:1,answer:'Table',value:500},{rank:2,answer:'Sink',value:250},{rank:3,answer:'Knife',value:100}] },
+  { prompt:'Bathroom ___', topAnswers:[{rank:1,answer:'Sink',value:500},{rank:2,answer:'Break',value:250},{rank:3,answer:'Humor',value:100}] },
+  { prompt:'Bedroom ___', topAnswers:[{rank:1,answer:'Eyes',value:500},{rank:2,answer:'Set',value:250},{rank:3,answer:'Door',value:100}] },
+  { prompt:'Morning ___', topAnswers:[{rank:1,answer:'Coffee',value:500},{rank:2,answer:'Person',value:250},{rank:3,answer:'Sickness',value:100}] },
+  { prompt:'Night ___', topAnswers:[{rank:1,answer:'Owl',value:500},{rank:2,answer:'Light',value:250},{rank:3,answer:'Club',value:100}] },
+  { prompt:'Happy ___', topAnswers:[{rank:1,answer:'Hour',value:500},{rank:2,answer:'Birthday',value:250},{rank:3,answer:'Meal',value:100}] },
+  { prompt:'Open ___', topAnswers:[{rank:1,answer:'Bar',value:500},{rank:2,answer:'House',value:250},{rank:3,answer:'Door',value:100}] }
 ];
 
 const generatePanel = async () => {
@@ -313,25 +491,69 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], us
   const shuffled = shuffle(availableChars);
   const charA = shuffled[0] || 'Old Timer Terry';
   const charB = shuffled[1] || 'Newcomer Nick';
-
-  const roomUsed = new Set([
+  const localUsed = [
     ...(usedRoundPrompts || []),
-    ...(usedCategories || []).filter(x => String(x).startsWith('PROMPT:')).map(x => String(x).slice(7))
-  ].map(normalizePromptKey));
+    ...(usedCategories || []).filter(x => String(x).startsWith('PROMPT:')).map(x => String(x).slice(7)),
+    ...usedPromptSamples('round', 120)
+  ];
+  const avoidList = localUsed.slice(-80).map(p => `- ${p}`).join('\n');
+  const categories = shuffle(PROMPT_CATEGORIES).slice(0, 6).join(', ');
 
-  // Strong no-repeat rule: first avoid all prompts used in this room and this server session.
-  let unused = FALLBACK_ROUND_PROMPTS.filter(p => !roomUsed.has(normalizePromptKey(p.prompt)) && !GLOBAL_USED_ROUND_PROMPTS.has(normalizePromptKey(p.prompt)));
-  // If the global pool is getting exhausted, still protect the current room from repeats.
-  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => !roomUsed.has(normalizePromptKey(p.prompt)));
-  // Only after the entire curated bank has been used in the room do we allow reuse.
+  // GenAI should be the engine, but the database/history is still essential as a guardrail:
+  // generate fresh prompts, reject repeats/similar prompts, and only fall back to curated prompts if needed.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const text = await callLLM(
+        `Generate TWO brand-new Match Game-style fill-in-the-blank prompts for a family game with adults and 17+ teens.
+
+IMPORTANT: These must not repeat or closely resemble any prior prompt listed below.
+Avoid prior prompts:\n${avoidList || '(none)'}
+
+Use fresh situations from these areas: ${categories}.
+Do NOT use generic "Favourite ___" prompts.
+Do NOT use trivia, niche references, or questions that are too wide open.
+Each prompt needs a "definitive" best answer: not obvious to everyone, but constrained enough that several people might match.
+Light innuendo is okay; keep it TV-PG/PG-13, playful, not explicit.
+
+For each prompt return 3 likely answers in order. The #1 answer should be the answer the panel can cluster around.
+Return JSON exactly:
+{"prompts":[{"prompt":"... ___ ...","answers":["best","second","third"],"category":"...","character":"..."},{"prompt":"... ___ ...","answers":["best","second","third"],"category":"...","character":"..."}]}`,
+        700, true
+      );
+      const parsed = extractJSON(text);
+      const prompts = (parsed.prompts || []).filter(x => promptIsUsable(x.prompt) && Array.isArray(x.answers) && x.answers.length >= 2);
+      const fresh = [];
+      for (const pr of prompts) {
+        if (promptAlreadyUsedOrSimilar('round', pr.prompt, [...localUsed, ...fresh.map(f => f.prompt)])) continue;
+        fresh.push(pr);
+      }
+      if (fresh.length >= 2) {
+        const [a,b] = fresh;
+        GLOBAL_USED_ROUND_PROMPTS.add(normalizePromptKey(a.prompt));
+        GLOBAL_USED_ROUND_PROMPTS.add(normalizePromptKey(b.prompt));
+        markPromptUsed('round', a.prompt);
+        markPromptUsed('round', b.prompt);
+        return {
+          promptA: a.prompt, promptB: b.prompt,
+          answersA: a.answers.slice(0,3), answersB: b.answers.slice(0,3),
+          categoryA: 'PROMPT:' + a.prompt, categoryB: 'PROMPT:' + b.prompt,
+          charA: a.character || charA, charB: b.character || charB,
+        };
+      }
+    } catch (e) {
+      console.warn('fresh prompt generation failed:', e.message);
+    }
+  }
+
+  // Fallback only: curated bank still exists so the game never crashes if API generation fails.
+  let unused = FALLBACK_ROUND_PROMPTS.filter(p => !promptAlreadyUsedOrSimilar('round', p.prompt, localUsed));
+  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => !localUsed.some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
   if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS;
-
   const pool = shuffle(unused);
   const a = pool[0];
   const b = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
-  GLOBAL_USED_ROUND_PROMPTS.add(normalizePromptKey(a.prompt));
-  GLOBAL_USED_ROUND_PROMPTS.add(normalizePromptKey(b.prompt));
-
+  markPromptUsed('round', a.prompt);
+  markPromptUsed('round', b.prompt);
   return {
     promptA: a.prompt, promptB: b.prompt,
     answersA: a.answers, answersB: b.answers,
@@ -340,7 +562,6 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], us
     charB: b.prompt.match(/^([^'’]+)'/)?.[1] || charB,
   };
 };
-
 
 const generatePanelAnswers = async (panel, promptText, contestantName, roundNum = 1, answerKey = []) => {
   const panelStr = panel.map((p, i) => `${i+1}. ${p.name} (${p.tag}; style=${p.answerStyle || 'obvious'}; matchBias=${p.matchBias ?? 0.8})`).join('\n');
@@ -406,11 +627,39 @@ Return JSON: {"answers": ["answer1","answer2","answer3","answer4","answer5","ans
 };
 
 const generateSuperMatchPrompt = async (usedPrompts = []) => {
-  // No LLM here: repeated prompts were killing the round. Use a no-repeat survey board.
-  const used = new Set((usedPrompts || []).map(x => String(x).toLowerCase()));
-  const unused = FALLBACK_SUPER_PROMPTS.filter(p => !used.has(p.prompt.toLowerCase()));
-  const pool = unused.length ? unused : FALLBACK_SUPER_PROMPTS;
-  return shuffle(pool)[0].prompt;
+  const localUsed = [...(usedPrompts || []), ...usedPromptSamples('super', 120)];
+  const avoidList = localUsed.slice(-90).map(p => `- ${p}`).join('\n');
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const text = await callLLM(
+        `Generate ONE brand-new Super Match survey-board prompt.
+It should be a short phrase with exactly one blank: ___
+Examples of the FORM: "Hot ___", "___ Dog", "Wedding ___", "Phone ___".
+Do NOT overuse "Favourite" or "Favorite". In fact, avoid that word entirely.
+It must be obvious enough to produce top 3 survey answers, but not be identical or similar to anything below.
+Avoid prior prompts:\n${avoidList || '(none)'}
+
+Return JSON exactly: {"prompt":"... ___ ..."}`,
+        140, true
+      );
+      const parsed = extractJSON(text);
+      const prompt = String(parsed.prompt || '').trim();
+      if (promptIsUsable(prompt) && !promptAlreadyUsedOrSimilar('super', prompt, localUsed)) {
+        markPromptUsed('super', prompt);
+        return prompt;
+      }
+    } catch (e) {
+      console.warn('fresh super prompt generation failed:', e.message);
+    }
+  }
+
+  let unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptAlreadyUsedOrSimilar('super', p.prompt, localUsed));
+  if (!unused.length) unused = FALLBACK_SUPER_PROMPTS.filter(p => !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
+  if (!unused.length) unused = FALLBACK_SUPER_PROMPTS;
+  const chosen = shuffle(unused)[0];
+  markPromptUsed('super', chosen.prompt);
+  return chosen.prompt;
 };
 
 const generateSuperMatchAnswers = async (prompt, celebNames) => {
@@ -565,8 +814,35 @@ const fuzzyMatch = (a, b) => {
   return wa.some(w => wb.includes(w));
 };
 
-const scoreAnswer = (playerAnswer, panel) =>
-  panel.map(p => fuzzyMatch(playerAnswer, p.answer || ''));
+const llmMatch = async (prompt, a, b) => {
+  if (fuzzyMatch(a, b)) return true;
+  // Conservative API judge for edge cases: spelling, Canadian/American variants,
+  // close synonyms, singular/plural, and common-sense equivalents.
+  try {
+    const text = await callLLM(
+      `You are the match judge for a Match Game-style fill-in-the-blank game.
+Prompt: "${prompt || ''}"
+Contestant answer: "${a || ''}"
+Celebrity answer: "${b || ''}"
+
+Count as a match for spelling variants, Canadian/American variants, plural/singular, abbreviations, and ordinary synonyms that would fit the same blank. Examples: cheque/check, TV/television, abs/muscles, beer/drink.
+Do NOT count as a match if they are merely related but would make meaningfully different answers.
+Return JSON only: {"match":true} or {"match":false}`,
+      40, true
+    );
+    const parsed = extractJSON(text);
+    return Boolean(parsed.match);
+  } catch (e) {
+    console.warn('llm match judge failed:', e.message);
+    return false;
+  }
+};
+
+const scoreAnswerAsync = async (playerAnswer, panel, prompt = '') => {
+  const results = [];
+  for (const p of panel) results.push(await llmMatch(prompt, playerAnswer, p.answer || ''));
+  return results;
+};
 
 // ─── API: HEALTH & CONFIG ──────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ ok: true, rooms: rooms.size }));
@@ -579,15 +855,28 @@ const assignRolesAndStart = async (room) => {
   if (room.rolesAssigned) return;
   room.rolesAssigned = true;
   const ids = Object.keys(room.participants || {}).map(Number);
-  const shuffled = shuffle(ids);
-  const c1 = shuffled[0], c2 = shuffled[1];
+  const prefs = room.participantPreferences || {};
+
+  // Respect preferences when possible: two contestants are chosen first from people
+  // who prefer contestant, then surprise, then celebrity. Remaining players become live stars.
+  const contestantPool = [
+    ...shuffle(ids.filter(id => prefs[id] === 'contestant')),
+    ...shuffle(ids.filter(id => !prefs[id] || prefs[id] === 'surprise')),
+    ...shuffle(ids.filter(id => prefs[id] === 'celebrity')),
+  ];
+  const c1 = contestantPool[0], c2 = contestantPool.find(id => id !== c1);
   room.playerIds = { 1: c1, 2: c2 };
   room.players = { 1: room.participants[c1], 2: room.participants[c2] };
   room.roles = {};
   room.roles[c1] = { role: 'contestant', contestantSlot: 1 };
   room.roles[c2] = { role: 'contestant', contestantSlot: 2 };
 
-  const humanCelebIds = shuffled.slice(2, 8);
+  const remaining = ids.filter(id => id !== c1 && id !== c2);
+  const humanCelebIds = [
+    ...shuffle(remaining.filter(id => prefs[id] === 'celebrity')),
+    ...shuffle(remaining.filter(id => !prefs[id] || prefs[id] === 'surprise')),
+    ...shuffle(remaining.filter(id => prefs[id] === 'contestant')),
+  ].slice(0, 6);
   const basePanel = await generatePanel();
   let panel = [...basePanel];
   for (let i = 0; i < humanCelebIds.length && i < 6; i++) {
@@ -640,7 +929,7 @@ const maybeFinishAnswerPhase = async (room) => {
       return { ...p, answer: answers[i] || '???', inactiveThisTurn: false };
     });
     room.panelAnswers = room.panel.map(p => p.answer);
-    const matches = scoreAnswer(room.contestantAnswer, room.panel).map((m, i) => inactiveCelebIndices.includes(i) ? false : m);
+    const matches = (await scoreAnswerAsync(room.contestantAnswer, room.panel, room.chosenPrompt)).map((m, i) => inactiveCelebIndices.includes(i) ? false : m);
     room.matches = matches;
     const matchCount = matches.filter(Boolean).length;
     room.pendingScoreDelta = matchCount;
@@ -667,6 +956,7 @@ app.post('/api/room', async (req, res) => {
       maxPlayers,
       participants: {},
       participantMessages: {},
+      participantPreferences: {},
       nextParticipantId: 1,
       rolesAssigned: false,
       roles: {},
@@ -705,6 +995,7 @@ app.post('/api/room', async (req, res) => {
       finalMatchCelebIndex: null,
       finalMatchContestantAnswer: null,
       finalMatchCelebAnswer: null,
+      finalMatchHumanAnswers: {},
       finalMatchResult: null,
       finalMatchWinnings: 0,
     };
@@ -719,7 +1010,7 @@ app.post('/api/room', async (req, res) => {
 app.post('/api/room/:code/join', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'No room with that code' });
-  const { playerName, signMessage } = req.body;
+  const { playerName, signMessage, rolePreference } = req.body;
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
   if (room.rolesAssigned) return res.status(409).json({ error: 'Game already started' });
   if (Object.keys(room.participants || {}).length >= room.maxPlayers) return res.status(409).json({ error: 'Room is full' });
@@ -727,6 +1018,8 @@ app.post('/api/room/:code/join', async (req, res) => {
   room.participants[slot] = playerName.trim().slice(0, 20);
   room.participantMessages = room.participantMessages || {};
   room.participantMessages[slot] = String(signMessage || '').trim().slice(0, 32) || randomSign();
+  room.participantPreferences = room.participantPreferences || {};
+  room.participantPreferences[slot] = ['contestant','celebrity','surprise'].includes(rolePreference) ? rolePreference : 'surprise';
   bump(room);
   res.json({ room, slot });
   if (Object.keys(room.participants).length >= room.maxPlayers) {
@@ -1057,7 +1350,7 @@ app.post('/api/room/:code/supermatch-answer', async (req, res) => {
   const topAnswers = room.superMatchTopAnswers || [];
   let winnings = 0;
   for (const ta of topAnswers) {
-    if (fuzzyMatch(room.superMatchContestantAnswer, ta.answer)) {
+    if (await llmMatch(room.superMatchPrompt, room.superMatchContestantAnswer, ta.answer)) {
       winnings = ta.value;
       break;
     }
@@ -1068,6 +1361,24 @@ app.post('/api/room/:code/supermatch-answer', async (req, res) => {
   bump(room);
   res.json({ room });
 });
+
+
+const completeFinalMatchReveal = async (room) => {
+  const celeb = room.panel[room.finalMatchCelebIndex];
+  let celebAnswer = null;
+  if (celeb?.isHuman) celebAnswer = room.finalMatchHumanAnswers?.[room.finalMatchCelebIndex];
+  if (!celebAnswer) {
+    celebAnswer = await generateFinalMatchCelebAnswer(
+      room.finalMatchPrompt, celeb, room.players[room.activeSlot], room.finalMatchAnswerKey || []
+    );
+  }
+  room.finalMatchCelebAnswer = String(celebAnswer || '').trim().slice(0, 50) || (room.finalMatchAnswerKey?.[0] || 'answer');
+  const matched = await llmMatch(room.finalMatchPrompt, room.finalMatchContestantAnswer, room.finalMatchCelebAnswer);
+  room.finalMatchResult = matched ? 'win' : 'lose';
+  room.finalMatchWinnings = matched ? room.superMatchWinnings * 10 : 0;
+  room.phase = 'finalMatch_reveal';
+  bump(room);
+};
 
 // ─── API: FINAL MATCH ─────────────────────────────────────────
 app.post('/api/room/:code/finalmatch-start', async (req, res) => {
@@ -1086,6 +1397,7 @@ app.post('/api/room/:code/finalmatch-start', async (req, res) => {
     room.finalMatchCelebIndex = null;
     room.finalMatchContestantAnswer = null;
     room.finalMatchCelebAnswer = null;
+    room.finalMatchHumanAnswers = {};
     room.phase = 'finalMatch_pickCeleb';
     bump(room);
   } catch(e) {
@@ -1103,6 +1415,7 @@ app.post('/api/room/:code/finalmatch-pick', async (req, res) => {
     return res.status(400).json({ error: 'Invalid celebrity' });
   }
   room.finalMatchCelebIndex = Number(celebIndex);
+  room.finalMatchHumanAnswers = {};
   room.phase = 'finalMatch_answering';
   bump(room);
   res.json({ room });
@@ -1120,19 +1433,37 @@ app.post('/api/room/:code/finalmatch-answer', async (req, res) => {
 
   try {
     const celeb = room.panel[room.finalMatchCelebIndex];
-    const celebAnswer = await generateFinalMatchCelebAnswer(
-      room.finalMatchPrompt, celeb, room.players[room.activeSlot], room.finalMatchAnswerKey || []
-    );
-    room.finalMatchCelebAnswer = celebAnswer;
-    const matched = fuzzyMatch(room.finalMatchContestantAnswer, celebAnswer);
-    room.finalMatchResult = matched ? 'win' : 'lose';
-    room.finalMatchWinnings = matched ? room.superMatchWinnings * 10 : 0;
-    room.phase = 'finalMatch_reveal';
-    bump(room);
+    if (celeb?.isHuman && !room.finalMatchHumanAnswers?.[room.finalMatchCelebIndex]) {
+      room.phase = 'finalMatch_human_celeb_answering';
+      bump(room);
+      return;
+    }
+    await completeFinalMatchReveal(room);
   } catch(e) {
     console.error('finalmatch celeb answer:', e);
     room.phase = 'error';
     bump(room);
+  }
+});
+
+app.post('/api/room/:code/finalmatch-celeb-answer', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (!['finalMatch_answering','finalMatch_human_celeb_answering'].includes(room.phase)) return res.status(400).json({ error: 'Wrong phase' });
+  const { slot, answer } = req.body;
+  if (!answer?.trim()) return res.status(400).json({ error: 'answer required' });
+  const role = room.roles?.[slot];
+  if (!role || role.role !== 'celeb' || role.celebIndex !== room.finalMatchCelebIndex || !room.panel[role.celebIndex]?.isHuman) {
+    return res.status(403).json({ error: 'Not the selected Final Match celebrity' });
+  }
+  room.finalMatchHumanAnswers = room.finalMatchHumanAnswers || {};
+  room.finalMatchHumanAnswers[role.celebIndex] = answer.trim().slice(0, 50);
+  bump(room);
+  res.json({ room });
+
+  if (room.finalMatchContestantAnswer) {
+    try { await completeFinalMatchReveal(room); }
+    catch(e) { console.error('finalmatch human celeb answer:', e); room.phase = 'error'; bump(room); }
   }
 });
 
