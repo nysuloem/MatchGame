@@ -109,15 +109,29 @@ const extractJSON = (text) => {
 };
 
 
+const BLANK = '__________';
+const normalizePromptBlank = (prompt = '') => String(prompt || '')
+  .replace(/_{3,}/g, BLANK)
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const blankCount = (prompt = '') => (String(prompt || '').match(/_{3,}/g) || []).length;
+
 const promptIsUsable = (prompt, kind = 'round') => {
-  const t = String(prompt || '').trim();
-  if (!t.includes('___')) return false;
-  if ((t.match(/___/g) || []).length !== 1) return false;
+  const t = normalizePromptBlank(prompt);
+  if (blankCount(t) !== 1) return false;
+  if (/\bblank\b/i.test(t)) return false;
   if (/favo[u]?rite/i.test(t)) return false; // this became repetitive and too generic
 
-  // Regular round prompts are full joke setups. Super/Final Match prompts are
-  // intentionally short survey-style phrases like "Hot ___" or "___ Dog".
-  if (kind === 'round') return t.length >= 40 && t.length <= 180;
+  // Regular prompts should be short, punchy Match Game setups.
+  // Super/Final Match prompts are intentionally short survey-style phrases.
+  if (kind === 'round') {
+    const words = t.split(/\s+/).length;
+    const blankPos = t.indexOf(BLANK);
+    const afterBlank = t.slice(blankPos + BLANK.length).replace(/[\s.!?"'’”]+/g, '');
+    const blankNearEnd = afterBlank.length === 0 || afterBlank.length <= 16;
+    return t.length >= 28 && t.length <= 135 && words <= 24 && blankNearEnd;
+  }
   return t.length >= 5 && t.length <= 80;
 };
 
@@ -186,7 +200,7 @@ const PROMPT_CATEGORIES = [
   'streaming and reality TV', 'school and campus life', 'workplace embarrassment',
   'gym and body comedy', 'food delivery and restaurants', 'vacations and hotels',
   'weddings and parties', 'pets behaving badly', 'shopping and money',
-  'cars and driving', 'doctors and health mishaps', 'sports and games'
+  'cars and driving', 'doctors and health mishaps', 'sports and games', 'classic Dumb Dora misunderstandings'
 ];
 
 const FALLBACK_ROUND_PROMPTS = [
@@ -210,6 +224,13 @@ const FALLBACK_ROUND_PROMPTS = [
   { prompt: "Martha's smart fridge refused to open until she said please and bought more ___.", answers: ['milk','beer','cheese'], category: 'home' },
   { prompt: "The gym teacher said the new uniform was just shorts and a giant ___.", answers: ['whistle','shirt','sock'], category: 'school' },
   { prompt: "Dumb Dora thought a dating app swipe meant she had to clean the ___.", answers: ['screen','floor','phone'], category: 'dating apps' },
+
+  { prompt: "Dumb Dora is so dumb, she thought a Hoover was a __________.", answers: ['vacuum','president','dam'], category: 'dumb dora' },
+  { prompt: "Dumb Dora is so dumb, she thought Bluetooth was a __________.", answers: ['toothbrush','dentist','phone'], category: 'dumb dora' },
+  { prompt: "Dumb Dora is so dumb, she thought a hot spot was a __________.", answers: ['rash','burn','stove'], category: 'dumb dora' },
+  { prompt: "Dumb Dora is so dumb, she thought a password was a __________.", answers: ['word','key','door'], category: 'dumb dora' },
+  { prompt: "Dumb Dora is so dumb, she thought a streaming service was a __________.", answers: ['plumber','river','shower'], category: 'dumb dora' },
+  { prompt: "Dumb Dora is so dumb, she thought an influencer was a __________.", answers: ['doctor','fan','virus'], category: 'dumb dora' },
   { prompt: "The influencer's beach photo was ruined when a seagull stole her ___.", answers: ['sandwich','phone','bikini'], category: 'social media' },
   { prompt: "At the office party, Steve accidentally photocopied his ___.", answers: ['butt','face','hand'], category: 'work' },
   { prompt: "The hotel said breakfast was included, but it was only a single ___.", answers: ['muffin','egg','banana'], category: 'travel' },
@@ -507,24 +528,27 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], us
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       const text = await callLLM(
-        `Generate TWO brand-new Match Game-style fill-in-the-blank prompts for a family game with adults and 17+ teens.
+        `Generate TWO brand-new Match Game-style fill-in-the-blank prompts for a family game with adults and 17+ teens. Keep each prompt SHORT and punchy.
 
 IMPORTANT: These must not repeat or closely resemble any prior prompt listed below.
 Avoid prior prompts:\n${avoidList || '(none)'}
 
 Use fresh situations from these areas: ${categories}.
-Do NOT use generic "Favourite ___" prompts.
+Include classic Match Game recurring-character styles sometimes, especially Dumb Dora. A valid Dumb Dora prompt should look like: "Dumb Dora is so dumb, she thought a Hoover was a __________." The screen prompt should NOT include the audience callback; the TV host will pause after "Dumb Dora is so dumb" so the audience can yell "How dumb is she?"
+Do NOT use generic "Favourite __________" prompts.
 Do NOT use trivia, niche references, or questions that are too wide open.
-Each prompt needs a "definitive" best answer: not obvious to everyone, but constrained enough that several people might match.
+Each prompt needs a "definitive" best answer: not obvious to everyone, but constrained enough that several people might match. Keep the setup to one sentence, usually 10-20 words. Put the blank almost always at the END. Use exactly one blank marker, written as __________. Never write the word blank in the prompt. For Dumb Dora prompts, use exactly this pattern: "Dumb Dora is so dumb, she thought [a thing/phrase] was a __________."
 Light innuendo is okay; keep it TV-PG/PG-13, playful, not explicit.
 
 For each prompt return 3 likely answers in order. The #1 answer should be the answer the panel can cluster around.
 Return JSON exactly:
-{"prompts":[{"prompt":"... ___ ...","answers":["best","second","third"],"category":"...","character":"..."},{"prompt":"... ___ ...","answers":["best","second","third"],"category":"...","character":"..."}]}`,
+{"prompts":[{"prompt":"short setup ending with __________","answers":["best","second","third"],"category":"...","character":"..."},{"prompt":"short setup ending with __________","answers":["best","second","third"],"category":"...","character":"..."}]}`,
         700, true
       );
       const parsed = extractJSON(text);
-      const prompts = (parsed.prompts || []).filter(x => promptIsUsable(x.prompt) && Array.isArray(x.answers) && x.answers.length >= 2);
+      const prompts = (parsed.prompts || [])
+        .map(x => ({ ...x, prompt: normalizePromptBlank(x.prompt) }))
+        .filter(x => promptIsUsable(x.prompt) && Array.isArray(x.answers) && x.answers.length >= 2);
       const fresh = [];
       for (const pr of prompts) {
         if (promptAlreadyUsedOrSimilar('round', pr.prompt, [...localUsed, ...fresh.map(f => f.prompt)])) continue;
@@ -553,8 +577,9 @@ Return JSON exactly:
   if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => !localUsed.some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
   if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS;
   const pool = shuffle(unused);
-  const a = pool[0];
-  const b = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
+  const a = { ...pool[0], prompt: normalizePromptBlank(pool[0].prompt) };
+  const b0 = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
+  const b = { ...b0, prompt: normalizePromptBlank(b0.prompt) };
   markPromptUsed('round', a.prompt);
   markPromptUsed('round', b.prompt);
   return {
@@ -637,8 +662,8 @@ const generateSuperMatchPrompt = async (usedPrompts = []) => {
     try {
       const text = await callLLM(
         `Generate ONE brand-new Super Match survey-board prompt.
-It should be a short phrase with exactly one blank: ___
-Examples of the FORM: "Hot ___", "___ Dog", "Wedding ___", "Phone ___".
+It should be a short phrase with exactly one blank marker: __________
+Examples of the FORM: "Hot __________", "__________ Dog", "Wedding __________", "Phone __________".
 Do NOT use "Favourite" or "Favorite" anywhere. In fact, avoid that word entirely.
 It must be obvious enough to produce top 3 survey answers, but not be identical or similar to anything below.
 Avoid prior prompts:\n${avoidList || '(none)'}
@@ -647,7 +672,7 @@ Return JSON exactly: {"prompt":"... ___ ..."}`,
         140, true
       );
       const parsed = extractJSON(text);
-      const prompt = String(parsed.prompt || '').trim();
+      const prompt = normalizePromptBlank(parsed.prompt || '');
       if (promptIsUsable(prompt, 'short') && !promptAlreadyUsedOrSimilar('super', prompt, localUsed)) {
         markPromptUsed('super', prompt);
         return prompt;
@@ -661,8 +686,9 @@ Return JSON exactly: {"prompt":"... ___ ..."}`,
   if (!unused.length) unused = FALLBACK_SUPER_PROMPTS.filter(p => !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
   if (!unused.length) unused = FALLBACK_SUPER_PROMPTS;
   const chosen = shuffle(unused)[0];
-  markPromptUsed('super', chosen.prompt);
-  return chosen.prompt;
+  const superPrompt = normalizePromptBlank(chosen.prompt);
+  markPromptUsed('super', superPrompt);
+  return superPrompt;
 };
 
 const generateSuperMatchAnswers = async (prompt, celebNames) => {
@@ -725,14 +751,14 @@ const generateFinalMatchPrompt = async (usedPrompts = []) => {
       const text = await callLLM(
         `Generate ONE brand-new Final Match clue as JSON.
 
-It must be a short, familiar survey-style phrase with exactly one blank marked ___.
-Examples of the FORM ONLY: "Birthday ___", "Movie ___", "Phone ___", "___ Dog", "Hot ___".
+It must be a short, familiar survey-style phrase with exactly one blank marker written as __________.
+Examples of the FORM ONLY: "Birthday __________", "Movie __________", "Phone __________", "__________ Dog", "Hot __________".
 Avoid "Favourite/Favorite" entirely.
 Avoid awkward/redundant clues like "First Date ___".
 Avoid anything identical or similar to these previous Super/Final Match prompts:
 ${avoidList || '(none)'}
 
-Return JSON exactly: {"prompt":"... ___ ...", "answers":["most obvious", "second", "third"]}`,
+Return JSON exactly: {"prompt":"... __________", "answers":["most obvious", "second", "third"]}`,
         180, true
       );
       const parsed = extractJSON(text);
@@ -751,8 +777,9 @@ Return JSON exactly: {"prompt":"... ___ ...", "answers":["most obvious", "second
   if (!unused.length) unused = FINAL_MATCH_PROMPTS.filter(p => !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
   if (!unused.length) unused = FINAL_MATCH_PROMPTS;
   const fallback = shuffle(unused)[0];
-  markPromptUsed('final', fallback.prompt);
-  return fallback;
+  const finalFallback = { ...fallback, prompt: normalizePromptBlank(fallback.prompt) };
+  markPromptUsed('final', finalFallback.prompt);
+  return finalFallback;
 };
 
 const generateFinalMatchCelebAnswer = async (prompt, celeb, contestantName, answerKey = []) => {
@@ -837,8 +864,20 @@ const fuzzyMatch = (a, b) => {
   if (!na || !nb) return false;
   if (na === nb) return true;
 
+  const tokensA = na.split(/\s+/).filter(Boolean);
+  const tokensB = nb.split(/\s+/).filter(Boolean);
+  // If the contestant gave a concise answer and that exact word/phrase appears
+  // inside the celebrity's longer answer, count it: "skills" matches
+  // "unbelievable skills". This is intentionally one-way so broad celebrity
+  // answers do not swallow specific contestant answers.
+  if (tokensA.length <= 2 && tokensA.every(w => w.length > 2)) {
+    for (let i = 0; i <= tokensB.length - tokensA.length; i++) {
+      if (tokensA.every((w, j) => tokensB[i + j] === w)) return true;
+    }
+  }
+
   // Allow obvious typos only when both answers are short single-word attempts.
-  // Do NOT use substring/word-overlap matching; that caused bad matches such as
+  // Do NOT use broad substring/word-overlap matching; that caused bad matches such as
   // related-but-different answers being accepted.
   const oneWordA = !na.includes(' ');
   const oneWordB = !nb.includes(' ');
@@ -866,6 +905,7 @@ COUNT AS MATCH ONLY FOR:
 - singular/plural of the same word
 - abbreviations of the same phrase: TV/television, cell/cellphone
 - very narrow same-meaning wording that creates the same completed phrase
+- the contestant's exact concise word/phrase appears as a complete word/phrase inside the celebrity answer, e.g. skills/unbelievable skills
 
 DO NOT MATCH:
 - general category vs specific member: animal/cat, drink/beer, vehicle/car
