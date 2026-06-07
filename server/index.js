@@ -1324,7 +1324,7 @@ app.post('/api/room/:code/intro-done', async (req, res) => {
       await startNewRound(room, 1);
     }
     catch(e) { console.error('start round 1 after coin toss:', e); room.phase = 'error'; bump(room); }
-  }, 4300);
+  }, 7600);
 });
 
 app.get('/api/room/:code', (req, res) => {
@@ -1362,7 +1362,11 @@ const startNewRound = async (room, roundNum) => {
     room.usedRoundPrompts = [...(room.usedRoundPrompts || []), promptA, promptB];
 
     // Determine who picks first
-    if (roundNum === 1) {
+    if (room.soloTest) {
+      // Solo Test is one human contestant against the AI celebrity panel, not an AI opponent.
+      // Keep the human in control for both regular rounds.
+      room.activeSlot = 1;
+    } else if (roundNum === 1) {
       room.activeSlot = room.cointossWinner;
     } else {
       // Lower score picks first (or slot 1 if tied after wipe)
@@ -1465,13 +1469,16 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
   room.pendingMatches = [];
 
   if (room.soloTest && room.turnInRound === 1) {
-    // Solo test mode: one human contestant plays a single regular-round turn, then moves on.
+    // Solo Test mode: one human contestant plays two regular rounds, then moves on.
     room.phase = 'round_end';
     bump(room);
     res.json({ room });
     setTimeout(async () => {
-      try { await startNewRound(room, 'super'); }
-      catch(e) { console.error('start super match:', e); }
+      try {
+        if (Number(room.round) < 2) await startNewRound(room, Number(room.round) + 1);
+        else await startNewRound(room, 'super');
+      }
+      catch(e) { console.error('solo next round/super match:', e); }
     }, 3000);
     return;
   }

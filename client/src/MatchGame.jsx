@@ -717,7 +717,7 @@ function DisplayView({ room, roomCode }) {
     setIntroStage('finale');
     setIntroIndex(r.panel.length);
     await delay(250);
-    await speakTTS({ text: 'As we get ready to play the star-studded Big Money Match Game!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+    await speakTTS({ text: 'As we play the star-studded Big Money... Match Game!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     await delay(2200);
     stopIntroMusic();
     setIntroComplete(true);
@@ -1102,6 +1102,8 @@ function DisplaySuperMatchResult({ room, roomCode }) {
       }
       if (!cancelled && winnings <= 0) {
         await speakTTS({ text: `No match this time.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+        await delay(1400);
+        if (!cancelled) { try { await api.finalMatchDone(roomCode); } catch {} }
       }
     })();
     return () => { cancelled = true; };
