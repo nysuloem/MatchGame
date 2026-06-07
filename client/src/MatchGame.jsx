@@ -173,7 +173,7 @@ const startIntroMusic = () => {
   try {
     introMusicAudio = new Audio(THEME_TRACK);
     introMusicAudio.loop = true;
-    introMusicAudio.volume = 0.58;
+    introMusicAudio.volume = 0.22;
     safePlayAudio(introMusicAudio);
   } catch { playRetroSting(); }
 };
@@ -590,6 +590,7 @@ function DisplayView({ room, roomCode }) {
   const turnPromptAnnouncedRef = useRef(null);
   const inheritedTurnAnnouncedRef = useRef(null);
   const revealRunRef = useRef(null);
+  const pickPromptSpeechRef = useRef({ key: '', promise: Promise.resolve() });
 
   const unlockAudio = () => {
     try {
@@ -623,23 +624,35 @@ function DisplayView({ room, roomCode }) {
     }
     if (phase === 'pick_prompt') {
       setPromptReadyFor(null);
-      const turnKey = `${room.round}-${room.turnInRound}-${room.activeSlot}-pick`;
-      if (turnPromptAnnouncedRef.current !== turnKey) {
-        turnPromptAnnouncedRef.current = turnKey;
-        speakTTS({ text: `${room.players[room.activeSlot]}, it's your turn. Choose A or B.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      const turnKey = `${room.round}-${room.turnInRound}-${room.activeSlot}`;
+      if (turnPromptAnnouncedRef.current !== `${turnKey}-pick`) {
+        turnPromptAnnouncedRef.current = `${turnKey}-pick`;
+        const promise = speakTTS({
+          text: `${room.players[room.activeSlot]}, it's your turn. Choose A or B.`,
+          isAnnouncer: true,
+          fallbackProfile: ANNOUNCER_PROFILE,
+        });
+        // If the contestant taps A/B quickly, the question waits until this line finishes.
+        pickPromptSpeechRef.current = { key: turnKey, promise };
       }
     }
     if (phase === 'answering' && room.chosenPrompt) {
-      const answerKey = `${room.round}-${room.turnInRound}-${room.activeSlot}-${room.chosenPrompt}`;
+      const turnKey = `${room.round}-${room.turnInRound}-${room.activeSlot}`;
+      const answerKey = `${turnKey}-${room.chosenPrompt}`;
       if (promptReadyFor !== room.chosenPrompt) setPromptReadyFor(null);
       (async () => {
-        await delay(350);
-        // If the player just picked A/B, we already said their name in pick_prompt.
-        // If they inherited the remaining question, announce their turn once here.
+        const pendingPickSpeech = pickPromptSpeechRef.current;
+        if (prevPhase === 'pick_prompt' && pendingPickSpeech?.key === turnKey) {
+          await pendingPickSpeech.promise.catch(() => {});
+          await delay(250);
+        } else {
+          await delay(350);
+        }
+        // If the player inherited the remaining question, announce their turn once here.
         if (prevPhase !== 'pick_prompt' && inheritedTurnAnnouncedRef.current !== answerKey) {
           inheritedTurnAnnouncedRef.current = answerKey;
           await speakTTS({ text: `${room.players[room.activeSlot]}, it's your turn.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-          await delay(200);
+          await delay(250);
         }
         if (promptReadyFor !== room.chosenPrompt) {
           await readGamePrompt(room.chosenPrompt, roomCode);
@@ -696,12 +709,6 @@ function DisplayView({ room, roomCode }) {
       playAudience(i % 2 === 0 ? 'applause' : 'cheer');
       await delay(950);
     }
-    // After the last star, reveal the glowing title logo out of the darkness.
-    setIntroIndex(-2);
-    await delay(250);
-    await speakTTS({ text: "As we get ready to play the big money Match Game!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-    playAudience('cheer');
-    await delay(2200);
     stopIntroMusic();
     setIntroComplete(true);
     try { await api.introDone(roomCode); } catch {}
@@ -816,7 +823,7 @@ function DisplayView({ room, roomCode }) {
               </>
             )}
             {phase === 'intro' && !introComplete && <DisplayIntroSpotlight room={room} introIndex={introIndex} />}
-            {phase === 'intro' && introComplete && <div className="mg-intro-title-card small"><div className="mg-intro-title-main">MATCH GAME</div></div>}
+            
           </div>
         )}
         {phase==='cointoss' && (
@@ -858,15 +865,9 @@ function DisplayView({ room, roomCode }) {
 function DisplayIntroSpotlight({ room, introIndex }) {
   const p = room?.panel?.[introIndex];
   return (
-    <div className={`mg-intro-stage ${introIndex === -2 ? 'finale' : ''}`}>
-      {introIndex === -2 ? (
-        <div className="mg-big-money-logo-wrap">
-          <img src="/images/match-game-logo.png" className="mg-big-money-logo" alt="Match Game logo" />
-        </div>
-      ) : !p ? (
-        <div className="mg-intro-title-card prelude">
-          <div className="mg-intro-title-main">MATCH GAME</div>
-        </div>
+    <div className="mg-intro-stage">
+      {!p ? (
+        <div className="mg-intro-waiting-dark" aria-label="Opening music" />
       ) : (
         <div className="mg-intro-card" key={introIndex}>
           <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={260} />

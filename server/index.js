@@ -171,6 +171,19 @@ const WACKY_SIGNS = [
 ];
 const randomSign = () => WACKY_SIGNS[Math.floor(Math.random() * WACKY_SIGNS.length)];
 
+const AI_CONTESTANT_NAMES = [
+  'Maggie Malone', 'Eddie Sparks', 'Linda Lou', 'Tony Bananas', 'Sally Sunshine',
+  'Frankie Flash', 'Rita Rocket', 'Bobby Buttons', 'Connie Cash', 'Vinnie Velvet',
+  'Diane Dynamite', 'Marty Moon'
+];
+const randomAiContestantName = (taken = []) => {
+  const lowerTaken = new Set(taken.map(x => String(x || '').toLowerCase()));
+  const available = AI_CONTESTANT_NAMES.filter(n => !lowerTaken.has(n.toLowerCase()));
+  const pool = available.length ? available : AI_CONTESTANT_NAMES;
+  return pool[Math.floor(Math.random() * pool.length)];
+};
+
+
 const MODERN_PANEL_BACKUPS = [
   { name:'Ryan Reynolds', tag:'quick-witted movie star', avatarType:'man_middle', voice:'verse', voiceInstructions:'Bright, fast, playful game-show delivery.', answerStyle:'punny', matchBias:0.86 },
   { name:'Zendaya', tag:'cool pop-culture icon', avatarType:'woman_young', voice:'nova', voiceInstructions:'Confident, warm, crisp, and amused.', answerStyle:'obvious', matchBias:0.88 },
@@ -1126,7 +1139,7 @@ const assignRolesAndStart = async (room) => {
   const c1 = contestantPool[0];
   const c2 = contestantPool.find(id => id !== c1) || null;
   room.playerIds = { 1: c1, 2: c2 };
-  room.players = { 1: room.participants[c1] || 'Player 1', 2: c2 ? room.participants[c2] : 'AI Contestant' };
+  room.players = { 1: room.participants[c1] || 'Player 1', 2: c2 ? room.participants[c2] : randomAiContestantName(Object.values(room.participants || {})) };
   room.roles = {};
   if (c1) room.roles[c1] = { role: 'contestant', contestantSlot: 1 };
   if (c2) room.roles[c2] = { role: 'contestant', contestantSlot: 2 };
@@ -1298,12 +1311,18 @@ app.post('/api/room/:code/intro-done', async (req, res) => {
   if (room.phase !== 'intro') return res.json({ room });
   if (room.introCompleted) return res.json({ room });
   room.introCompleted = true;
+  room.phase = 'cointoss';
+  room.coinTossStartedAt = Date.now();
   bump(room);
   res.json({ room });
   setTimeout(async () => {
-    try { await startNewRound(room, 1); }
-    catch(e) { console.error('start round 1 after intro:', e); room.phase = 'error'; bump(room); }
-  }, 500);
+    try {
+      const liveRoom = rooms.get(room.code);
+      if (!liveRoom || liveRoom !== room || room.phase !== 'cointoss') return;
+      await startNewRound(room, 1);
+    }
+    catch(e) { console.error('start round 1 after coin toss:', e); room.phase = 'error'; bump(room); }
+  }, 4300);
 });
 
 app.get('/api/room/:code', (req, res) => {

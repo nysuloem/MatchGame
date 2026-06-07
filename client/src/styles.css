@@ -1224,3 +1224,14 @@ body { margin: 0; }
   .mg-contestant-score-shape { width: clamp(58px, 8vw, 104px); height: clamp(50px, 7.2vh, 86px); }
   .mg-contestant-score-shape .mg-contestant-num { font-size: clamp(26px, 4.8vw, 54px); }
 }
+
+
+/* ── v25 opening cleanup: no fake logo, quiet prelude, QR first ── */
+.mg-intro-waiting-dark {
+  width: min(760px, 80vw);
+  height: min(420px, 52vh);
+  background: radial-gradient(circle at 50% 50%, rgba(255,210,63,0.12), transparent 48%), #050302;
+  border: 4px solid rgba(255,244,214,0.25);
+  box-shadow: inset 0 0 50px rgba(0,0,0,0.8), 0 0 26px rgba(255,210,63,0.16);
+}
+.mg-intro-stage.finale, .mg-big-money-logo-wrap, .mg-big-money-logo { display: none !important; }
