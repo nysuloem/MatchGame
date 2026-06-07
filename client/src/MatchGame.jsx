@@ -846,6 +846,22 @@ function DisplayView({ room, roomCode }) {
 }
 
 
+function CelebVisual({ celeb, size = 100, className = '' }) {
+  if (celeb?.imageUrl) {
+    const width = Math.round(size * 0.9);
+    const height = Math.round(size * 1.18);
+    return (
+      <img
+        src={celeb.imageUrl}
+        alt={celeb?.name || 'Celebrity'}
+        className={`mg-celeb-photo ${className}`.trim()}
+        style={{ width, height }}
+      />
+    );
+  }
+  return <CelebAvatar avatarType={celeb?.avatarType || 'man_middle'} size={size} />;
+}
+
 function DisplayIntroSpotlight({ room, introIndex, introStage }) {
   const p = room?.panel?.[introIndex];
   if (introStage === 'finale') {
@@ -863,7 +879,7 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
         <div className="mg-intro-waiting-dark" aria-label="Opening music" />
       ) : (
         <div className="mg-intro-card" key={introIndex}>
-          <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={260} />
+          <CelebVisual celeb={p} size={260} className="intro" />
           <div className="mg-intro-name">{p.name}</div>
           <div className="mg-intro-sign">{p.signMessage || 'Hi Mom!'}</div>
         </div>
@@ -897,7 +913,7 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) 
               transform: introIndex === undefined ? 'scale(1)' : (i <= introIndex ? 'scale(1)' : 'scale(0.85)'),
               transition: 'opacity 0.35s ease-out, transform 0.35s ease-out'
             }}>
-            <CelebAvatar avatarType={p.avatarType || 'man_middle'} size={100} />
+            <CelebVisual celeb={p} size={100} />
             <div className="mg-panelist-name">{p.name}</div>
             <div className={`mg-panelist-answer hand-${i % 6} ${shown ? 'blue-card' : 'blank'}`}>
               {shown ? (p.answer || (prelit ? 'Matched' : '')) : ''}
@@ -1075,8 +1091,20 @@ function DisplaySuperMatchResult({ room, roomCode }) {
         }
       }
       if (!cancelled && winnings <= 0) {
-        await speakTTS({ text: `No match this time.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-        await delay(1400);
+        const name = room.players[room.activeSlot] || 'there';
+        const gift = room.partingGift || 'a lovely parting gift from the prop department';
+        await speakTTS({
+          text: `Well ${name}, I'm sorry you didn't make a match, but I hope you had a good time. I think we have a parting gift for you anyway.`,
+          isAnnouncer: true,
+          fallbackProfile: ANNOUNCER_PROFILE,
+        });
+        await delay(400);
+        await speakTTS({
+          text: `${name} will receive ${gift}! Congratulations!`,
+          isAnnouncer: true,
+          fallbackProfile: { rate: 1.03, pitch: 1.15 },
+        });
+        await delay(1600);
         if (!cancelled) { try { await api.finalMatchDone(roomCode); } catch {} }
       }
     })();
@@ -1134,7 +1162,9 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
     ? `${room.players[room.activeSlot]} wins ${fmt$(room.finalMatchWinnings)}!`
     : room.superMatchWinnings>0
       ? `${room.players[room.activeSlot]} wins ${fmt$(room.superMatchWinnings)}!`
-      : 'Thanks for playing!';
+      : room.partingGift
+        ? `Parting gift: ${room.partingGift}`
+        : 'Thanks for playing!';
   const handlePlayAgain = async () => {
     try {
       stopCreditsMusic();
@@ -1159,6 +1189,7 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
           <p>Audience gasps by one tiny synthesizer</p>
           <p>Wardrobe by Someone's Closet</p>
           <p>Blue cards supplied by imagination</p>
+          <p>Some celebrity photos via Wikipedia / Wikimedia Commons</p>
           <p>Celebrity handwriting approved by nobody</p>
           <p>No actual celebrities were harmed</p>
           <p>Good night, stars!</p>
@@ -1265,7 +1296,7 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
 
       <div className={`mg-final-celeb-focus ${stage === 'thinking' ? 'stressed' : ''} ${stage !== 'thinking' ? 'revealed' : ''}`}>
         <div style={{width:150,height:150,margin:'0 auto 10px'}}>
-          <CelebAvatar avatarType={celeb?.avatarType || 'man_middle'} />
+          <CelebVisual celeb={celeb} size={150} />
         </div>
         <div className="mg-panelist-name" style={{fontSize:30}}>{celeb?.name}</div>
         <div className="mg-panelist-tag">{stage === 'thinking' ? 'thinking hard…' : 'reveals:'}</div>

@@ -89,6 +89,85 @@ const markPromptUsed = (kind, prompt) => {
   savePromptHistory();
 };
 
+const CELEB_IMAGE_FILE = path.join(DATA_DIR, 'celebrity-images.json');
+const loadCelebImageCache = () => {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!fs.existsSync(CELEB_IMAGE_FILE)) return {};
+    return JSON.parse(fs.readFileSync(CELEB_IMAGE_FILE, 'utf8'));
+  } catch (err) {
+    console.warn('Could not load celebrity image cache:', err.message);
+    return {};
+  }
+};
+const CELEB_IMAGE_CACHE = loadCelebImageCache();
+const saveCelebImageCache = () => {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(CELEB_IMAGE_FILE, JSON.stringify(CELEB_IMAGE_CACHE, null, 2));
+  } catch (err) {
+    console.warn('Could not save celebrity image cache:', err.message);
+  }
+};
+const celebImageKey = (name = '') => String(name || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+
+const fetchJsonWithTimeout = async (url, timeoutMs = 5000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'user-agent': 'MatchGameFamily/1.0 (celebrity photos via Wikipedia)'
+      }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const fetchWikipediaHeadshot = async (name) => {
+  const key = celebImageKey(name);
+  if (!key) return null;
+  if (key in CELEB_IMAGE_CACHE) return CELEB_IMAGE_CACHE[key] || null;
+  let record = null;
+  try {
+    const search = await fetchJsonWithTimeout(`https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(name)}&limit=1&namespace=0&format=json`);
+    const title = search?.[1]?.[0] || name;
+    const summary = await fetchJsonWithTimeout(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+    const imageUrl = summary?.originalimage?.source || summary?.thumbnail?.source || null;
+    if (imageUrl) {
+      record = {
+        imageUrl,
+        imageTitle: summary?.title || title,
+        imagePageUrl: summary?.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(String(title).replace(/ /g, '_'))}`,
+        imageSource: 'Wikipedia / Wikimedia Commons',
+        imageAttribution: 'Photo via Wikipedia / Wikimedia Commons',
+        fetchedAt: new Date().toISOString(),
+      };
+    }
+  } catch (err) {
+    console.warn(`Could not fetch Wikipedia image for ${name}:`, err.message);
+  }
+  CELEB_IMAGE_CACHE[key] = record;
+  saveCelebImageCache();
+  return record;
+};
+
+const enrichPanelWithWikipediaImages = async (panel = []) => {
+  const enriched = await Promise.all((panel || []).map(async (p) => {
+    if (!p || p.isHuman) return p;
+    const img = await fetchWikipediaHeadshot(p.name);
+    return img ? { ...p, ...img } : p;
+  }));
+  return enriched;
+};
+
 
 // ─── LLM HELPERS ──────────────────────────────────────────────
 const callLLM = async (prompt, maxTokens = 1200, jsonMode = false) => {
@@ -214,6 +293,20 @@ const randomAiContestantName = (taken = []) => {
   const pool = available.length ? available : AI_CONTESTANT_NAMES;
   return pool[Math.floor(Math.random() * pool.length)];
 };
+
+const PARTING_GIFTS = [
+  'a year supply of Rice-A-Roni, the San Francisco treat',
+  'a toaster that only works on Wednesdays',
+  'a deluxe set of blue index cards and one suspicious marker',
+  'a home version of our game, provided someone remembers to build it',
+  'a slightly used fondue set and a warm handshake',
+  'a gift certificate for one imaginary steak dinner',
+  'a fashionable 1970s leisure suit in a colour no one requested',
+  'a lifetime supply of absolutely nothing, delivered monthly',
+  'a handsome clock radio for your bedside table',
+  'a mystery box from the prop department'
+];
+const randomPartingGift = () => PARTING_GIFTS[Math.floor(Math.random() * PARTING_GIFTS.length)];
 
 
 const MODERN_PANEL_BACKUPS = [
@@ -469,7 +562,7 @@ const generatePanel = async () => {
 
 CRITICAL PANEL RULES:
 - Include EXACTLY ONE classic Match Game regular: ${classic}.
-- The other 5 panelists must be recognizable to adults and older teenagers in 2026.
+- The other 5 panelists should feel like people who plausibly belong on a current IMDb STARmeter / current pop-culture Top 100 list: recognizable film/TV actors, comedians, hosts, musicians, athletes, and internet/pop-culture figures. Do not actually claim you checked IMDb live.
 - Make the five modern choices highly varied: choose from different categories such as comedians, sitcom actors, musicians, athletes, internet personalities, movie stars, TV hosts, chefs, reality TV figures, and tech/pop-culture figures.
 - Avoid politicians.
 - Avoid always choosing the same obvious people. Variety seed: ${varietySeed}.
@@ -547,7 +640,7 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
     }
   }
 
-  return panel.slice(0, 6).map(p => ({
+  const normalizedPanel = panel.slice(0, 6).map(p => ({
     name: cleanPanelName(p.name),
     tag: p.tag,
     signMessage: String(p.signMessage || p.tag || randomSign()).slice(0, 32),
@@ -558,6 +651,7 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
     matchBias: Number.isFinite(Number(p.matchBias)) ? Math.max(0.65, Math.min(0.98, Number(p.matchBias))) : 0.85,
     answer: null,
   }));
+  return await enrichPanelWithWikipediaImages(normalizedPanel);
 };
 
 const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], usedRoundPrompts = [], allowDumbDora = true) => {
@@ -725,7 +819,9 @@ const generateSuperMatchPrompt = async (usedPrompts = []) => {
         `Generate ONE brand-new Super Match survey-board prompt.
 It should be a short phrase with exactly one blank marker: __________
 Examples of the FORM: "Hot __________", "__________ Dog", "Wedding __________", "Phone __________".
+Generate a clean, classic survey-board clue. It should have MANY ordinary answers a real audience might give, with one very obvious top answer and two plausible runners-up.
 Do NOT use "Favourite" or "Favorite" anywhere. In fact, avoid that word entirely.
+Avoid vague adjectives where the top answers would be random. Avoid obscure slang, niche pop culture, or clues that invite silly nonsense.
 It must be obvious enough to produce top 3 survey answers, but not be identical or similar to anything below.
 Avoid prior prompts:\n${avoidList || '(none)'}
 
@@ -752,6 +848,23 @@ Return JSON exactly: {"prompt":"... ___ ..."}`,
   return superPrompt;
 };
 
+
+const cleanSurveyAnswer = (prompt, answer) => stripAnswerToBlank(prompt, String(answer || '')).split(/\s+/).slice(0, 2).join(' ').trim();
+
+const surveyBoardLooksBad = (prompt, answers = []) => {
+  const cleaned = answers.map(a => cleanSurveyAnswer(prompt, a.answer || a)).filter(Boolean);
+  if (cleaned.length < 3) return true;
+  if (new Set(cleaned.map(a => canonPhrase(a))).size < 3) return true;
+  for (const a of cleaned) {
+    const c = canonPhrase(a);
+    if (!c || c.length < 2) return true;
+    if (/^(thing|stuff|something|anything|whatever|blank|answer|person|place|object|item)$/.test(c)) return true;
+    if (/[!?]/.test(a)) return true;
+    if (a.split(/\s+/).length > 2) return true;
+  }
+  return false;
+};
+
 const generateSuperMatchAnswers = async (prompt, celebNames) => {
   const fallback = FALLBACK_SUPER_PROMPTS.find(p => p.prompt.toLowerCase() === String(prompt).toLowerCase())
     || FALLBACK_SUPER_PROMPTS[Math.floor(Math.random() * FALLBACK_SUPER_PROMPTS.length)];
@@ -761,12 +874,13 @@ const generateSuperMatchAnswers = async (prompt, celebNames) => {
   // from suspiciously giving the exact $500/$250/$100 answers every time.
   let topAnswers = fallback.topAnswers.map((ta, i) => ({
     rank: i + 1,
-    answer: String(ta.answer).split(/\s+/).slice(0,2).join(' '),
+    answer: cleanSurveyAnswer(prompt, ta.answer),
     value: [500,250,100][i]
   }));
 
-  try {
-    const surveyText = await callLLM(
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const surveyText = await callLLM(
       `Super Match survey board. Prompt: "${prompt}"
 
 Generate the TOP 3 most popular/obvious survey answers for adults and 17+ teenagers.
@@ -775,7 +889,11 @@ Classic Match Game survey logic: obvious beats clever. These are the hidden stud
 Rules:
 - Each answer must be 1-2 words.
 - Each answer must be ONLY the missing word/phrase, not the whole completed phrase. For "Dream __________", answer "job", not "dream job".
-- Answers must fit the blank naturally.
+- Answers must fit the blank naturally when inserted into the prompt.
+- Use COMMON, boring, survey-plausible answers. Do not be quirky, meta, gross, random, overly clever, or absurd.
+- The #1 answer should be the answer a normal audience would most likely say first.
+- The #2 and #3 answers should also be strong ordinary completions, not joke answers.
+- Reject answers that only make sense as a joke, a prop, or a forced association.
 - The three answers should be distinct.
 - Prize values must be exactly 500, 250, 100.
 
@@ -790,15 +908,17 @@ Return JSON only:
       350, true
     );
     const parsedSurvey = extractJSON(surveyText);
-    if (Array.isArray(parsedSurvey.topAnswers) && parsedSurvey.topAnswers.length >= 3) {
+    if (Array.isArray(parsedSurvey.topAnswers) && parsedSurvey.topAnswers.length >= 3 && !surveyBoardLooksBad(prompt, parsedSurvey.topAnswers)) {
       topAnswers = parsedSurvey.topAnswers.slice(0, 3).map((ta, i) => ({
         rank: i + 1,
-        answer: stripAnswerToBlank(prompt, String(ta.answer || fallback.topAnswers[i].answer)).split(/\s+/).slice(0,2).join(' '),
+        answer: cleanSurveyAnswer(prompt, ta.answer || fallback.topAnswers[i].answer),
         value: [500,250,100][i]
       }));
+      break;
     }
-  } catch (e) {
-    console.warn('super survey generation failed:', e.message);
+    } catch (e) {
+      console.warn('super survey generation failed:', e.message);
+    }
   }
 
   let celebAnswers = [];
@@ -1214,6 +1334,11 @@ const assignRolesAndStart = async (room) => {
       signMessage: room.participantMessages?.[pid] || randomSign(),
       isHuman: true,
       playerId: pid,
+      imageUrl: null,
+      imageTitle: null,
+      imagePageUrl: null,
+      imageSource: null,
+      imageAttribution: null,
       voice: template.voice || 'alloy',
       voiceInstructions: 'Read clearly and playfully like a family game-show panelist.',
       answerStyle: 'human',
@@ -1284,6 +1409,7 @@ const resetRoomForPlayAgain = (room) => {
   room.finalMatchResult = null;
   room.finalMatchWinnings = 0;
   room.finalMatchPromptReady = false;
+  room.partingGift = null;
   room.phase = 'lobby';
   room.introCompleted = false;
   room.introStartedAt = null;
@@ -1385,6 +1511,7 @@ app.post('/api/room', async (req, res) => {
       finalMatchResult: null,
       finalMatchWinnings: 0,
       finalMatchPromptReady: false,
+      partingGift: null,
     };
     rooms.set(code, room);
     res.json({ room, slot: null });
@@ -1776,6 +1903,7 @@ const completeSuperMatchContestantAnswer = async (room, answer) => {
     }
   }
   room.superMatchWinnings = winnings;
+  room.partingGift = winnings > 0 ? null : randomPartingGift();
   room.superMatchTopRevealIndex = -1;
   room.phase = winnings > 0 ? 'superMatch_won' : 'superMatch_lost';
   bump(room);
