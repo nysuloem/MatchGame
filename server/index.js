@@ -64,12 +64,12 @@ const PROMPT_HISTORY_FILE = path.join(DATA_DIR, 'prompt-history.json');
 const loadPromptHistory = () => {
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    if (!fs.existsSync(PROMPT_HISTORY_FILE)) return { round: {}, super: {} };
+    if (!fs.existsSync(PROMPT_HISTORY_FILE)) return { round: {}, super: {}, final: {} };
     const parsed = JSON.parse(fs.readFileSync(PROMPT_HISTORY_FILE, 'utf8'));
-    return { round: parsed.round || {}, super: parsed.super || {} };
+    return { round: parsed.round || {}, super: parsed.super || {}, final: parsed.final || {} };
   } catch (err) {
     console.warn('Could not load prompt history:', err.message);
-    return { round: {}, super: {} };
+    return { round: {}, super: {}, final: {} };
   }
 };
 const PROMPT_HISTORY = loadPromptHistory();
@@ -109,13 +109,16 @@ const extractJSON = (text) => {
 };
 
 
-const promptIsUsable = (prompt) => {
+const promptIsUsable = (prompt, kind = 'round') => {
   const t = String(prompt || '').trim();
   if (!t.includes('___')) return false;
-  if (t.length < 40 || t.length > 150) return false;
-  if (/favo[u]?rite/i.test(t)) return false; // this became repetitive and too generic
   if ((t.match(/___/g) || []).length !== 1) return false;
-  return true;
+  if (/favo[u]?rite/i.test(t)) return false; // this became repetitive and too generic
+
+  // Regular round prompts are full joke setups. Super/Final Match prompts are
+  // intentionally short survey-style phrases like "Hot ___" or "___ Dog".
+  if (kind === 'round') return t.length >= 40 && t.length <= 180;
+  return t.length >= 5 && t.length <= 80;
 };
 
 const promptsTooSimilar = (a, b) => {
@@ -636,7 +639,7 @@ const generateSuperMatchPrompt = async (usedPrompts = []) => {
         `Generate ONE brand-new Super Match survey-board prompt.
 It should be a short phrase with exactly one blank: ___
 Examples of the FORM: "Hot ___", "___ Dog", "Wedding ___", "Phone ___".
-Do NOT overuse "Favourite" or "Favorite". In fact, avoid that word entirely.
+Do NOT use "Favourite" or "Favorite" anywhere. In fact, avoid that word entirely.
 It must be obvious enough to produce top 3 survey answers, but not be identical or similar to anything below.
 Avoid prior prompts:\n${avoidList || '(none)'}
 
@@ -645,7 +648,7 @@ Return JSON exactly: {"prompt":"... ___ ..."}`,
       );
       const parsed = extractJSON(text);
       const prompt = String(parsed.prompt || '').trim();
-      if (promptIsUsable(prompt) && !promptAlreadyUsedOrSimilar('super', prompt, localUsed)) {
+      if (promptIsUsable(prompt, 'short') && !promptAlreadyUsedOrSimilar('super', prompt, localUsed)) {
         markPromptUsed('super', prompt);
         return prompt;
       }
@@ -713,25 +716,42 @@ const FINAL_MATCH_PROMPTS = [
   { prompt:'Christmas ___', answers:['Tree','Gift','Party'] }
 ];
 
-const generateFinalMatchPrompt = async () => {
-  const fallback = FINAL_MATCH_PROMPTS[Math.floor(Math.random() * FINAL_MATCH_PROMPTS.length)];
-  const text = await callLLM(
-    `Generate ONE Final Match clue as JSON.
+const generateFinalMatchPrompt = async (usedPrompts = []) => {
+  const localUsed = [...(usedPrompts || []), ...usedPromptSamples('final', 120), ...usedPromptSamples('super', 80)];
+  const avoidList = localUsed.slice(-120).map(p => `- ${p}`).join('\n');
 
-It must be a short, familiar phrase with exactly one blank marked ___ and one very obvious most-popular answer.
-Use clean survey-style phrases like: Birthday ___ -> Cake, Movie ___ -> Star, Phone ___ -> Call, ___ Dog -> Hot.
-Avoid awkward clues like "First Date ___" because the answer can create a redundant phrase.
-Avoid clever, abstract, or niche clues.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const text = await callLLM(
+        `Generate ONE brand-new Final Match clue as JSON.
 
-Return JSON: {"prompt":"...", "answers":["most obvious", "second", "third"]}`,
-    160, true
-  );
-  try {
-    const parsed = extractJSON(text);
-    const prompt = String(parsed.prompt || '').trim();
-    const answers = Array.isArray(parsed.answers) ? parsed.answers.map(a => String(a).trim()).filter(Boolean).slice(0,3) : [];
-    if (prompt.includes('___') && answers.length) return { prompt, answers };
-  } catch {}
+It must be a short, familiar survey-style phrase with exactly one blank marked ___.
+Examples of the FORM ONLY: "Birthday ___", "Movie ___", "Phone ___", "___ Dog", "Hot ___".
+Avoid "Favourite/Favorite" entirely.
+Avoid awkward/redundant clues like "First Date ___".
+Avoid anything identical or similar to these previous Super/Final Match prompts:
+${avoidList || '(none)'}
+
+Return JSON exactly: {"prompt":"... ___ ...", "answers":["most obvious", "second", "third"]}`,
+        180, true
+      );
+      const parsed = extractJSON(text);
+      const prompt = String(parsed.prompt || '').trim();
+      const answers = Array.isArray(parsed.answers) ? parsed.answers.map(a => String(a).trim()).filter(Boolean).slice(0,3) : [];
+      if (promptIsUsable(prompt, 'short') && answers.length && !promptAlreadyUsedOrSimilar('final', prompt, localUsed)) {
+        markPromptUsed('final', prompt);
+        return { prompt, answers };
+      }
+    } catch (e) {
+      console.warn('fresh final prompt generation failed:', e.message);
+    }
+  }
+
+  let unused = FINAL_MATCH_PROMPTS.filter(p => !promptAlreadyUsedOrSimilar('final', p.prompt, localUsed));
+  if (!unused.length) unused = FINAL_MATCH_PROMPTS.filter(p => !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
+  if (!unused.length) unused = FINAL_MATCH_PROMPTS;
+  const fallback = shuffle(unused)[0];
+  markPromptUsed('final', fallback.prompt);
   return fallback;
 };
 
@@ -754,25 +774,19 @@ Give only the answer, 1-2 words maximum.`,
 
 // ─── SCORING ──────────────────────────────────────────────────
 const SYNONYM_GROUPS = [
-  ['tv','television','telly','screen'],
-  ['abs','ab','muscle','muscles','sixpack','six pack','pecs','biceps','body'],
-  ['beer','drink','drinks','booze','alcohol','liquor','wine','cocktail','beverage'],
-  ['phone','cell','cellphone','mobile','iphone','smartphone'],
-  ['car','auto','automobile','vehicle','truck','ride'],
-  ['money','cash','bucks','dollars','dough','cheque','check','paycheck','paycheque'],
-  ['butt','bum','rear','behind','bottom'],
-  ['bathroom','toilet','washroom','restroom','loo'],
-  ['dog','puppy','pooch'],
-  ['cat','kitten','kitty'],
+  // Keep these deliberately narrow. Match Game should not match a general
+  // category with a specific member of that category. These groups are mostly
+  // spelling variants, abbreviations, and near-identical everyday wording.
+  ['tv','television','telly'],
+  ['cellphone','cell phone','mobile phone','phone','iphone','smartphone'],
+  ['cheque','check'],
+  ['paycheque','paycheck'],
+  ['abs','abdominals','sixpack','six pack'],
   ['mom','mother','mum','mama'],
   ['dad','father','papa'],
-  ['doctor','physician','doc'],
-  ['cop','police','officer'],
-  ['gym','fitness','workout'],
-  ['text','message','dm','chat'],
-  ['television show','tv show','show','series'],
+  ['bathroom','washroom','restroom','loo'],
+  ['text','message','dm'],
 ];
-
 const norm = (s) => (s||'')
   .toLowerCase()
   .replace(/&/g, ' and ')
@@ -803,32 +817,66 @@ const canonPhrase = (s) => {
   return out.split(/\s+/).filter(Boolean).map(canonToken).join(' ').trim();
 };
 
+const editDistance = (a, b) => {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+  }
+  return dp[a.length][b.length];
+};
+
 const fuzzyMatch = (a, b) => {
   const na = canonPhrase(a), nb = canonPhrase(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
-  if (na.length >= 3 && nb.includes(na)) return true;
-  if (nb.length >= 3 && na.includes(nb)) return true;
-  const wa = na.split(/\s+/).filter(w => w.length >= 3).map(canonToken);
-  const wb = nb.split(/\s+/).filter(w => w.length >= 3).map(canonToken);
-  return wa.some(w => wb.includes(w));
+
+  // Allow obvious typos only when both answers are short single-word attempts.
+  // Do NOT use substring/word-overlap matching; that caused bad matches such as
+  // related-but-different answers being accepted.
+  const oneWordA = !na.includes(' ');
+  const oneWordB = !nb.includes(' ');
+  if (oneWordA && oneWordB && Math.max(na.length, nb.length) >= 5) {
+    return editDistance(na, nb) <= 1;
+  }
+  return false;
 };
 
 const llmMatch = async (prompt, a, b) => {
   if (fuzzyMatch(a, b)) return true;
-  // Conservative API judge for edge cases: spelling, Canadian/American variants,
-  // close synonyms, singular/plural, and common-sense equivalents.
+  // Conservative API judge for true edge cases only. It should save spelling and
+  // abbreviation misses, not award broad association/category matches.
   try {
     const text = await callLLM(
-      `You are the match judge for a Match Game-style fill-in-the-blank game.
+      `You are the STRICT match judge for a 1970s Match Game-style fill-in-the-blank game.
 Prompt: "${prompt || ''}"
 Contestant answer: "${a || ''}"
 Celebrity answer: "${b || ''}"
 
-Count as a match for spelling variants, Canadian/American variants, plural/singular, abbreviations, and ordinary synonyms that would fit the same blank. Examples: cheque/check, TV/television, abs/muscles, beer/drink.
-Do NOT count as a match if they are merely related but would make meaningfully different answers.
+Judge whether these are essentially the SAME answer for this exact blank.
+
+COUNT AS MATCH ONLY FOR:
+- spelling variants or typos: cheque/check, color/colour
+- singular/plural of the same word
+- abbreviations of the same phrase: TV/television, cell/cellphone
+- very narrow same-meaning wording that creates the same completed phrase
+
+DO NOT MATCH:
+- general category vs specific member: animal/cat, drink/beer, vehicle/car
+- related or associated words: salt/pepper, pepper/shaker for "Salt ___"
+- container/tool/object pairs: drink/glass, salt/shaker
+- two different common completions of the same clue
+- answers that are merely in the same topic area
+
+Useful test: put each answer into the blank. If they make two meaningfully different phrases, return false.
 Return JSON only: {"match":true} or {"match":false}`,
-      40, true
+      60, true
     );
     const parsed = extractJSON(text);
     return Boolean(parsed.match);
@@ -978,6 +1026,7 @@ app.post('/api/room', async (req, res) => {
       usedCharacters: [],
       usedCategories: [],
       usedSuperPrompts: [],
+      usedFinalPrompts: [],
       chosenAnswerKey: [],
       contestantAnswer: null,
       panelAnswers: [],
@@ -1391,8 +1440,9 @@ app.post('/api/room/:code/finalmatch-start', async (req, res) => {
   res.json({ room });
 
   try {
-    const fm = await generateFinalMatchPrompt();
+    const fm = await generateFinalMatchPrompt(room.usedFinalPrompts || []);
     room.finalMatchPrompt = fm.prompt;
+    room.usedFinalPrompts = [...(room.usedFinalPrompts || []), fm.prompt];
     room.finalMatchAnswerKey = fm.answers || [];
     room.finalMatchCelebIndex = null;
     room.finalMatchContestantAnswer = null;
