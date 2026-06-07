@@ -1054,6 +1054,7 @@ function DisplaySuperMatchReveal({ room, roomCode, setRevealIndex = () => {} }) 
           const shown = i <= (room.superMatchRevealIndex ?? -1);
           return (
             <div key={i} className={`mg-super-celeb-card ${shown ? 'revealed' : ''}`}>
+              <CelebVisual celeb={p} size={92} />
               <div className="mg-panelist-name">{p?.name}</div>
               <div className="mg-panelist-answer" style={{fontSize:28}}>
                 {shown ? p?.answer : '???'}
@@ -1309,13 +1310,17 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
           isAnnouncer: true,
           fallbackProfile: ANNOUNCER_PROFILE,
         });
+        await delay(1800);
+        if (!cancelled) { try { await api.finalMatchDone(roomCode); } catch {} }
       } else {
         playAudience('aww');
         await speakTTS({
-          text: `No match. So close!`,
+          text: `Well, ${room.players[room.activeSlot]}, you didn't win the Final Match, but you're still going home with ${fmt$(room.superMatchWinnings || 0)}.`,
           isAnnouncer: true,
           fallbackProfile: ANNOUNCER_PROFILE,
         });
+        await delay(1800);
+        if (!cancelled) { try { await api.finalMatchDone(roomCode); } catch {} }
       }
     })();
     return () => { cancelled = true; };
@@ -1349,7 +1354,7 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
             </div>
           </div>
         : <div style={{textAlign:'center',fontFamily:'Bowlby One,sans-serif',fontSize:32,color:'var(--cir-red)'}}>
-            No match — so close!
+            No Final Match — credits coming up!
           </div>)
         : <p className="mg-status" style={{fontSize:20}}>The star is thinking...</p>}
     </div>

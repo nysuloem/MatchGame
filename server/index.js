@@ -263,6 +263,25 @@ const usedPromptSamples = (kind, limit = 80) => Object.values(PROMPT_HISTORY[kin
   .map(x => x.prompt)
   .filter(Boolean);
 
+const SUPER_FINAL_FORBIDDEN_ROOTS = new Set([
+  'pizza', 'favourite', 'favorite'
+]);
+
+const promptRootWords = (prompt = '') => normalizePromptKey(prompt)
+  .replace(/_/g, ' ')
+  .split(/\s+/)
+  .map(w => w.replace(/[^a-z0-9]/g, ''))
+  .filter(w => w.length > 3 && !['with','from','that','this','your','their','there','match','game'].includes(w));
+
+const promptHasForbiddenSuperFinalRoot = (prompt = '') => promptRootWords(prompt)
+  .some(w => SUPER_FINAL_FORBIDDEN_ROOTS.has(w));
+
+const promptRootAlreadyUsed = (prompt = '', localUsed = []) => {
+  const roots = new Set(promptRootWords(prompt));
+  if (!roots.size) return false;
+  return (localUsed || []).some(oldPrompt => promptRootWords(oldPrompt).some(w => roots.has(w)));
+};
+
 const promptAlreadyUsedOrSimilar = (kind, prompt, localUsed = []) => {
   const all = [...localUsed, ...usedPromptSamples(kind, 250)];
   return all.some(p => promptsTooSimilar(prompt, p));
@@ -824,7 +843,7 @@ const generateSuperMatchPrompt = async (usedPrompts = []) => {
 It should be a short phrase with exactly one blank marker: __________
 Examples of the FORM: "Hot __________", "__________ Dog", "Wedding __________", "Phone __________".
 Generate a clean, classic survey-board clue. It should have MANY ordinary answers a real audience might give, with one very obvious top answer and two plausible runners-up.
-Do NOT use "Favourite" or "Favorite" anywhere. In fact, avoid that word entirely.
+Do NOT use "Favourite" or "Favorite" anywhere. Do NOT use Pizza. Avoid any clue root already listed below.
 Avoid vague adjectives where the top answers would be random. Avoid obscure slang, niche pop culture, or clues that invite silly nonsense.
 It must be obvious enough to produce top 3 survey answers, but not be identical or similar to anything below.
 Avoid prior prompts:\n${avoidList || '(none)'}
@@ -834,7 +853,7 @@ Return JSON exactly: {"prompt":"... ___ ..."}`,
       );
       const parsed = extractJSON(text);
       const prompt = normalizePromptBlank(parsed.prompt || '');
-      if (promptIsUsable(prompt, 'short') && !promptAlreadyUsedOrSimilar('super', prompt, localUsed)) {
+      if (promptIsUsable(prompt, 'short') && !promptHasForbiddenSuperFinalRoot(prompt) && !promptRootAlreadyUsed(prompt, localUsed) && !promptAlreadyUsedOrSimilar('super', prompt, localUsed)) {
         markPromptUsed('super', prompt);
         return prompt;
       }
@@ -843,8 +862,8 @@ Return JSON exactly: {"prompt":"... ___ ..."}`,
     }
   }
 
-  let unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptAlreadyUsedOrSimilar('super', p.prompt, localUsed));
-  if (!unused.length) unused = FALLBACK_SUPER_PROMPTS.filter(p => !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
+  let unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !promptRootAlreadyUsed(p.prompt, localUsed) && !promptAlreadyUsedOrSimilar('super', p.prompt, localUsed));
+  if (!unused.length) unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
   if (!unused.length) unused = FALLBACK_SUPER_PROMPTS;
   const chosen = shuffle(unused)[0];
   const superPrompt = normalizePromptBlank(chosen.prompt);
@@ -994,7 +1013,7 @@ const generateFinalMatchPrompt = async (usedPrompts = []) => {
 
 It must be a short, familiar survey-style phrase with exactly one blank marker written as __________.
 Examples of the FORM ONLY: "Birthday __________", "Movie __________", "Phone __________", "__________ Dog", "Hot __________". Answers must be ONLY the missing word/phrase, not the entire completed phrase.
-Avoid "Favourite/Favorite" entirely.
+Avoid "Favourite/Favorite" entirely. Do NOT use Pizza. Avoid any clue root already listed below.
 Avoid awkward/redundant clues like "First Date ___".
 Avoid anything identical or similar to these previous Super/Final Match prompts:
 ${avoidList || '(none)'}
@@ -1005,7 +1024,7 @@ Return JSON exactly: {"prompt":"... __________", "answers":["most obvious", "sec
       const parsed = extractJSON(text);
       const prompt = String(parsed.prompt || '').trim();
       const answers = Array.isArray(parsed.answers) ? parsed.answers.map(a => stripAnswerToBlank(prompt, String(a).trim())).filter(Boolean).slice(0,3) : [];
-      if (promptIsUsable(prompt, 'short') && answers.length && !promptAlreadyUsedOrSimilar('final', prompt, localUsed)) {
+      if (promptIsUsable(prompt, 'short') && answers.length && !promptHasForbiddenSuperFinalRoot(prompt) && !promptRootAlreadyUsed(prompt, localUsed) && !promptAlreadyUsedOrSimilar('final', prompt, localUsed)) {
         markPromptUsed('final', prompt);
         return { prompt, answers };
       }
@@ -1014,8 +1033,8 @@ Return JSON exactly: {"prompt":"... __________", "answers":["most obvious", "sec
     }
   }
 
-  let unused = FINAL_MATCH_PROMPTS.filter(p => !promptAlreadyUsedOrSimilar('final', p.prompt, localUsed));
-  if (!unused.length) unused = FINAL_MATCH_PROMPTS.filter(p => !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
+  let unused = FINAL_MATCH_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !promptRootAlreadyUsed(p.prompt, localUsed) && !promptAlreadyUsedOrSimilar('final', p.prompt, localUsed));
+  if (!unused.length) unused = FINAL_MATCH_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
   if (!unused.length) unused = FINAL_MATCH_PROMPTS;
   const fallback = shuffle(unused)[0];
   const finalFallback = { ...fallback, prompt: normalizePromptBlank(fallback.prompt) };
