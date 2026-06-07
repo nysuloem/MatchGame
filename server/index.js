@@ -135,6 +135,37 @@ const promptIsUsable = (prompt, kind = 'round') => {
   return t.length >= 5 && t.length <= 80;
 };
 
+const stripAnswerToBlank = (prompt = '', answer = '') => {
+  // Celebrities and survey boards should supply ONLY the missing word/phrase.
+  // If the prompt is "Dream __________" and the model says "dream job", keep "job".
+  const raw = String(answer || '')
+    .replace(/^['"“”‘’]+|['"“”‘’.,!?;:]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!raw) return '';
+  const promptText = normalizePromptBlank(prompt);
+  const before = promptText.split(BLANK)[0] || '';
+  const after = promptText.split(BLANK)[1] || '';
+  const cleanWord = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  let out = raw;
+
+  const beforeWords = cleanWord(before).split(/\s+/).filter(w => w.length > 2);
+  const afterWords = cleanWord(after).split(/\s+/).filter(w => w.length > 2);
+  const rawWords = out.split(/\s+/);
+  while (rawWords.length > 1 && beforeWords.includes(cleanWord(rawWords[0]))) rawWords.shift();
+  while (rawWords.length > 1 && afterWords.includes(cleanWord(rawWords[rawWords.length - 1]))) rawWords.pop();
+  out = rawWords.join(' ');
+
+  // Also remove a multi-word prefix that is literally the prompt text before the blank.
+  const beforeNorm = cleanWord(before);
+  const outNorm = cleanWord(out);
+  if (beforeNorm && outNorm.startsWith(beforeNorm + ' ')) {
+    const n = beforeNorm.split(/\s+/).length;
+    out = out.split(/\s+/).slice(n).join(' ');
+  }
+  return (out || raw).split(/\s+/).slice(0, 3).join(' ').trim();
+};
+
 const promptsTooSimilar = (a, b) => {
   const na = normalizePromptKey(a).replace(/[^a-z0-9 ]/g, ' ');
   const nb = normalizePromptKey(b).replace(/[^a-z0-9 ]/g, ' ');
@@ -209,11 +240,16 @@ const CHARACTER_ARCHETYPES = [
 
 
 const PROMPT_CATEGORIES = [
-  'awkward family moments', 'teen and adult dating', 'phones and group chats',
-  'streaming and reality TV', 'school and campus life', 'workplace embarrassment',
-  'gym and body comedy', 'food delivery and restaurants', 'vacations and hotels',
-  'weddings and parties', 'pets behaving badly', 'shopping and money',
-  'cars and driving', 'doctors and health mishaps', 'sports and games', 'classic Dumb Dora misunderstandings'
+  'classic dumb misunderstandings', 'dating and romance', 'parents and in-laws',
+  'teenagers and group chats', 'neighbors and apartment buildings', 'restaurants and bars',
+  'airports and airplanes', 'hotels and cruises', 'doctors dentists and pharmacies',
+  'gyms locker rooms and spas', 'office jobs and bosses', 'teachers principals and campus life',
+  'police judges and traffic stops', 'shopping malls and returns', 'banks bills and money',
+  'cars buses taxis and rideshares', 'pets vets and animal trouble', 'sports fans and locker rooms',
+  'camping beaches and cottages', 'supermarkets and convenience stores', 'hair salons and barbers',
+  'mechanics plumbers and electricians', 'technology smart homes and passwords', 'streaming reality TV and influencers',
+  'game nights karaoke and parties', 'holidays birthdays and family dinners', 'fortune tellers magicians and psychics',
+  'pirates astronauts cowboys and old movie types', 'light adult innuendo and double meanings'
 ];
 
 const FALLBACK_ROUND_PROMPTS = [
@@ -575,7 +611,7 @@ Return JSON exactly:
         markPromptUsed('round', b.prompt);
         return {
           promptA: a.prompt, promptB: b.prompt,
-          answersA: a.answers.slice(0,3), answersB: b.answers.slice(0,3),
+          answersA: a.answers.slice(0,3).map(ans => stripAnswerToBlank(a.prompt, ans)), answersB: b.answers.slice(0,3).map(ans => stripAnswerToBlank(b.prompt, ans)),
           categoryA: 'PROMPT:' + a.prompt, categoryB: 'PROMPT:' + b.prompt,
           charA: a.character || charA, charB: b.character || charB,
         };
@@ -597,7 +633,7 @@ Return JSON exactly:
   markPromptUsed('round', b.prompt);
   return {
     promptA: a.prompt, promptB: b.prompt,
-    answersA: a.answers, answersB: b.answers,
+    answersA: a.answers.map(ans => stripAnswerToBlank(a.prompt, ans)), answersB: b.answers.map(ans => stripAnswerToBlank(b.prompt, ans)),
     categoryA: 'PROMPT:' + a.prompt, categoryB: 'PROMPT:' + b.prompt,
     charA: a.prompt.match(/^([^'’]+)'/)?.[1] || charA,
     charB: b.prompt.match(/^([^'’]+)'/)?.[1] || charB,
@@ -627,11 +663,12 @@ The panel should NOT give six unrelated answers.
 
 ANSWER RULES:
 - 1-2 WORDS MAXIMUM per celebrity.
+- Fill ONLY the missing blank. Do NOT repeat words already in the prompt. If the clue is "Dream __________", answer "job", not "dream job".
 - Use simple concrete words, not explanations.
 - The answer must fit the blank naturally when read in the prompt.
 - Round 1: answers may vary, but they must stay in the same answer neighborhood. About 2 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, 1 should give a plausible in-character answer, and 1 should give a funny answer.
-- Round 2: increase matching strongly. At least 4 eligible celebrities should use the #1 answer or an obvious synonym. One celebrity may use #2/#3. One may be funny/lightly innuendo-based, but still plausibly matchable.
-- The funny answer should be a quick laugh, light innuendo is allowed, but it must still make sense for the blank.
+- Round 2: increase matching strongly. At least 4 eligible celebrities should use the #1 answer or an obvious synonym. One celebrity may use #2/#3. One may be funny/adult-innuendo-based, but still plausibly matchable.
+- The funny answer should be a quick laugh. Lean into classic Match Game double-entendre and adult innuendo when the prompt allows it, but keep it non-explicit and TV-PG/PG-13.
 - Do NOT make the same celebrity type the oddball every time; follow the designated funny position.
 - Do NOT make every celebrity different. That ruins the game.
 - Do NOT be too clever, abstract, or niche.
@@ -644,14 +681,14 @@ Return JSON: {"answers": ["answer1","answer2","answer3","answer4","answer5","ans
   );
   const parsed = extractJSON(text);
   let answers = Array.isArray(parsed) ? parsed : (parsed.answers || []);
-  answers = answers.map(a => (a || '???').split(/\s+/).slice(0, 2).join(' '));
+  answers = answers.map(a => stripAnswerToBlank(promptText, a || '???').split(/\s+/).slice(0, 2).join(' '));
   while (answers.length < 6) answers.push(key[0] || '???');
 
   // Safety net: keep the model funny, but enforce Match Game convergence with randomized positions.
   if (key.length) {
-    const top = key[0];
-    const second = key[1] || key[0];
-    const third = key[2] || second;
+    const top = stripAnswerToBlank(promptText, key[0]);
+    const second = stripAnswerToBlank(promptText, key[1] || key[0]);
+    const third = stripAnswerToBlank(promptText, key[2] || second);
     if (roundNum === 1) {
       for (const i of topSlots) answers[i] = top;
       for (const i of alternateSlots) answers[i] = Math.random() < 0.5 ? second : third;
@@ -726,6 +763,7 @@ Classic Match Game survey logic: obvious beats clever. These are the hidden stud
 
 Rules:
 - Each answer must be 1-2 words.
+- Each answer must be ONLY the missing word/phrase, not the whole completed phrase. For "Dream __________", answer "job", not "dream job".
 - Answers must fit the blank naturally.
 - The three answers should be distinct.
 - Prize values must be exactly 500, 250, 100.
@@ -744,7 +782,7 @@ Return JSON only:
     if (Array.isArray(parsedSurvey.topAnswers) && parsedSurvey.topAnswers.length >= 3) {
       topAnswers = parsedSurvey.topAnswers.slice(0, 3).map((ta, i) => ({
         rank: i + 1,
-        answer: String(ta.answer || fallback.topAnswers[i].answer).split(/\s+/).slice(0,2).join(' '),
+        answer: stripAnswerToBlank(prompt, String(ta.answer || fallback.topAnswers[i].answer)).split(/\s+/).slice(0,2).join(' '),
         value: [500,250,100][i]
       }));
     }
@@ -763,6 +801,7 @@ Generate ONE suggested answer from each celebrity. They are trying to help the c
 
 Rules:
 - 1-2 WORDS max per answer.
+- Each answer must be ONLY the missing word/phrase, not the whole completed phrase. For "Dream __________", answer "job", not "dream job".
 - Answers must fit the blank naturally.
 - Make the suggestions plausible and helpful, but not magically perfect.
 - Avoid making all three celebrities give the same answer.
@@ -788,8 +827,8 @@ Return JSON only: {"celebAnswers": ["answer for celeb 1", "answer for celeb 2", 
     topAnswers[2]?.answer
   ].filter(Boolean));
 
-  celebAnswers = celebAnswers.slice(0, 3).map((a, i) => String(a || fallbackSuggestions[i] || topAnswers[i % topAnswers.length].answer).split(/\s+/).slice(0,2).join(' '));
-  while (celebAnswers.length < 3) celebAnswers.push(String(fallbackSuggestions[celebAnswers.length] || topAnswers[celebAnswers.length % topAnswers.length].answer).split(/\s+/).slice(0,2).join(' '));
+  celebAnswers = celebAnswers.slice(0, 3).map((a, i) => stripAnswerToBlank(prompt, String(a || fallbackSuggestions[i] || topAnswers[i % topAnswers.length].answer)).split(/\s+/).slice(0,2).join(' '));
+  while (celebAnswers.length < 3) celebAnswers.push(stripAnswerToBlank(prompt, String(fallbackSuggestions[celebAnswers.length] || topAnswers[celebAnswers.length % topAnswers.length].answer)).split(/\s+/).slice(0,2).join(' '));
 
   return { topAnswers, celebAnswers };
 };
@@ -819,7 +858,7 @@ const generateFinalMatchPrompt = async (usedPrompts = []) => {
         `Generate ONE brand-new Final Match clue as JSON.
 
 It must be a short, familiar survey-style phrase with exactly one blank marker written as __________.
-Examples of the FORM ONLY: "Birthday __________", "Movie __________", "Phone __________", "__________ Dog", "Hot __________".
+Examples of the FORM ONLY: "Birthday __________", "Movie __________", "Phone __________", "__________ Dog", "Hot __________". Answers must be ONLY the missing word/phrase, not the entire completed phrase.
 Avoid "Favourite/Favorite" entirely.
 Avoid awkward/redundant clues like "First Date ___".
 Avoid anything identical or similar to these previous Super/Final Match prompts:
@@ -830,7 +869,7 @@ Return JSON exactly: {"prompt":"... __________", "answers":["most obvious", "sec
       );
       const parsed = extractJSON(text);
       const prompt = String(parsed.prompt || '').trim();
-      const answers = Array.isArray(parsed.answers) ? parsed.answers.map(a => String(a).trim()).filter(Boolean).slice(0,3) : [];
+      const answers = Array.isArray(parsed.answers) ? parsed.answers.map(a => stripAnswerToBlank(prompt, String(a).trim())).filter(Boolean).slice(0,3) : [];
       if (promptIsUsable(prompt, 'short') && answers.length && !promptAlreadyUsedOrSimilar('final', prompt, localUsed)) {
         markPromptUsed('final', prompt);
         return { prompt, answers };
@@ -846,7 +885,7 @@ Return JSON exactly: {"prompt":"... __________", "answers":["most obvious", "sec
   const fallback = shuffle(unused)[0];
   const finalFallback = { ...fallback, prompt: normalizePromptBlank(fallback.prompt) };
   markPromptUsed('final', finalFallback.prompt);
-  return finalFallback;
+  return { ...finalFallback, answers: finalFallback.answers.map(ans => stripAnswerToBlank(finalFallback.prompt, ans)) };
 };
 
 const generateFinalMatchCelebAnswer = async (prompt, celeb, contestantName, answerKey = []) => {
@@ -858,10 +897,10 @@ Celebrity: ${celeb.name} (${celeb.tag})
 Likely survey answers: ${keyText || 'infer the obvious answer'}
 
 ${celeb.name} is under pressure and trying VERY HARD to match the contestant. The answer should almost always be the #1 obvious answer, not a joke.
-Give only the answer, 1-2 words maximum.`,
+Give only the missing word/phrase, 1-2 words maximum. Do NOT repeat words already in the prompt. If the clue is "Dream __________", answer "job", not "dream job".`,
     30
   );
-  let ans = text.trim().replace(/^['"]|['"]$/g, '').split(/\s+/).slice(0, 2).join(' ');
+  let ans = stripAnswerToBlank(prompt, text.trim().replace(/^['"]|['"]$/g, '')).split(/\s+/).slice(0, 2).join(' ');
   if (!ans && answerKey?.[0]) ans = answerKey[0];
   return ans;
 };
@@ -1017,7 +1056,7 @@ const aiContestantAnswer = async (prompt, answerKey = []) => {
       80, true
     );
     const parsed = extractJSON(text);
-    return String(parsed.answer || 'answer').trim().split(/\s+/).slice(0,2).join(' ');
+    return stripAnswerToBlank(prompt, String(parsed.answer || 'answer').trim()).split(/\s+/).slice(0,2).join(' ');
   } catch {
     return 'answer';
   }

@@ -58,84 +58,11 @@ const getAudioCtx = () => {
     return sharedAudioCtx;
   } catch { return null; }
 };
-const playAudience = (kind = 'applause') => {
-  const ctx = getAudioCtx();
-  if (!ctx) return;
-  const now = ctx.currentTime;
-
-  const makeNoise = (start, duration, volume, envelopeType = 'fade', tone = 1) => {
-    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) {
-      const t = i / data.length;
-      const burst = 0.55 + 0.45 * Math.sin(i * 0.025 * tone) * Math.sin(i * 0.007);
-      const env = envelopeType === 'swell'
-        ? Math.sin(Math.PI * t)
-        : envelopeType === 'pop'
-          ? Math.exp(-8 * t)
-          : Math.exp(-2.6 * t);
-      data[i] = (Math.random() * 2 - 1) * burst * env * volume;
-    }
-    const src = ctx.createBufferSource();
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(1, start + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.01, start + duration);
-    src.buffer = buffer;
-    src.connect(gain).connect(ctx.destination);
-    src.start(start);
-    src.stop(start + duration + 0.02);
-  };
-
-  const tone = (freq, start, duration, volume, type = 'triangle') => {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, start);
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(volume, start + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(start);
-    osc.stop(start + duration + 0.02);
-  };
-
-  if (kind === 'applause') {
-    makeNoise(now, 0.75, 0.22, 'fade', 1.1);
-    makeNoise(now + 0.08, 0.65, 0.15, 'fade', 1.8);
-  } else if (kind === 'cheer') {
-    makeNoise(now, 1.05, 0.30, 'swell', 0.8);
-    [523.25, 659.25, 783.99].forEach((f, i) => tone(f, now + 0.08 + i * 0.08, 0.28, 0.07));
-  } else if (kind === 'win') {
-    makeNoise(now, 1.8, 0.38, 'swell', 0.7);
-    [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
-      tone(freq, now + idx * 0.12, 0.4, 0.18, 'triangle');
-    });
-  } else if (kind === 'laugh' || kind === 'chuckle') {
-    const reps = kind === 'laugh' ? 8 : 5;
-    for (let i = 0; i < reps; i++) {
-      const start = now + i * 0.075;
-      makeNoise(start, 0.16, kind === 'laugh' ? 0.14 : 0.09, 'pop', 2.5 + i * 0.2);
-      tone(180 + (i % 3) * 35, start, 0.08, 0.025, 'sawtooth');
-    }
-  } else if (kind === 'groan' || kind === 'aww') {
-    makeNoise(now, 0.8, 0.16, 'swell', 0.55);
-    [220, 196, 174.6].forEach((f, i) => tone(f, now + i * 0.11, 0.36, kind === 'groan' ? 0.065 : 0.045, 'sine'));
-  } else if (kind === 'gasp') {
-    makeNoise(now, 0.35, 0.20, 'swell', 0.45);
-    tone(392, now + 0.04, 0.18, 0.035, 'sine');
-  } else if (kind === 'drumroll') {
-    for (let i = 0; i < 16; i++) makeNoise(now + i * 0.045, 0.06, 0.12 + i * 0.004, 'pop', 4);
-  } else if (kind === 'rimshot') {
-    makeNoise(now, 0.08, 0.28, 'pop', 6);
-    tone(880, now + 0.08, 0.08, 0.08, 'square');
-    tone(220, now + 0.17, 0.22, 0.12, 'triangle');
-  }
-};
-
+const playAudience = () => {};
 let thinkingMusicTimer = null;
 let thinkingMusicAudio = null;
 let introMusicAudio = null;
+let creditsMusicAudio = null;
 const THEME_TRACK = '/audio/match-game-73.mp3';
 const REGULAR_TRACK = '/audio/regular-music.mp3';
 const safePlayAudio = (audio) => audio.play().catch(() => {});
@@ -183,6 +110,20 @@ const stopIntroMusic = () => {
   if (!introMusicAudio) return;
   fadeAndStop(introMusicAudio, 650);
   introMusicAudio = null;
+};
+const startCreditsMusic = () => {
+  if (creditsMusicAudio) return;
+  try {
+    creditsMusicAudio = new Audio(THEME_TRACK);
+    creditsMusicAudio.loop = true;
+    creditsMusicAudio.volume = 0.16;
+    safePlayAudio(creditsMusicAudio);
+  } catch { playRetroSting(); }
+};
+const stopCreditsMusic = () => {
+  if (!creditsMusicAudio) return;
+  fadeAndStop(creditsMusicAudio, 650);
+  creditsMusicAudio = null;
 };
 const startThinkingMusic = () => {
   if (thinkingMusicAudio || thinkingMusicTimer) return;
@@ -1177,15 +1118,16 @@ function DisplayGameOver({ room }) {
   useEffect(() => {
     if (ranRef.current) return;
     ranRef.current = true;
+    startCreditsMusic();
     (async () => {
       await delay(600);
-      playAudience('applause');
       await speakTTS({
         text: 'Match Game is a collaboration between Jason Brown, Claude AI, and ChatGPT.',
         isAnnouncer: true,
         fallbackProfile: ANNOUNCER_PROFILE,
       });
     })();
+    return () => stopCreditsMusic();
   }, []);
   const headline = room.finalMatchResult==='win'
     ? `${room.players[room.activeSlot]} wins ${fmt$(room.finalMatchWinnings)}!`

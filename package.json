@@ -1,10 +1,15 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import MatchGame from './MatchGame.jsx';
-import './styles.css';
-
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <MatchGame />
-  </React.StrictMode>
-);
+{
+  "name": "match-game",
+  "version": "1.0.0",
+  "description": "Match Game - retro game show, two-device sync, AI celebrity panel",
+  "workspaces": ["client", "server"],
+  "scripts": {
+    "build": "npm run build --workspace=client",
+    "start": "npm start --workspace=server",
+    "dev:server": "npm run dev --workspace=server",
+    "dev:client": "npm run dev --workspace=client"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
