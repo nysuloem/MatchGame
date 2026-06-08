@@ -59,7 +59,8 @@ const normalizePromptKey = (prompt) => String(prompt || '')
 const PROMPT_ROOT_STOPWORDS = new Set([
   'with','from','that','this','your','their','there','match','game','when','what','were',
   'they','them','then','than','into','onto','over','under','round','final','super',
-  'blank','said','thought','because','would','could','should','going','after','before'
+  'blank','said','thought','because','would','could','should','going','after','before',
+  'party','room','money','show','night','thing','stuff'
 ]);
 
 const promptRootWords = (prompt = '') => normalizePromptKey(prompt)
@@ -67,6 +68,18 @@ const promptRootWords = (prompt = '') => normalizePromptKey(prompt)
   .split(/\s+/)
   .map(w => w.replace(/[^a-z0-9]/g, ''))
   .filter(w => w.length > 3 && !PROMPT_ROOT_STOPWORDS.has(w));
+
+const promptClueRootWords = (prompt = '') => {
+  const normalized = normalizePromptKey(prompt).replace(/_{3,}|___+/g, ' ____ ');
+  const beforeBlank = normalized.split('____')[0] || '';
+  const afterBlank = normalized.split('____')[1] || '';
+  const basis = beforeBlank.trim() ? beforeBlank : afterBlank;
+  const roots = basis
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-z0-9]/g, ''))
+    .filter(w => w.length > 3 && !PROMPT_ROOT_STOPWORDS.has(w));
+  return roots.length ? roots : promptRootWords(prompt);
+};
 
 // In-memory no-repeat database for the current server process. Each room also tracks
 // its own used prompts so a family play-through never sees an exact repeat.
@@ -129,7 +142,7 @@ const markPromptUsed = (kind, prompt) => {
   // Also store root words so "Birthday ___" and "Birthday Cake ___" do not
   // sneak through as "different" prompts. This is especially important for
   // Super Match and Final Match clues, where the root word is the whole game.
-  for (const root of promptRootWords(clean)) {
+  for (const root of promptClueRootWords(clean)) {
     PROMPT_DB.prepare(`
       INSERT INTO prompt_root_history (kind, root, prompt)
       VALUES (?, ?, ?)
@@ -355,16 +368,16 @@ const promptsTooSimilar = (a, b) => {
 };
 
 const SUPER_FINAL_FORBIDDEN_ROOTS = new Set([
-  'pizza', 'pizzas', 'birthday', 'birthdays', 'favourite', 'favorite'
+  'pizza', 'pizzas', 'birthday', 'birthdays', 'favourite', 'favorite', 'favorites', 'favourites'
 ]);
 
 const promptHasForbiddenSuperFinalRoot = (prompt = '') => promptRootWords(prompt)
   .some(w => SUPER_FINAL_FORBIDDEN_ROOTS.has(w));
 
 const promptRootAlreadyUsed = (prompt = '', localUsed = [], kinds = ['super','final']) => {
-  const roots = new Set(promptRootWords(prompt));
+  const roots = new Set(promptClueRootWords(prompt));
   if (!roots.size) return false;
-  if ((localUsed || []).some(oldPrompt => promptRootWords(oldPrompt).some(w => roots.has(w)))) return true;
+  if ((localUsed || []).some(oldPrompt => promptClueRootWords(oldPrompt).some(w => roots.has(w)))) return true;
   for (const root of roots) {
     for (const kind of kinds) {
       if (hasPromptRootBeenUsed(kind, root)) return true;
@@ -642,81 +655,46 @@ const FALLBACK_ROUND_PROMPTS = [
 
 const FALLBACK_SUPER_PROMPTS = [
   { prompt:'Television ___', topAnswers:[{rank:1,answer:'Show',value:500},{rank:2,answer:'Set',value:250},{rank:3,answer:'Remote',value:100}] },
-  { prompt:'Birthday ___', topAnswers:[{rank:1,answer:'Cake',value:500},{rank:2,answer:'Party',value:250},{rank:3,answer:'Gift',value:100}] },
   { prompt:'___ Dog', topAnswers:[{rank:1,answer:'Hot',value:500},{rank:2,answer:'Guard',value:250},{rank:3,answer:'Big',value:100}] },
   { prompt:'Phone ___', topAnswers:[{rank:1,answer:'Call',value:500},{rank:2,answer:'Case',value:250},{rank:3,answer:'Number',value:100}] },
   { prompt:'Hot ___', topAnswers:[{rank:1,answer:'Dog',value:500},{rank:2,answer:'Tub',value:250},{rank:3,answer:'Sauce',value:100}] },
   { prompt:'Movie ___', topAnswers:[{rank:1,answer:'Star',value:500},{rank:2,answer:'Night',value:250},{rank:3,answer:'Theater',value:100}] },
-  { prompt:'___ Party', topAnswers:[{rank:1,answer:'Birthday',value:500},{rank:2,answer:'House',value:250},{rank:3,answer:'Pool',value:100}] },
   { prompt:'Gym ___', topAnswers:[{rank:1,answer:'Rat',value:500},{rank:2,answer:'Bag',value:250},{rank:3,answer:'Class',value:100}] },
   { prompt:'___ Chat', topAnswers:[{rank:1,answer:'Group',value:500},{rank:2,answer:'Video',value:250},{rank:3,answer:'Snap',value:100}] },
   { prompt:'First ___', topAnswers:[{rank:1,answer:'Date',value:500},{rank:2,answer:'Kiss',value:250},{rank:3,answer:'Love',value:100}] },
   { prompt:'Coffee ___', topAnswers:[{rank:1,answer:'Cup',value:500},{rank:2,answer:'Shop',value:250},{rank:3,answer:'Break',value:100}] },
-  { prompt:'Wedding ___', topAnswers:[{rank:1,answer:'Cake',value:500},{rank:2,answer:'Ring',value:250},{rank:3,answer:'Dress',value:100}] },
   { prompt:'School ___', topAnswers:[{rank:1,answer:'Bus',value:500},{rank:2,answer:'Dance',value:250},{rank:3,answer:'Lunch',value:100}] },
   { prompt:'Christmas ___', topAnswers:[{rank:1,answer:'Tree',value:500},{rank:2,answer:'Gift',value:250},{rank:3,answer:'Party',value:100}] },
   { prompt:'Rock ___', topAnswers:[{rank:1,answer:'Star',value:500},{rank:2,answer:'Music',value:250},{rank:3,answer:'Band',value:100}] },
   { prompt:'Car ___', topAnswers:[{rank:1,answer:'Keys',value:500},{rank:2,answer:'Wash',value:250},{rank:3,answer:'Seat',value:100}] },
-  { prompt:'Pizza ___', topAnswers:[{rank:1,answer:'Pie',value:500},{rank:2,answer:'Slice',value:250},{rank:3,answer:'Delivery',value:100}] },
   { prompt:'Dating ___', topAnswers:[{rank:1,answer:'App',value:500},{rank:2,answer:'Game',value:250},{rank:3,answer:'Profile',value:100}] },
-  { prompt:'___ Room', topAnswers:[{rank:1,answer:'Living',value:500},{rank:2,answer:'Bed',value:250},{rank:3,answer:'Dining',value:100}] },
-  { prompt:'___ Money', topAnswers:[{rank:1,answer:'Cash',value:500},{rank:2,answer:'Prize',value:250},{rank:3,answer:'Blood',value:100}] },
-  { prompt:'Game ___', topAnswers:[{rank:1,answer:'Show',value:500},{rank:2,answer:'Night',value:250},{rank:3,answer:'Board',value:100}] },
-  { prompt:'Blank ___', topAnswers:[{rank:1,answer:'Slate',value:500},{rank:2,answer:'Check',value:250},{rank:3,answer:'Page',value:100}] },
-  { prompt:'Family ___', topAnswers:[{rank:1,answer:'Feud',value:500},{rank:2,answer:'Dinner',value:250},{rank:3,answer:'Tree',value:100}] },
   { prompt:'Ice ___', topAnswers:[{rank:1,answer:'Cream',value:500},{rank:2,answer:'Cube',value:250},{rank:3,answer:'Skate',value:100}] },
   { prompt:'Baby ___', topAnswers:[{rank:1,answer:'Shower',value:500},{rank:2,answer:'Bottle',value:250},{rank:3,answer:'Food',value:100}] },
-  { prompt:'Bank ___', topAnswers:[{rank:1,answer:'Account',value:500},{rank:2,answer:'Robber',value:250},{rank:3,answer:'Teller',value:100}] },
-  { prompt:'___ Night', topAnswers:[{rank:1,answer:'Date',value:500},{rank:2,answer:'Game',value:250},{rank:3,answer:'Movie',value:100}] },
-  { prompt:'___ Face', topAnswers:[{rank:1,answer:'Poker',value:500},{rank:2,answer:'Baby',value:250},{rank:3,answer:'Duck',value:100}] },
-  { prompt:'Magic ___', topAnswers:[{rank:1,answer:'Trick',value:500},{rank:2,answer:'Wand',value:250},{rank:3,answer:'Show',value:100}] },
-  { prompt:'Love ___', topAnswers:[{rank:1,answer:'Letter',value:500},{rank:2,answer:'Song',value:250},{rank:3,answer:'Boat',value:100}] },
-  { prompt:'Dinner ___', topAnswers:[{rank:1,answer:'Table',value:500},{rank:2,answer:'Date',value:250},{rank:3,answer:'Party',value:100}] },
-  { prompt:'___ School', topAnswers:[{rank:1,answer:'High',value:500},{rank:2,answer:'Old',value:250},{rank:3,answer:'Night',value:100}] },
-  { prompt:'___ Check', topAnswers:[{rank:1,answer:'Rain',value:500},{rank:2,answer:'Blank',value:250},{rank:3,answer:'Pay',value:100}] },
-  { prompt:'Kitchen ___', topAnswers:[{rank:1,answer:'Sink',value:500},{rank:2,answer:'Table',value:250},{rank:3,answer:'Knife',value:100}] },
-  { prompt:'Party ___', topAnswers:[{rank:1,answer:'Animal',value:500},{rank:2,answer:'Hat',value:250},{rank:3,answer:'Favor',value:100}] },
-  { prompt:'___ Bag', topAnswers:[{rank:1,answer:'Garbage',value:500},{rank:2,answer:'Gym',value:250},{rank:3,answer:'Tea',value:100}] },
-  { prompt:'Blue ___', topAnswers:[{rank:1,answer:'Moon',value:500},{rank:2,answer:'Jeans',value:250},{rank:3,answer:'Cheese',value:100}] },
-  { prompt:'Rain ___', topAnswers:[{rank:1,answer:'Coat',value:500},{rank:2,answer:'Check',value:250},{rank:3,answer:'Drop',value:100}] },
-  { prompt:'Pay ___', topAnswers:[{rank:1,answer:'Check',value:500},{rank:2,answer:'Day',value:250},{rank:3,answer:'Phone',value:100}] },
-  { prompt:'Dream ___', topAnswers:[{rank:1,answer:'Job',value:500},{rank:2,answer:'House',value:250},{rank:3,answer:'Girl',value:100}] },
-  { prompt:'Chicken ___', topAnswers:[{rank:1,answer:'Soup',value:500},{rank:2,answer:'Wing',value:250},{rank:3,answer:'Dance',value:100}] },
-  { prompt:'Cold ___', topAnswers:[{rank:1,answer:'Beer',value:500},{rank:2,answer:'Water',value:250},{rank:3,answer:'Feet',value:100}] },
-  { prompt:'Big ___', topAnswers:[{rank:1,answer:'Mouth',value:500},{rank:2,answer:'Deal',value:250},{rank:3,answer:'Mac',value:100}] },
-  { prompt:'Fast ___', topAnswers:[{rank:1,answer:'Food',value:500},{rank:2,answer:'Car',value:250},{rank:3,answer:'Money',value:100}] },
-  { prompt:'Slow ___', topAnswers:[{rank:1,answer:'Dance',value:500},{rank:2,answer:'Motion',value:250},{rank:3,answer:'Cooker',value:100}] },
-  { prompt:'Dirty ___', topAnswers:[{rank:1,answer:'Laundry',value:500},{rank:2,answer:'Dancing',value:250},{rank:3,answer:'Joke',value:100}] },
-  { prompt:'Sweet ___', topAnswers:[{rank:1,answer:'Tooth',value:500},{rank:2,answer:'Heart',value:250},{rank:3,answer:'Tea',value:100}] },
-  { prompt:'Bad ___', topAnswers:[{rank:1,answer:'Boy',value:500},{rank:2,answer:'Dog',value:250},{rank:3,answer:'News',value:100}] },
-  { prompt:'Good ___', topAnswers:[{rank:1,answer:'Luck',value:500},{rank:2,answer:'Night',value:250},{rank:3,answer:'Boy',value:100}] },
-  { prompt:'Private ___', topAnswers:[{rank:1,answer:'Eye',value:500},{rank:2,answer:'School',value:250},{rank:3,answer:'Party',value:100}] },
-  { prompt:'Secret ___', topAnswers:[{rank:1,answer:'Agent',value:500},{rank:2,answer:'Santa',value:250},{rank:3,answer:'Sauce',value:100}] },
-  { prompt:'House ___', topAnswers:[{rank:1,answer:'Party',value:500},{rank:2,answer:'Key',value:250},{rank:3,answer:'Cat',value:100}] },
-  { prompt:'Pool ___', topAnswers:[{rank:1,answer:'Party',value:500},{rank:2,answer:'Table',value:250},{rank:3,answer:'Boy',value:100}] },
-  { prompt:'Beach ___', topAnswers:[{rank:1,answer:'Ball',value:500},{rank:2,answer:'House',value:250},{rank:3,answer:'Bum',value:100}] },
-  { prompt:'Office ___', topAnswers:[{rank:1,answer:'Party',value:500},{rank:2,answer:'Chair',value:250},{rank:3,answer:'Romance',value:100}] },
-  { prompt:'Remote ___', topAnswers:[{rank:1,answer:'Control',value:500},{rank:2,answer:'Work',value:250},{rank:3,answer:'Island',value:100}] },
-  { prompt:'Text ___', topAnswers:[{rank:1,answer:'Message',value:500},{rank:2,answer:'Book',value:250},{rank:3,answer:'Bubble',value:100}] },
-  { prompt:'Group ___', topAnswers:[{rank:1,answer:'Chat',value:500},{rank:2,answer:'Photo',value:250},{rank:3,answer:'Hug',value:100}] },
-  { prompt:'Video ___', topAnswers:[{rank:1,answer:'Game',value:500},{rank:2,answer:'Call',value:250},{rank:3,answer:'Tape',value:100}] },
   { prompt:'Credit ___', topAnswers:[{rank:1,answer:'Card',value:500},{rank:2,answer:'Score',value:250},{rank:3,answer:'Union',value:100}] },
-  { prompt:'Paper ___', topAnswers:[{rank:1,answer:'Towel',value:500},{rank:2,answer:'Bag',value:250},{rank:3,answer:'Boy',value:100}] },
-  { prompt:'Back ___', topAnswers:[{rank:1,answer:'Seat',value:500},{rank:2,answer:'Door',value:250},{rank:3,answer:'Pain',value:100}] },
-  { prompt:'Front ___', topAnswers:[{rank:1,answer:'Door',value:500},{rank:2,answer:'Seat',value:250},{rank:3,answer:'Page',value:100}] },
-  { prompt:'Side ___', topAnswers:[{rank:1,answer:'Dish',value:500},{rank:2,answer:'Eye',value:250},{rank:3,answer:'Hustle',value:100}] },
-  { prompt:'Power ___', topAnswers:[{rank:1,answer:'Nap',value:500},{rank:2,answer:'Tool',value:250},{rank:3,answer:'Couple',value:100}] },
-  { prompt:'Love ___', topAnswers:[{rank:1,answer:'Song',value:500},{rank:2,answer:'Letter',value:250},{rank:3,answer:'Bird',value:100}] },
-  { prompt:'Money ___', topAnswers:[{rank:1,answer:'Bag',value:500},{rank:2,answer:'Tree',value:250},{rank:3,answer:'Talks',value:100}] },
-  { prompt:'Sports ___', topAnswers:[{rank:1,answer:'Car',value:500},{rank:2,answer:'Bar',value:250},{rank:3,answer:'Bra',value:100}] },
-  { prompt:'Dinner ___', topAnswers:[{rank:1,answer:'Party',value:500},{rank:2,answer:'Table',value:250},{rank:3,answer:'Plate',value:100}] },
-  { prompt:'Kitchen ___', topAnswers:[{rank:1,answer:'Table',value:500},{rank:2,answer:'Sink',value:250},{rank:3,answer:'Knife',value:100}] },
-  { prompt:'Bathroom ___', topAnswers:[{rank:1,answer:'Sink',value:500},{rank:2,answer:'Break',value:250},{rank:3,answer:'Humor',value:100}] },
-  { prompt:'Bedroom ___', topAnswers:[{rank:1,answer:'Eyes',value:500},{rank:2,answer:'Set',value:250},{rank:3,answer:'Door',value:100}] },
-  { prompt:'Morning ___', topAnswers:[{rank:1,answer:'Coffee',value:500},{rank:2,answer:'Person',value:250},{rank:3,answer:'Sickness',value:100}] },
-  { prompt:'Night ___', topAnswers:[{rank:1,answer:'Owl',value:500},{rank:2,answer:'Light',value:250},{rank:3,answer:'Club',value:100}] },
-  { prompt:'Happy ___', topAnswers:[{rank:1,answer:'Hour',value:500},{rank:2,answer:'Birthday',value:250},{rank:3,answer:'Meal',value:100}] },
-  { prompt:'Open ___', topAnswers:[{rank:1,answer:'Bar',value:500},{rank:2,answer:'House',value:250},{rank:3,answer:'Door',value:100}] }
+  { prompt:'Electric ___', topAnswers:[{rank:1,answer:'Car',value:500},{rank:2,answer:'Guitar',value:250},{rank:3,answer:'Chair',value:100}] },
+  { prompt:'Paper ___', topAnswers:[{rank:1,answer:'Clip',value:500},{rank:2,answer:'Bag',value:250},{rank:3,answer:'Cut',value:100}] },
+  { prompt:'Sleep ___', topAnswers:[{rank:1,answer:'Walk',value:500},{rank:2,answer:'Over',value:250},{rank:3,answer:'Mask',value:100}] },
+  { prompt:'Magic ___', topAnswers:[{rank:1,answer:'Trick',value:500},{rank:2,answer:'Wand',value:250},{rank:3,answer:'Show',value:100}] },
+  { prompt:'Traffic ___', topAnswers:[{rank:1,answer:'Light',value:500},{rank:2,answer:'Jam',value:250},{rank:3,answer:'Cop',value:100}] },
+  { prompt:'Beach ___', topAnswers:[{rank:1,answer:'Ball',value:500},{rank:2,answer:'Towel',value:250},{rank:3,answer:'House',value:100}] },
+  { prompt:'Chicken ___', topAnswers:[{rank:1,answer:'Soup',value:500},{rank:2,answer:'Wing',value:250},{rank:3,answer:'Dance',value:100}] },
+  { prompt:'Secret ___', topAnswers:[{rank:1,answer:'Agent',value:500},{rank:2,answer:'Code',value:250},{rank:3,answer:'Santa',value:100}] },
+  { prompt:'Elevator ___', topAnswers:[{rank:1,answer:'Music',value:500},{rank:2,answer:'Button',value:250},{rank:3,answer:'Shaft',value:100}] },
+  { prompt:'Alarm ___', topAnswers:[{rank:1,answer:'Clock',value:500},{rank:2,answer:'Bell',value:250},{rank:3,answer:'System',value:100}] },
+  { prompt:'Pocket ___', topAnswers:[{rank:1,answer:'Watch',value:500},{rank:2,answer:'Knife',value:250},{rank:3,answer:'Money',value:100}] },
+  { prompt:'Rubber ___', topAnswers:[{rank:1,answer:'Band',value:500},{rank:2,answer:'Duck',value:250},{rank:3,answer:'Boot',value:100}] },
+  { prompt:'Garden ___', topAnswers:[{rank:1,answer:'Hose',value:500},{rank:2,answer:'Gnome',value:250},{rank:3,answer:'Party',value:100}] },
+  { prompt:'Hair ___', topAnswers:[{rank:1,answer:'Spray',value:500},{rank:2,answer:'Brush',value:250},{rank:3,answer:'Cut',value:100}] },
+  { prompt:'Mail ___', topAnswers:[{rank:1,answer:'Box',value:500},{rank:2,answer:'Man',value:250},{rank:3,answer:'Order',value:100}] },
+  { prompt:'Disco ___', topAnswers:[{rank:1,answer:'Ball',value:500},{rank:2,answer:'Dance',value:250},{rank:3,answer:'Music',value:100}] },
+  { prompt:'Lucky ___', topAnswers:[{rank:1,answer:'Charm',value:500},{rank:2,answer:'Number',value:250},{rank:3,answer:'Strike',value:100}] },
+  { prompt:'Plastic ___', topAnswers:[{rank:1,answer:'Bag',value:500},{rank:2,answer:'Surgery',value:250},{rank:3,answer:'Cup',value:100}] },
+  { prompt:'Water ___', topAnswers:[{rank:1,answer:'Bottle',value:500},{rank:2,answer:'Bed',value:250},{rank:3,answer:'Park',value:100}] },
+  { prompt:'Office ___', topAnswers:[{rank:1,answer:'Party',value:500},{rank:2,answer:'Chair',value:250},{rank:3,answer:'Space',value:100}] },
+  { prompt:'Shopping ___', topAnswers:[{rank:1,answer:'Cart',value:500},{rank:2,answer:'Bag',value:250},{rank:3,answer:'Mall',value:100}] },
+  { prompt:'Remote ___', topAnswers:[{rank:1,answer:'Control',value:500},{rank:2,answer:'Work',value:250},{rank:3,answer:'Island',value:100}] },
+  { prompt:'Cheese ___', topAnswers:[{rank:1,answer:'Cake',value:500},{rank:2,answer:'Burger',value:250},{rank:3,answer:'Ball',value:100}] },
+  { prompt:'Golden ___', topAnswers:[{rank:1,answer:'Ticket',value:500},{rank:2,answer:'Rule',value:250},{rank:3,answer:'Retriever',value:100}] }
 ];
 
 const generatePanel = async () => {
@@ -999,47 +977,74 @@ Return JSON: {"answers": ["answer1","answer2","answer3","answer4","answer5","ans
 };
 
 const generateSuperMatchPrompt = async (usedPrompts = []) => {
-  const localUsed = [...(usedPrompts || []), ...usedPromptSamples('super', 250), ...usedPromptSamples('final', 250)];
-  const avoidList = localUsed.slice(-90).map(p => `- ${p}`).join('\n');
+  const localUsed = [...(usedPrompts || []), ...usedPromptSamples('super', 300), ...usedPromptSamples('final', 300)];
+  const avoidList = localUsed.slice(-120).map(p => `- ${p}`).join('\n');
+  const usedRoots = [...new Set([
+    ...usedPromptRoots('super', 300),
+    ...usedPromptRoots('final', 300),
+    ...localUsed.flatMap(p => promptClueRootWords(p))
+  ])].slice(0, 160).join(', ');
 
+  const validate = (candidate) => {
+    const prompt = normalizePromptBlank(candidate || '');
+    if (!promptIsUsable(prompt, 'short')) return null;
+    if (promptHasForbiddenSuperFinalRoot(prompt)) return null;
+    if (promptRootAlreadyUsed(prompt, localUsed, ['super','final'])) return null;
+    if (promptAlreadyUsedOrSimilar('super', prompt, localUsed)) return null;
+    return prompt;
+  };
+
+  // Ask for a batch so we are not stuck accepting the model's first familiar idea.
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       const text = await callLLM(
         `${SUPER_MATCH_WRITER_STYLE}
 
-Generate ONE brand-new Super Match survey-board prompt.
-It should be a short phrase with exactly one blank marker: __________
-Examples of the FORM: "Hot __________", "__________ Dog", "Wedding __________", "Phone __________", "__________ Ticket".
-Generate a clean, classic survey-board clue. It should have MANY ordinary answers a real audience might give, with one very obvious top answer and two plausible runners-up.
-Do NOT use "Favourite" or "Favorite" anywhere. Do NOT use Pizza. Avoid any clue root already listed below.
-Avoid vague adjectives where the top answers would be random. Avoid obscure slang, niche pop culture, or clues that invite silly nonsense.
-It must be obvious enough to produce top 3 survey answers, but not be identical or similar to anything below.
-Avoid prior prompts:\n${avoidList || '(none)'}
+Generate EIGHT brand-new Super Match survey-board prompts.
+Each should be a short phrase with exactly one blank marker: __________
+Good FORM examples only: "Hot __________", "__________ Dog", "Golden __________", "Coffee __________".
+Do NOT copy those examples unless they are not in the avoid list.
+Each clue must have many ordinary answers a real audience might give, with one obvious top answer and two plausible runners-up.
+Avoid generic, overused, or obvious repeated roots.
+Do NOT use "Favourite" or "Favorite" anywhere. Do NOT use Pizza or Birthday.
+Avoid roots already used: ${usedRoots || '(none)'}
+Avoid prior prompts:
+${avoidList || '(none)'}
 
-Return JSON exactly: {"prompt":"... ___ ..."}`,
-        140, true
+Return JSON exactly: {"prompts":["... __________","__________ ...", "..."]}`,
+        360, true
       );
       const parsed = extractJSON(text);
-      const prompt = normalizePromptBlank(parsed.prompt || '');
-      if (promptIsUsable(prompt, 'short') && !promptHasForbiddenSuperFinalRoot(prompt) && !promptRootAlreadyUsed(prompt, localUsed) && !promptAlreadyUsedOrSimilar('super', prompt, localUsed)) {
-        markPromptUsed('super', prompt);
-        return prompt;
+      const prompts = Array.isArray(parsed) ? parsed : (parsed.prompts || []);
+      for (const candidate of shuffle(prompts)) {
+        const prompt = validate(candidate);
+        if (prompt) {
+          markPromptUsed('super', prompt);
+          return prompt;
+        }
       }
     } catch (e) {
       console.warn('fresh super prompt generation failed:', e.message);
     }
   }
 
-  let unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !promptRootAlreadyUsed(p.prompt, localUsed) && !promptAlreadyUsedOrSimilar('super', p.prompt, localUsed));
-  if (!unused.length) unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
-  if (!unused.length) unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt));
-  if (!unused.length) unused = FALLBACK_SUPER_PROMPTS;
-  const chosen = shuffle(unused)[0];
+  // Large curated fallback pool. Still respect root memory; do not drop to the same tiny set.
+  let unused = FALLBACK_SUPER_PROMPTS.filter(p => validate(p.prompt));
+  if (!unused.length) {
+    // If the database is completely saturated, relax similarity but still block hard-forbidden roots.
+    unused = FALLBACK_SUPER_PROMPTS.filter(p =>
+      !promptHasForbiddenSuperFinalRoot(p.prompt) &&
+      !hasPromptBeenUsed('super', p.prompt)
+    );
+  }
+  if (!unused.length) {
+    unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt));
+  }
+  const chosen = shuffle(unused.length ? unused : FALLBACK_SUPER_PROMPTS)[0];
   const superPrompt = normalizePromptBlank(chosen.prompt);
   markPromptUsed('super', superPrompt);
   return superPrompt;
 };
-
 
 const cleanSurveyAnswer = (prompt, answer) => stripAnswerToBlank(prompt, String(answer || '')).split(/\s+/).slice(0, 2).join(' ').trim();
 
