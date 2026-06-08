@@ -43,6 +43,7 @@ const api = {
   finalMatchPick:  (code, celebIndex) => req(`/api/room/${code}/finalmatch-pick`, { method:'POST', body:{celebIndex} }),
   finalMatchAnswer:(code, answer) => req(`/api/room/${code}/finalmatch-answer`, { method:'POST', body:{answer} }),
   finalMatchPromptRead:(code) => req(`/api/room/${code}/finalmatch-prompt-read`, { method:'POST' }),
+  finalMatchPickReady:(code) => req(`/api/room/${code}/finalmatch-pick-ready`, { method:'POST' }),
   finalMatchCelebAnswer:(code, slot, answer) => req(`/api/room/${code}/finalmatch-celeb-answer`, { method:'POST', body:{slot,answer} }),
   finalMatchDone:  (code) => req(`/api/room/${code}/finalmatch-done`, { method:'POST' }),
   superMatchLostDone: (code) => req(`/api/room/${code}/supermatch-lost-done`, { method:'POST' }),
@@ -660,6 +661,22 @@ function DisplayView({ room, roomCode }) {
     if (phase === 'tiebreaker' && prevPhase !== 'tiebreaker') {
       speakTTS({ text: "It's a tie! Scores reset — tiebreaker round!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     }
+    if (phase === 'round_end' && room.eliminatedSlot && room.eliminatedPartingGift && prevPhase !== 'round_end') {
+      (async () => {
+        const loserName = room.players?.[room.eliminatedSlot] || 'there';
+        await speakTTS({
+          text: `Well, ${loserName}, we have to say goodbye to you at this point, but we've got a lovely parting gift for you.`,
+          isAnnouncer: true,
+          fallbackProfile: ANNOUNCER_PROFILE,
+        });
+        await delay(350);
+        await speakTTS({
+          text: `${loserName} will receive ${room.eliminatedPartingGift}!`,
+          isAnnouncer: true,
+          fallbackProfile: { rate: 1.03, pitch: 1.15 },
+        });
+      })();
+    }
     if (phase === 'superMatch_pickCelebs' && prevPhase !== 'superMatch_pickCelebs') {
       setSuperPromptReady(false);
       (async () => {
@@ -676,11 +693,14 @@ function DisplayView({ room, roomCode }) {
       const key = `${room.activeSlot}-${room.superMatchWinnings}`;
       if (finalMatchSpeechRef.current.pick !== key) {
         finalMatchSpeechRef.current.pick = key;
-        speakTTS({
-          text: `${room.players[room.activeSlot]}, you're now going to play for ${fmt$(Number(room.superMatchWinnings || 0) * 10)} by matching one celebrity exactly. Who do you choose?`,
-          isAnnouncer: true,
-          fallbackProfile: ANNOUNCER_PROFILE,
-        });
+        (async () => {
+          await speakTTS({
+            text: `${room.players[room.activeSlot]}, you're now going to play for ${fmt$(Number(room.superMatchWinnings || 0) * 10)} by matching one celebrity exactly. Who do you choose?`,
+            isAnnouncer: true,
+            fallbackProfile: ANNOUNCER_PROFILE,
+          });
+          try { await api.finalMatchPickReady(roomCode); } catch {}
+        })();
       }
     }
     if (phase === 'finalMatch_answering' && prevPhase !== 'finalMatch_answering' && room.finalMatchPrompt) {
@@ -1186,7 +1206,7 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
     ranRef.current = true;
     startCreditsMusic();
     (async () => {
-      await delay(600);
+      await delay(450);
       await speakTTS({
         text: 'Match Game is a collaboration between Jason Brown, Claude AI, and ChatGPT.',
         isAnnouncer: true,
@@ -1195,13 +1215,16 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
     })();
     return () => stopCreditsMusic();
   }, []);
-  const headline = room.finalMatchResult==='win'
-    ? `${room.players[room.activeSlot]} wins ${fmt$(room.finalMatchWinnings)}!`
-    : room.superMatchWinnings>0
-      ? `${room.players[room.activeSlot]} wins ${fmt$(room.superMatchWinnings)}!`
-      : room.partingGift
+
+  const activeName = room?.players?.[room?.activeSlot] || 'Our contestant';
+  const headline = room?.finalMatchResult === 'win'
+    ? `${activeName} wins ${fmt$(room?.finalMatchWinnings || 0)}!`
+    : room?.superMatchWinnings > 0
+      ? `${activeName} goes home with ${fmt$(room?.superMatchWinnings || 0)}!`
+      : room?.partingGift
         ? `Parting gift: ${room.partingGift}`
         : 'Thanks for playing!';
+
   const handlePlayAgain = async () => {
     try {
       stopCreditsMusic();
@@ -1211,11 +1234,11 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
       alert(e.message || 'Could not start a new game');
     }
   };
+
   return (
     <div className="mg-display-center-msg mg-credits-screen">
       <div className="mg-bigsymbol" style={{fontSize:60}}>🎉</div>
       <h2 style={{fontFamily:'Bowlby One,sans-serif',fontSize:40,color:'var(--orange-deep)',textAlign:'center'}}>{headline}</h2>
-      <button className="mg-btn" style={{margin:'10px auto 18px', maxWidth:260}} onClick={handlePlayAgain}>Play Again</button>
       <div className="mg-credit-roll">
         <div className="mg-credit-content">
           <p>Match Game</p>
@@ -1223,19 +1246,18 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
           <p>Created by Jason Brown</p>
           <p>Question chaos by Claude AI</p>
           <p>Code wrangling by ChatGPT</p>
-          <p>Audience gasps by one tiny synthesizer</p>
+          <p>Photos via Wikipedia / Wikimedia Commons where available</p>
           <p>Wardrobe by Someone's Closet</p>
           <p>Blue cards supplied by imagination</p>
-          <p>Some celebrity photos via Wikipedia / Wikimedia Commons</p>
           <p>Celebrity handwriting approved by nobody</p>
           <p>No actual celebrities were harmed</p>
           <p>Good night, stars!</p>
         </div>
       </div>
+      <button className="mg-btn" style={{margin:'18px auto 0', maxWidth:260}} onClick={handlePlayAgain}>Play Again</button>
     </div>
   );
 }
-
 
 function DisplayFinalMatchActive({ room }) {
   return (
@@ -1251,7 +1273,7 @@ function DisplayFinalMatchActive({ room }) {
       )}
       <p className="mg-status">
         {room.phase === 'finalMatch_pickCeleb'
-          ? `${room.players[room.activeSlot]} is choosing a celebrity…`
+          ? (room.finalMatchPickReady ? `${room.players[room.activeSlot]} is choosing a celebrity…` : 'The host is introducing the Final Match…')
           : `${room.players[room.activeSlot]} is writing their answer…`}
       </p>
     </div>
@@ -1704,15 +1726,21 @@ function PhoneView({ room, roomCode, playerSlot }) {
         {phase === 'finalMatch_pickCeleb' && isMyTurn && !submitted && (
           <div className="mg-phone-body">
             <div className="mg-display-round final">★★ Final Match ★★</div>
-            <p className="mg-status">Pick ONE celebrity to try to match exactly:</p>
-            <div className="mg-phone-celeb-grid">
-              {room.panel.map((p, i) => (
-                <button key={i} className="mg-phone-celeb-btn"
-                  onClick={() => { setSubmitted(true); handleFinalMatchPick(i); }}>
-                  {p.name}
-                </button>
-              ))}
-            </div>
+            {!room.finalMatchPickReady ? (
+              <p className="mg-status">Watch the TV — the host is introducing the Final Match.</p>
+            ) : (
+              <>
+                <p className="mg-status">Pick ONE celebrity to try to match exactly:</p>
+                <div className="mg-phone-celeb-grid">
+                  {room.panel.map((p, i) => (
+                    <button key={i} className="mg-phone-celeb-btn"
+                      onClick={() => { setSubmitted(true); handleFinalMatchPick(i); }}>
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -1777,14 +1805,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
         {/* Final Match — reveal */}
         {phase === 'finalMatch_reveal' && (
           <div className="mg-phone-body">
-            <p className="mg-status">Watch the TV for the reveal!</p>
-            {playerSlot === room.activeSlot && (
-              <div className="mg-row" style={{marginTop:24}}>
-                <button className="mg-btn" onClick={handleFinalMatchDone}>
-                  {room.finalMatchResult === 'win' ? '🎉 Collect Winnings!' : 'End Game'}
-                </button>
-              </div>
-            )}
+            <p className="mg-status">Watch the TV for the Final Match reveal and credits.</p>
           </div>
         )}
 

@@ -279,6 +279,20 @@ const stripAnswerToBlank = (prompt = '', answer = '') => {
   return (out || raw).split(/\s+/).slice(0, 3).join(' ').trim();
 };
 
+const cleanGeneratedBlankAnswer = (prompt = '', answer = '') => {
+  let cleaned = String(answer || '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/[.…]+/g, ' ')
+    .replace(/^(answer|my answer is|i would say|i'd say|i say|says|said)\s*[:\-]?\s*/i, '')
+    .replace(/^['"“”‘’]+|['"“”‘’.,!?;:]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  cleaned = stripAnswerToBlank(prompt, cleaned).split(/\s+/).slice(0, 2).join(' ').trim();
+  if (!/[a-z0-9]/i.test(cleaned)) return '';
+  if (/^(pass|uh|umm|hmm|dot|dots)$/i.test(cleaned)) return '';
+  return cleaned;
+};
+
 const promptsTooSimilar = (a, b) => {
   const na = normalizePromptKey(a).replace(/[^a-z0-9 ]/g, ' ');
   const nb = normalizePromptKey(b).replace(/[^a-z0-9 ]/g, ' ');
@@ -387,6 +401,28 @@ const PARTING_GIFTS = [
   'a mystery box from the prop department'
 ];
 const randomPartingGift = () => PARTING_GIFTS[Math.floor(Math.random() * PARTING_GIFTS.length)];
+
+const generatePartingGift = async () => {
+  try {
+    const text = await callLLM(
+      `Invent ONE funny 1970s game-show parting gift for a losing Match Game contestant.
+Make it silly, concrete, family-friendly, and short enough for an announcer to read in one breath.
+Examples: a suspicious fondue set, a year's supply of Rice-A-Roni, a deluxe set of blue index cards.
+Return only the prize phrase, no quotation marks.`,
+      40, false
+    );
+    const clean = String(text || '').replace(/[\r\n]+/g, ' ').replace(/^['"“”‘’]+|['"“”‘’.,!]+$/g, '').trim();
+    if (clean && clean.length <= 140) return clean;
+  } catch (e) {
+    console.warn('parting gift generation failed:', e.message);
+  }
+  return randomPartingGift();
+};
+
+const prepareElimination = async (room, loserSlot) => {
+  room.eliminatedSlot = loserSlot;
+  room.eliminatedPartingGift = await generatePartingGift();
+};
 
 
 const MODERN_PANEL_BACKUPS = [
@@ -1052,8 +1088,8 @@ Return JSON only: {"celebAnswers": ["answer for celeb 1", "answer for celeb 2", 
     topAnswers[2]?.answer
   ].filter(Boolean));
 
-  celebAnswers = celebAnswers.slice(0, 3).map((a, i) => stripAnswerToBlank(prompt, String(a || fallbackSuggestions[i] || topAnswers[i % topAnswers.length].answer)).split(/\s+/).slice(0,2).join(' '));
-  while (celebAnswers.length < 3) celebAnswers.push(stripAnswerToBlank(prompt, String(fallbackSuggestions[celebAnswers.length] || topAnswers[celebAnswers.length % topAnswers.length].answer)).split(/\s+/).slice(0,2).join(' '));
+  celebAnswers = celebAnswers.slice(0, 3).map((a, i) => cleanGeneratedBlankAnswer(prompt, a) || cleanGeneratedBlankAnswer(prompt, fallbackSuggestions[i]) || cleanGeneratedBlankAnswer(prompt, topAnswers[i % topAnswers.length].answer));
+  while (celebAnswers.length < 3) celebAnswers.push(cleanGeneratedBlankAnswer(prompt, fallbackSuggestions[celebAnswers.length]) || cleanGeneratedBlankAnswer(prompt, topAnswers[celebAnswers.length % topAnswers.length].answer) || 'answer');
 
   return { topAnswers, celebAnswers };
 };
@@ -1127,7 +1163,7 @@ ${celeb.name} is under pressure and trying VERY HARD to match the contestant. Th
 Give only the missing word/phrase, 1-2 words maximum. Do NOT repeat words already in the prompt. If the clue is "Dream __________", answer "job", not "dream job".`,
     30
   );
-  let ans = stripAnswerToBlank(prompt, text.trim().replace(/^['"]|['"]$/g, '')).split(/\s+/).slice(0, 2).join(' ');
+  let ans = cleanGeneratedBlankAnswer(prompt, text.trim().replace(/^['"]|['"]$/g, ''));
   if (!ans && answerKey?.[0]) ans = answerKey[0];
   return ans;
 };
@@ -1505,7 +1541,10 @@ const resetRoomForPlayAgain = (room) => {
   room.finalMatchResult = null;
   room.finalMatchWinnings = 0;
   room.finalMatchPromptReady = false;
+  room.finalMatchPickReady = false;
   room.partingGift = null;
+  room.eliminatedSlot = null;
+  room.eliminatedPartingGift = null;
   room.phase = 'lobby';
   room.introCompleted = false;
   room.introStartedAt = null;
@@ -1608,7 +1647,10 @@ app.post('/api/room', async (req, res) => {
       finalMatchResult: null,
       finalMatchWinnings: 0,
       finalMatchPromptReady: false,
+      finalMatchPickReady: false,
       partingGift: null,
+      eliminatedSlot: null,
+      eliminatedPartingGift: null,
     };
     rooms.set(code, room);
     res.json({ room, slot: null });
@@ -1739,6 +1781,8 @@ const startNewRound = async (room, roundNum) => {
     room.superMatchContestantAnswer = null;
     room.superMatchTopAnswers = null;
     room.superMatchTopRevealIndex = -1;
+    room.eliminatedSlot = null;
+    room.eliminatedPartingGift = null;
     room.phase = 'superMatch_pickCelebs';
     bump(room);
     maybeScheduleAiAction(room);
@@ -1833,6 +1877,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     const other = otherSlot(currentActive);
     if (room.round >= 2 && (room.scores[other] || 0) > (room.scores[currentActive] || 0)) {
       room.activeSlot = other;
+      await prepareElimination(room, currentActive);
       room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
       room.phase = 'round_end';
       bump(room);
@@ -1840,7 +1885,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
       setTimeout(async () => {
         try { await startNewRound(room, 'super'); }
         catch(e) { console.error('start super match:', e); }
-      }, 3500);
+      }, 8500);
       return;
     }
     // Otherwise, second contestant now answers the remaining prompt.
@@ -1888,7 +1933,9 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     }
 
     const leader = s1 > s2 ? 1 : 2;
+    const loser = otherSlot(leader);
     room.activeSlot = leader;
+    await prepareElimination(room, loser);
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
     room.phase = 'round_end';
     bump(room);
@@ -1896,7 +1943,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     setTimeout(async () => {
       try { await startNewRound(room, 'super'); }
       catch(e) { console.error('start super match:', e); }
-    }, 4000);
+    }, 8500);
     return;
   }
 
@@ -2042,6 +2089,16 @@ app.post('/api/room/:code/finalmatch-prompt-read', (req, res) => {
   res.json({ room });
 });
 
+app.post('/api/room/:code/finalmatch-pick-ready', (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.phase === 'finalMatch_pickCeleb') {
+    room.finalMatchPickReady = true;
+    bump(room);
+  }
+  res.json({ room });
+});
+
 const completeFinalMatchReveal = async (room) => {
   const celeb = room.panel[room.finalMatchCelebIndex];
   let celebAnswer = null;
@@ -2079,6 +2136,7 @@ app.post('/api/room/:code/finalmatch-start', async (req, res) => {
     room.finalMatchCelebAnswer = null;
     room.finalMatchHumanAnswers = {};
     room.finalMatchPromptReady = false;
+    room.finalMatchPickReady = false;
     room.phase = 'finalMatch_pickCeleb';
     bump(room);
     maybeScheduleAiAction(room);
@@ -2092,6 +2150,7 @@ app.post('/api/room/:code/finalmatch-start', async (req, res) => {
 app.post('/api/room/:code/finalmatch-pick', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (!room.finalMatchPickReady) return res.status(400).json({ error: 'Host has not finished introducing Final Match yet' });
   const { celebIndex } = req.body;
   if (!Number.isInteger(Number(celebIndex)) || Number(celebIndex) < 0 || Number(celebIndex) >= room.panel.length) {
     return res.status(400).json({ error: 'Invalid celebrity' });
@@ -2164,6 +2223,7 @@ app.post('/api/room/:code/supermatch-lost-done', (req, res) => {
 app.post('/api/room/:code/finalmatch-done', (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.phase !== 'finalMatch_reveal' && room.phase !== 'gameOver') return res.json({ room });
   room.phase = 'gameOver';
   bump(room);
   res.json({ room });

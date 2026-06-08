@@ -1054,7 +1054,7 @@ body { margin: 0; }
 }
 .mg-contestant-score-shape.tri .mg-contestant-num { transform: translateY(15%); }
 
-.mg-credits-screen { overflow: hidden; }
+.mg-credits-screen { overflow: hidden; background: radial-gradient(circle at center, #fff4d6 0%, #f3b24c 45%, #2b1810 120%); }
 .mg-credit-roll {
   width: min(720px, 85vw);
   height: min(34vh, 300px);
@@ -1070,12 +1070,12 @@ body { margin: 0; }
   text-align: center;
   color: var(--brown);
   animation: mgCreditsRoll 18s linear forwards;
-  padding-top: 34vh;
+  padding-top: 3vh;
 }
 .mg-credit-content p { margin: 0 0 28px; }
 @keyframes mgCreditsRoll {
   from { transform: translateY(0); }
-  to { transform: translateY(-118%); }
+  to { transform: translateY(-88%); }
 }
 
 /* ── v23: closer classic opening title card; no filler start message ── */
