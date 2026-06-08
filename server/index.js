@@ -55,6 +55,19 @@ const normalizePromptKey = (prompt) => String(prompt || '')
   .replace(/[’]/g, "'")
   .replace(/\s+/g, ' ')
   .trim();
+
+const PROMPT_ROOT_STOPWORDS = new Set([
+  'with','from','that','this','your','their','there','match','game','when','what','were',
+  'they','them','then','than','into','onto','over','under','round','final','super',
+  'blank','said','thought','because','would','could','should','going','after','before'
+]);
+
+const promptRootWords = (prompt = '') => normalizePromptKey(prompt)
+  .replace(/_/g, ' ')
+  .split(/\s+/)
+  .map(w => w.replace(/[^a-z0-9]/g, ''))
+  .filter(w => w.length > 3 && !PROMPT_ROOT_STOPWORDS.has(w));
+
 // In-memory no-repeat database for the current server process. Each room also tracks
 // its own used prompts so a family play-through never sees an exact repeat.
 const GLOBAL_USED_ROUND_PROMPTS = new Set();
@@ -82,6 +95,20 @@ PROMPT_DB.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_prompt_history_kind_last
     ON prompt_history(kind, last_used_at DESC);
+
+  CREATE TABLE IF NOT EXISTS prompt_root_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    root TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    first_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    times_used INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(kind, root)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_prompt_root_history_kind_last
+    ON prompt_root_history(kind, last_used_at DESC);
 `);
 
 const hasPromptBeenUsed = (kind, prompt) => Boolean(PROMPT_DB.prepare(
@@ -98,11 +125,32 @@ const markPromptUsed = (kind, prompt) => {
       last_used_at = CURRENT_TIMESTAMP,
       times_used = times_used + 1
   `).run(kind, normalizePromptKey(clean), clean);
+
+  // Also store root words so "Birthday ___" and "Birthday Cake ___" do not
+  // sneak through as "different" prompts. This is especially important for
+  // Super Match and Final Match clues, where the root word is the whole game.
+  for (const root of promptRootWords(clean)) {
+    PROMPT_DB.prepare(`
+      INSERT INTO prompt_root_history (kind, root, prompt)
+      VALUES (?, ?, ?)
+      ON CONFLICT(kind, root) DO UPDATE SET
+        last_used_at = CURRENT_TIMESTAMP,
+        times_used = times_used + 1
+    `).run(kind, root, clean);
+  }
 };
 
 const usedPromptSamples = (kind, limit = 80) => PROMPT_DB.prepare(
   'SELECT prompt FROM prompt_history WHERE kind = ? ORDER BY last_used_at DESC LIMIT ?'
 ).all(kind, limit).map(row => row.prompt).filter(Boolean);
+
+const usedPromptRoots = (kind, limit = 250) => PROMPT_DB.prepare(
+  'SELECT root FROM prompt_root_history WHERE kind = ? ORDER BY last_used_at DESC LIMIT ?'
+).all(kind, limit).map(row => row.root).filter(Boolean);
+
+const hasPromptRootBeenUsed = (kind, root) => Boolean(PROMPT_DB.prepare(
+  'SELECT 1 FROM prompt_root_history WHERE kind = ? AND root = ? LIMIT 1'
+).get(kind, root));
 
 const migrateLegacyPromptHistory = () => {
   const legacyFile = path.join(DATA_DIR, 'prompt-history.json');
@@ -307,22 +355,22 @@ const promptsTooSimilar = (a, b) => {
 };
 
 const SUPER_FINAL_FORBIDDEN_ROOTS = new Set([
-  'pizza', 'favourite', 'favorite'
+  'pizza', 'pizzas', 'birthday', 'birthdays', 'favourite', 'favorite'
 ]);
-
-const promptRootWords = (prompt = '') => normalizePromptKey(prompt)
-  .replace(/_/g, ' ')
-  .split(/\s+/)
-  .map(w => w.replace(/[^a-z0-9]/g, ''))
-  .filter(w => w.length > 3 && !['with','from','that','this','your','their','there','match','game'].includes(w));
 
 const promptHasForbiddenSuperFinalRoot = (prompt = '') => promptRootWords(prompt)
   .some(w => SUPER_FINAL_FORBIDDEN_ROOTS.has(w));
 
-const promptRootAlreadyUsed = (prompt = '', localUsed = []) => {
+const promptRootAlreadyUsed = (prompt = '', localUsed = [], kinds = ['super','final']) => {
   const roots = new Set(promptRootWords(prompt));
   if (!roots.size) return false;
-  return (localUsed || []).some(oldPrompt => promptRootWords(oldPrompt).some(w => roots.has(w)));
+  if ((localUsed || []).some(oldPrompt => promptRootWords(oldPrompt).some(w => roots.has(w)))) return true;
+  for (const root of roots) {
+    for (const kind of kinds) {
+      if (hasPromptRootBeenUsed(kind, root)) return true;
+    }
+  }
+  return false;
 };
 
 const promptAlreadyUsedOrSimilar = (kind, prompt, localUsed = []) => {
@@ -880,8 +928,11 @@ const generatePanelAnswers = async (panel, promptText, contestantName, roundNum 
   const key = (answerKey || []).filter(Boolean).slice(0, 3);
   const order = [0,1,2,3,4,5].sort(() => Math.random() - 0.5);
   const funnyIndex = order[0];
-  const topSlots = new Set(order.slice(roundNum === 1 ? 1 : 0, roundNum === 1 ? 3 : 5));
-  const alternateSlots = new Set(order.slice(roundNum === 1 ? 3 : 5, roundNum === 1 ? 5 : 6));
+  const topCount = roundNum === 1 ? 2 : (Math.random() < 0.55 ? 3 : 4);
+  const altCount = roundNum === 1 ? 2 : (6 - topCount - 1);
+  const topSlots = new Set(order.slice(0, topCount));
+  const alternateSlots = new Set(order.slice(topCount, topCount + altCount));
+  const funnySlots = new Set(order.slice(topCount + altCount));
 
   const text = await callLLM(
     `You are writing celebrity panel answers for Match Game.
@@ -902,10 +953,10 @@ ANSWER RULES:
 - Use simple concrete words, not explanations.
 - The answer must fit the blank naturally when read in the prompt.
 - Round 1: answers may vary, but they must stay in the same answer neighborhood. About 2 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, 1 should give a plausible in-character answer, and 1 should give a funny answer.
-- Round 2: make matching VERY likely. At least 5 eligible celebrities should use the #1 answer or a very close variant. If there is a funny/adult-innuendo answer, it should still usually be the #1 answer with a playful adjective, not a totally different answer.
+- Round 2: make matching likely by staying inside a limited answer set, not by making everyone identical. Usually 3-4 celebrities should use the #1 answer or a very close variant, 1-2 should use the #2 answer or a close variant, and 1 may give a funny/adult-innuendo answer that still fits the same answer neighborhood.
 - The funny answer should be a quick laugh. Lean into classic Match Game double-entendre and adult innuendo when the prompt allows it, but keep it non-explicit and TV-PG/PG-13.
 - Do NOT make the same celebrity type the oddball every time; follow the designated funny position.
-- Do NOT make every celebrity different. That ruins the game.
+- Do NOT make every celebrity different, but also do NOT make all six identical. A good Round 2 panel should feel spontaneous while clustering around 2-3 plausible answers.
 - Do NOT be too clever, abstract, or niche.
 
 Panel:
@@ -931,16 +982,23 @@ Return JSON: {"answers": ["answer1","answer2","answer3","answer4","answer5","ans
       // If the funny answer is empty, give it a slightly playful but still matchable alternate.
       if (!answers[funnyIndex] || answers[funnyIndex] === '???') answers[funnyIndex] = third;
     } else {
+      // Round 2 should be more matchable, but not robotic. Cluster around a
+      // small answer set so a contestant who chooses the second obvious answer
+      // can still get matches.
       for (const i of topSlots) answers[i] = top;
-      for (const i of alternateSlots) answers[i] = second;
-      if (!answers[funnyIndex] || answers[funnyIndex] === '???') answers[funnyIndex] = Math.random() < 0.5 ? second : third;
+      for (const i of alternateSlots) answers[i] = Math.random() < 0.75 ? second : third;
+      for (const i of funnySlots) {
+        const base = Math.random() < 0.6 ? top : (Math.random() < 0.75 ? second : third);
+        answers[i] = answers[i] && answers[i] !== '???' ? answers[i] : base;
+        if (!similarEnoughToAny(answers[i], [top, second, third])) answers[i] = base;
+      }
     }
   }
   return answers.slice(0, 6);
 };
 
 const generateSuperMatchPrompt = async (usedPrompts = []) => {
-  const localUsed = [...(usedPrompts || []), ...usedPromptSamples('super', 120)];
+  const localUsed = [...(usedPrompts || []), ...usedPromptSamples('super', 250), ...usedPromptSamples('final', 250)];
   const avoidList = localUsed.slice(-90).map(p => `- ${p}`).join('\n');
 
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -973,6 +1031,7 @@ Return JSON exactly: {"prompt":"... ___ ..."}`,
 
   let unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !promptRootAlreadyUsed(p.prompt, localUsed) && !promptAlreadyUsedOrSimilar('super', p.prompt, localUsed));
   if (!unused.length) unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
+  if (!unused.length) unused = FALLBACK_SUPER_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt));
   if (!unused.length) unused = FALLBACK_SUPER_PROMPTS;
   const chosen = shuffle(unused)[0];
   const superPrompt = normalizePromptBlank(chosen.prompt);
@@ -1112,7 +1171,7 @@ const FINAL_MATCH_PROMPTS = [
 ];
 
 const generateFinalMatchPrompt = async (usedPrompts = []) => {
-  const localUsed = [...(usedPrompts || []), ...usedPromptSamples('final', 120), ...usedPromptSamples('super', 80)];
+  const localUsed = [...(usedPrompts || []), ...usedPromptSamples('final', 250), ...usedPromptSamples('super', 250)];
   const avoidList = localUsed.slice(-120).map(p => `- ${p}`).join('\n');
 
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -1146,6 +1205,7 @@ Return JSON exactly: {"prompt":"... __________", "answers":["most obvious", "sec
 
   let unused = FINAL_MATCH_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !promptRootAlreadyUsed(p.prompt, localUsed) && !promptAlreadyUsedOrSimilar('final', p.prompt, localUsed));
   if (!unused.length) unused = FINAL_MATCH_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
+  if (!unused.length) unused = FINAL_MATCH_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt));
   if (!unused.length) unused = FINAL_MATCH_PROMPTS;
   const fallback = shuffle(unused)[0];
   const finalFallback = { ...fallback, prompt: normalizePromptBlank(fallback.prompt) };
@@ -1213,6 +1273,19 @@ const canonPhrase = (s) => {
     }
   }
   return out.split(/\s+/).filter(Boolean).map(canonToken).join(' ').trim();
+};
+
+const similarEnoughToAny = (answer, options = []) => {
+  const c = canonPhrase(answer);
+  if (!c) return false;
+  return options.some(opt => {
+    const o = canonPhrase(opt);
+    if (!o) return false;
+    if (c === o) return true;
+    const ct = c.split(/\s+/);
+    const ot = o.split(/\s+/);
+    return ct.some(t => ot.includes(t)) || ot.some(t => ct.includes(t));
+  });
 };
 
 const editDistance = (a, b) => {

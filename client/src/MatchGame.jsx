@@ -433,7 +433,7 @@ export default function MatchGame() {
     setLoading(false);
   };
 
-  if (mode === 'display') return <DisplayView room={room} roomCode={roomCode} />;
+  if (mode === 'display') return <DisplayView room={room} roomCode={roomCode} setRoom={setRoom} />;
   if (mode === 'phone') return <PhoneView room={room} roomCode={roomCode} playerSlot={playerSlot} />;
 
   // ── HOME SCREEN ──
@@ -555,7 +555,7 @@ const getQrSrc = (url) => url
   ? `https://api.qrserver.com/v1/create-qr-code/?size=360x360&margin=14&data=${encodeURIComponent(url)}`
   : '';
 
-function DisplayView({ room, roomCode }) {
+function DisplayView({ room, roomCode, setRoom }) {
   const prevPhaseRef = useRef(null);
   const prevVersionRef = useRef(null);
   const [revealIndex, setRevealIndex] = useState(-1);
@@ -795,6 +795,10 @@ function DisplayView({ room, roomCode }) {
   );
 
   const phase = room.phase;
+  if (phase === 'gameOver') {
+    return <DisplayGameOver room={room} roomCode={roomCode} setRoom={setRoom} />;
+  }
+
   const p1name = room.players[1] || '—';
   const p2name = room.soloTest ? 'Solo Test' : (room.players[2] || 'Waiting…');
   const isActive = (slot) => room.activeSlot === slot && ['pick_prompt','answering','generating_answers'].includes(phase);
@@ -1197,57 +1201,42 @@ function DisplaySuperMatchResult({ room, roomCode }) {
 }
 
 function DisplayGameOver({ room, roomCode, setRoom }) {
-  // Keep credits deliberately simple and non-audio-dependent. Previous versions
-  // tried to start music/TTS here, which caused blank/black screens on some laptops.
-  useEffect(() => {
-    try { stopIntroMusic(); } catch {}
-    try { stopThinkingMusic(); } catch {}
-    try { stopCreditsMusic(); } catch {}
-    try {
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio = null;
-      }
-    } catch {}
-  }, []);
-
-  const activeName = room?.players?.[room?.activeSlot] || 'Our contestant';
-  const headline = room?.finalMatchResult === 'win'
-    ? `${activeName} wins ${fmt$(room?.finalMatchWinnings || 0)}!`
-    : room?.superMatchWinnings > 0
-      ? `${activeName} goes home with ${fmt$(room?.superMatchWinnings || 0)}!`
-      : room?.partingGift
-        ? `Parting gift: ${room.partingGift}`
-        : 'Thanks for playing!';
+  const safeMoney = (n) => `$${Number(n || 0).toLocaleString()}`;
+  let headline = 'Thanks for playing!';
+  try {
+    const slot = room && room.activeSlot;
+    const name = (room && room.players && room.players[slot]) || 'Our contestant';
+    if (room && room.finalMatchResult === 'win') headline = `${name} wins ${safeMoney(room.finalMatchWinnings)}!`;
+    else if (room && Number(room.superMatchWinnings || 0) > 0) headline = `${name} goes home with ${safeMoney(room.superMatchWinnings)}!`;
+    else if (room && room.partingGift) headline = `Parting gift: ${room.partingGift}`;
+  } catch {}
 
   const handlePlayAgain = async () => {
     try {
       const { room: updated } = await api.playAgain(roomCode);
-      setRoom?.(updated);
+      if (setRoom) setRoom(updated);
     } catch (e) {
       alert(e.message || 'Could not start a new game');
     }
   };
 
   return (
-    <div className="mg-display-center-msg mg-credits-screen stable">
-      <h2 className="mg-credits-headline">{headline}</h2>
-      <div className="mg-credit-roll stable">
-        <div className="mg-credit-content stable">
-          <p className="mg-credit-title">Match Game</p>
-          <p>A collaboration between Jason Brown, Claude AI, and ChatGPT</p>
-          <p>Created by Jason Brown</p>
-          <p>Question chaos by Claude AI</p>
-          <p>Code wrangling by ChatGPT</p>
-          <p>Photos via Wikipedia / Wikimedia Commons where available</p>
-          <p>Wardrobe by Someone's Closet</p>
-          <p>Blue cards supplied by imagination</p>
-          <p>Celebrity handwriting approved by nobody</p>
-          <p>No actual celebrities were harmed</p>
-          <p>Good night, stars!</p>
-        </div>
+    <div className="mg-credit-only-screen">
+      <div className="mg-credit-only-headline">{headline}</div>
+      <div className="mg-credit-only-card">
+        <div className="mg-credit-only-title">Match Game</div>
+        <div>A collaboration between Jason Brown, Claude AI, and ChatGPT</div>
+        <div>Created by Jason Brown</div>
+        <div>Question chaos by Claude AI</div>
+        <div>Code wrangling by ChatGPT</div>
+        <div>Photos via Wikipedia / Wikimedia Commons where available</div>
+        <div>Wardrobe by Someone's Closet</div>
+        <div>Blue cards supplied by imagination</div>
+        <div>Celebrity handwriting approved by nobody</div>
+        <div>No actual celebrities were harmed</div>
+        <div>Good night, stars!</div>
       </div>
-      <button className="mg-btn" style={{margin:'18px auto 0', maxWidth:260}} onClick={handlePlayAgain}>Play Again</button>
+      <button className="mg-btn mg-credit-play-again" onClick={handlePlayAgain}>Play Again</button>
     </div>
   );
 }

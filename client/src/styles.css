@@ -1316,3 +1316,57 @@ body { margin: 0; }
   color: var(--orange-deep);
   margin-bottom: 18px !important;
 }
+
+
+/* v42: completely standalone credits screen. No audio, no animation, no header layout. */
+.mg-credit-only-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  box-sizing: border-box;
+  background:
+    radial-gradient(circle at 50% 22%, rgba(243,178,76,0.35), transparent 30%),
+    linear-gradient(180deg, #22120b 0%, #070404 100%);
+  color: #fff4d6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(14px, 2.4vh, 26px);
+  padding: clamp(16px, 4vh, 42px);
+  text-align: center;
+}
+.mg-credit-only-headline {
+  font-family: 'Bowlby One', sans-serif;
+  font-size: clamp(28px, 5vw, 60px);
+  color: #ffd23f;
+  text-shadow: 4px 4px 0 #000;
+  max-width: min(1050px, 94vw);
+  line-height: 1.05;
+}
+.mg-credit-only-card {
+  width: min(900px, 90vw);
+  max-height: 66vh;
+  overflow: auto;
+  background: rgba(255,244,214,0.96);
+  color: #2b1810;
+  border: 5px solid #2b1810;
+  box-shadow: 8px 8px 0 #000;
+  padding: clamp(18px, 3vh, 34px);
+  font-family: 'DM Serif Display', serif;
+  font-size: clamp(18px, 2.45vw, 32px);
+  line-height: 1.22;
+}
+.mg-credit-only-card div {
+  margin: 0 0 10px;
+}
+.mg-credit-only-title {
+  font-family: 'Bowlby One', sans-serif;
+  color: #d4572a;
+  font-size: clamp(38px, 6vw, 74px);
+  line-height: 1;
+  margin-bottom: 20px !important;
+}
+.mg-credit-play-again {
+  max-width: 260px;
+}
