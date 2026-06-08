@@ -94,3 +94,14 @@ Cost: roughly $0.015 per minute of generated audio. A typical round has ~30 seco
 ## Cost notes
 
 Each round triggers two `gpt-4o-mini` chat completion calls (prompt generation + panel answers) plus 6+ `gpt-4o-mini-tts` TTS calls. With gpt-4o-mini at fractions of a cent per call and TTS at ~$0.015/min of audio, a typical 10-round game costs well under $0.20 total. Swapping to `gpt-5.5-mini` would raise this by maybe 10×; still cheap.
+
+
+## SQLite prompt memory
+
+The server now keeps a persistent SQLite prompt-history database at:
+
+```text
+server/data/match-game-prompts.sqlite
+```
+
+This file is created automatically at runtime. It stores regular-round, Super Match, and Final Match prompts that have already been used so the game can avoid exact or similar repeats across restarts. The older `prompt-history.json` file is migrated into SQLite if present, but SQLite is now the main prompt memory.
