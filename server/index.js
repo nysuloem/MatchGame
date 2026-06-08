@@ -1332,35 +1332,42 @@ const fuzzyMatch = (a, b) => {
 };
 
 const llmMatch = async (prompt, a, b) => {
+  // Fast local pass is intentionally narrow: exact matches, spelling variants,
+  // typo-level differences, and contestant answer contained as a full phrase
+  // inside a longer celebrity answer. Semantic judging belongs to the API below.
   if (fuzzyMatch(a, b)) return true;
-  // Conservative API judge for true edge cases only. It should save spelling and
-  // abbreviation misses, not award broad association/category matches.
+
   try {
     const text = await callLLM(
-      `You are the STRICT match judge for a 1970s Match Game-style fill-in-the-blank game.
+      `You are the STRICT but fair match judge for a 1970s Match Game-style fill-in-the-blank game.
+
 Prompt: "${prompt || ''}"
 Contestant answer: "${a || ''}"
 Celebrity answer: "${b || ''}"
 
-Judge whether these are essentially the SAME answer for this exact blank.
+Judge whether these should count as the SAME answer for this exact blank.
 
-COUNT AS MATCH ONLY FOR:
-- spelling variants or typos: cheque/check, color/colour
+COUNT AS A MATCH:
+- exact same meaning even with different common wording: swimsuit/bathing suit, sofa/couch, doctor/physician
+- spelling variants or typos: cheque/check, colour/color
 - singular/plural of the same word
-- abbreviations of the same phrase: TV/television, cell/cellphone
-- very narrow same-meaning wording that creates the same completed phrase
-- the contestant's exact concise word/phrase appears as a complete word/phrase inside the celebrity answer, e.g. skills/unbelievable skills
+- abbreviation vs full phrase: TV/television, abs/abdominals
+- the contestant's concise answer appears as a complete word/phrase inside the celebrity answer: skills/unbelievable skills
+- one answer is a very common synonym that would create essentially the same completed phrase
 
 DO NOT MATCH:
-- general category vs specific member: animal/cat, drink/beer, vehicle/car
-- related or associated words: salt/pepper, pepper/shaker for "Salt ___"
-- container/tool/object pairs: drink/glass, salt/shaker
+- broad category vs specific member: animal/cat, drink/beer, vehicle/car, food/pizza
+- related or associated words that are not synonyms: salt/pepper, pepper/shaker, school/teacher
+- container/tool/object pairs: drink/glass, salt/shaker, coffee/mug
 - two different common completions of the same clue
-- answers that are merely in the same topic area
+- answers that merely belong to the same topic area
+- jokes that are funny but not the same answer
 
-Useful test: put each answer into the blank. If they make two meaningfully different phrases, return false.
+Important Match Game rule: general terms do not match specific terms.
+Useful test: put each answer into the blank. If the completed phrases mean essentially the same thing, return true. If they produce meaningfully different answers, return false.
+
 Return JSON only: {"match":true} or {"match":false}`,
-      60, true
+      90, true
     );
     const parsed = extractJSON(text);
     return Boolean(parsed.match);

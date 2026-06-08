@@ -1370,3 +1370,28 @@ body { margin: 0; }
 .mg-credit-play-again {
   max-width: 260px;
 }
+
+
+/* v43: bring back scrolling credits/music while keeping the crash-safe standalone layout. */
+.mg-credit-only-screen.scrolling {
+  background:
+    radial-gradient(circle at 50% 18%, rgba(243,178,76,0.30), transparent 32%),
+    linear-gradient(180deg, #1b0e08 0%, #050303 100%);
+}
+.mg-credit-only-card.scrolling {
+  height: min(58vh, 520px);
+  max-height: min(58vh, 520px);
+  overflow: hidden;
+  position: relative;
+}
+.mg-credit-scroll-content {
+  animation: mgCreditSafeScroll 24s linear infinite;
+  will-change: transform;
+}
+.mg-credit-scroll-content div {
+  margin: 0 0 18px;
+}
+@keyframes mgCreditSafeScroll {
+  0% { transform: translateY(42%); }
+  100% { transform: translateY(-100%); }
+}

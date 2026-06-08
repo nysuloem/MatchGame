@@ -306,7 +306,7 @@ const PHASE_LABELS = {
   generating: 'Preparing the round…',
   pick_prompt: 'Choose your question!',
   answering: 'Fill in the blank!',
-  generating_answers: 'The panel is conferring…',
+  generating_answers: 'Waiting for panelists to write down their answers…',
   revealing: 'Reveal!',
   round_end: 'Round complete…',
   tiebreaker: "It's a tie — tiebreaker round!",
@@ -877,13 +877,13 @@ function DisplayView({ room, roomCode, setRoom }) {
           <div className="mg-display-center-msg">
             <div className="mg-loading">
               {phase==='generating'&&'Preparing questions'}
-              {phase==='generating_answers'&&'The panel is conferring'}
+              {phase==='generating_answers'&&'Waiting for panelists to write down their answers'}
               {phase==='round_end'&&'Calculating scores'}
               {phase==='tiebreaker'&&"It's a tie — resetting scores"}
               {phase==='superMatch_generating'&&'Consulting the panel'}
               {phase==='superMatch_human_answering'&&'Waiting for the live stars'}
               {phase==='finalMatch_generating'&&'Preparing the Final Match'}
-              {phase==='finalMatch_generating_celeb'&&`${room.panel[room.finalMatchCelebIndex]?.name} is thinking hard`}
+              {phase==='finalMatch_generating_celeb'&&`${room.panel[room.finalMatchCelebIndex]?.name} is writing an answer`}
             </div>
             <DisplayPanelGrid room={room} revealIndex={-1}/>
           </div>
@@ -1211,8 +1211,32 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
     else if (room && room.partingGift) headline = `Parting gift: ${room.partingGift}`;
   } catch {}
 
+  const wardrobeSources = [
+    "Someone's Closet",
+    "the 1974 Sears catalogue",
+    "a suspicious basement trunk",
+    "Brett Somers' yard sale",
+    "the polyester appreciation society",
+    "a clearance rack in Encino",
+    "the lost-and-found at Studio 33",
+    "a very brave aunt",
+    "three leisure suits and a dream"
+  ];
+  const wardrobeBy = wardrobeSources[Math.floor(Math.random() * wardrobeSources.length)];
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try { startCreditsMusic(); } catch {}
+    }, 350);
+    return () => {
+      clearTimeout(timer);
+      try { stopCreditsMusic(); } catch {}
+    };
+  }, []);
+
   const handlePlayAgain = async () => {
     try {
+      try { stopCreditsMusic(); } catch {}
       const { room: updated } = await api.playAgain(roomCode);
       if (setRoom) setRoom(updated);
     } catch (e) {
@@ -1221,20 +1245,25 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
   };
 
   return (
-    <div className="mg-credit-only-screen">
+    <div className="mg-credit-only-screen scrolling">
       <div className="mg-credit-only-headline">{headline}</div>
-      <div className="mg-credit-only-card">
-        <div className="mg-credit-only-title">Match Game</div>
-        <div>A collaboration between Jason Brown, Claude AI, and ChatGPT</div>
-        <div>Created by Jason Brown</div>
-        <div>Question chaos by Claude AI</div>
-        <div>Code wrangling by ChatGPT</div>
-        <div>Photos via Wikipedia / Wikimedia Commons where available</div>
-        <div>Wardrobe by Someone's Closet</div>
-        <div>Blue cards supplied by imagination</div>
-        <div>Celebrity handwriting approved by nobody</div>
-        <div>No actual celebrities were harmed</div>
-        <div>Good night, stars!</div>
+      <div className="mg-credit-only-card scrolling">
+        <div className="mg-credit-scroll-content">
+          <div className="mg-credit-only-title">Match Game</div>
+          <div>A collaboration between Jason Brown, Claude AI, and ChatGPT</div>
+          <div>Created by Jason Brown</div>
+          <div>Question chaos by Claude AI</div>
+          <div>Code wrangling by ChatGPT</div>
+          <div>Photos via Wikipedia / Wikimedia Commons where available</div>
+          <div>Wardrobe provided by {wardrobeBy}</div>
+          <div>Blue cards supplied by imagination</div>
+          <div>Celebrity handwriting approved by nobody</div>
+          <div>Legal services by Dewey, Cheatem & Howe</div>
+          <div>Travel arranged by a man with a clipboard</div>
+          <div>Catering by the snack table</div>
+          <div>No actual celebrities were harmed</div>
+          <div>Good night, stars!</div>
+        </div>
       </div>
       <button className="mg-btn mg-credit-play-again" onClick={handlePlayAgain}>Play Again</button>
     </div>
@@ -1290,7 +1319,7 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
       if (cancelled) return;
       await delay(450);
       await speakTTS({
-        text: `${celeb?.name || 'Our star'} looks nervous... thinking hard...`,
+        text: `${celeb?.name || 'Our star'} ${['looks nervous','looks sweaty','looks pale','looks worried','looks a little dejected','looks like they need a commercial break'][Math.floor(Math.random()*6)]}...`,
         isAnnouncer: true,
         fallbackProfile: ANNOUNCER_PROFILE,
       });
@@ -1344,7 +1373,7 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
           <CelebVisual celeb={celeb} size={150} />
         </div>
         <div className="mg-panelist-name" style={{fontSize:30}}>{celeb?.name}</div>
-        <div className="mg-panelist-tag">{stage === 'thinking' ? 'thinking hard…' : 'reveals:'}</div>
+        <div className="mg-panelist-tag">{stage === 'thinking' ? 'looks nervous…' : 'reveals:'}</div>
         <div className="mg-panelist-answer" style={{fontSize: stage === 'thinking' ? 34 : 48, minHeight:64}}>
           {stage === 'thinking' ? '???' : room.finalMatchCelebAnswer}
         </div>
@@ -1360,7 +1389,7 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
         : <div style={{textAlign:'center',fontFamily:'Bowlby One,sans-serif',fontSize:32,color:'var(--cir-red)'}}>
             No Final Match — credits coming up!
           </div>)
-        : <p className="mg-status" style={{fontSize:20}}>The star is thinking...</p>}
+        : <p className="mg-status" style={{fontSize:20}}>The star looks nervous...</p>}
     </div>
   );
 }
