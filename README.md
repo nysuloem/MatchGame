@@ -107,3 +107,19 @@ server/data/match-game-prompts.sqlite
 This file is created automatically at runtime using Node's built-in SQLite support. It stores regular-round, Super Match, and Final Match prompts that have already been used so the game can avoid exact or similar repeats across restarts. The older `prompt-history.json` file is migrated into SQLite if present, but SQLite is now the main prompt memory.
 
 This version does not use `sql.js` or `better-sqlite3`, so Railway should not need to download or compile any extra SQLite package.
+
+## Railway persistent database
+
+Prompt and parting-gift memory is stored in SQLite. On Railway, attach a Volume mounted at:
+
+```text
+/data
+```
+
+The app automatically uses `/data/match-game-prompts.sqlite` when `/data` exists. You can override this with:
+
+```text
+MATCHGAME_DB_PATH=/data/match-game-prompts.sqlite
+```
+
+Without a Railway Volume, the database will still work during a deployment, but it may be wiped when Railway redeploys or restarts the service.

@@ -37,7 +37,7 @@ const api = {
   superMatchPick: (code, celebIndices) => req(`/api/room/${code}/supermatch-pick`, { method:'POST', body:{celebIndices} }),
   superMatchRevealNext: (code) => req(`/api/room/${code}/supermatch-reveal-next`, { method:'POST' }),
   superMatchCelebAnswer: (code, slot, answer) => req(`/api/room/${code}/supermatch-celeb-answer`, { method:'POST', body:{slot,answer} }),
-  superMatchAnswer: (code, answer) => req(`/api/room/${code}/supermatch-answer`, { method:'POST', body:{answer} }),
+  superMatchAnswer: (code, answer, source={type:'own'}) => req(`/api/room/${code}/supermatch-answer`, { method:'POST', body:{answer, sourceType:source.type, celebIndex:source.celebIndex} }),
   superMatchPromptRead: (code) => req(`/api/room/${code}/supermatch-prompt-read`, { method:'POST' }),
   finalMatchStart: (code) => req(`/api/room/${code}/finalmatch-start`, { method:'POST' }),
   finalMatchPick:  (code, celebIndex) => req(`/api/room/${code}/finalmatch-pick`, { method:'POST', body:{celebIndex} }),
@@ -1122,6 +1122,22 @@ function DisplaySuperMatchResult({ room, roomCode }) {
     let cancelled = false;
     (async () => {
       await delay(500);
+      const name = room.players[room.activeSlot] || 'Our contestant';
+      const src = room.superMatchAnswerSource || { type: 'own' };
+      if (src.type === 'celeb') {
+        await speakTTS({
+          text: `${name} has decided to go with ${src.celebName || 'a celebrity'}'s answer: ${contestantAnswer}.`,
+          isAnnouncer: true,
+          fallbackProfile: ANNOUNCER_PROFILE,
+        });
+      } else {
+        await speakTTS({
+          text: `${name} has decided to go with their own answer: ${contestantAnswer}.`,
+          isAnnouncer: true,
+          fallbackProfile: ANNOUNCER_PROFILE,
+        });
+      }
+      await delay(450);
       let foundMatch = false;
       for (let i = 0; i < topAnswers.length; i++) {
         if (cancelled) return;
@@ -1177,7 +1193,7 @@ function DisplaySuperMatchResult({ room, roomCode }) {
     <div className="mg-display-center-msg">
       {celebrated && <Confetti />}
       <div className="mg-prompt">{room.superMatchPrompt}</div>
-      <p className="mg-status">{room.players[room.activeSlot]} said: <strong>"{contestantAnswer}"</strong></p>
+      <p className="mg-status">{room.players[room.activeSlot]} chose: <strong>"{contestantAnswer}"</strong></p>
       <div className="mg-top-answers">
         {topAnswers.slice(0, visibleCount).map((ta, i) => {
           const isMatch = winnings > 0 && ta.value === winnings;
@@ -1479,9 +1495,9 @@ function PhoneView({ room, roomCode, playerSlot }) {
     );
   };
 
-  const handleSuperMatchAnswer = async (answer) => {
+  const handleSuperMatchAnswer = async (answer, source={type:'own'}) => {
     setSubmitted(true);
-    try { await api.superMatchAnswer(roomCode, answer || myAnswer); }
+    try { await api.superMatchAnswer(roomCode, answer || myAnswer, source); }
     catch(e) { setSubmitted(false); }
   };
 
@@ -1717,7 +1733,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
                 <p className="mg-status" style={{fontWeight:'bold'}}>All celebrities have answered. Choose:</p>
                 {(room.superMatchCelebIndices || []).map((panelIdx, i) => (
                   <button key={i} className="mg-btn" style={{width:'100%', marginTop:10, fontSize:16}}
-                    onClick={() => { setSubmitted(true); handleSuperMatchAnswer(room.panel[panelIdx]?.answer); }}>
+                    onClick={() => { setSubmitted(true); handleSuperMatchAnswer(room.panel[panelIdx]?.answer, {type:'celeb', celebIndex: panelIdx}); }}>
                     {room.panel[panelIdx]?.name}: <em>"{room.panel[panelIdx]?.answer}"</em>
                   </button>
                 ))}
@@ -1727,7 +1743,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
                     onChange={e => setMyAnswer(e.target.value)}
                     placeholder="Your answer" maxLength={30} style={{fontSize:20}} />
                   <div className="mg-row">
-                    <button className="mg-btn secondary" onClick={() => { setSubmitted(true); handleSuperMatchAnswer(myAnswer); }}
+                    <button className="mg-btn secondary" onClick={() => { setSubmitted(true); handleSuperMatchAnswer(myAnswer, {type:'own'}); }}
                       disabled={!myAnswer.trim()}>Use My Answer</button>
                   </div>
                 </div>

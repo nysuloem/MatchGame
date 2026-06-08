@@ -89,10 +89,13 @@ const GLOBAL_USED_ROUND_PROMPTS = new Set();
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// Persistent prompt memory using Node's built-in SQLite support.
-// This avoids extra npm SQLite packages, so Railway does not need to download
-// or compile sql.js / better-sqlite3 during deployment.
-const PROMPT_DB_FILE = path.join(DATA_DIR, 'match-game-prompts.sqlite');
+// Persistent prompt/prize memory using Node's built-in SQLite support.
+// On Railway, attach a Volume mounted at /data. The DB will then survive redeploys.
+// You can also set MATCHGAME_DB_PATH explicitly.
+const PERSIST_DIR = process.env.MATCHGAME_DATA_DIR || (fs.existsSync('/data') ? '/data' : DATA_DIR);
+if (!fs.existsSync(PERSIST_DIR)) fs.mkdirSync(PERSIST_DIR, { recursive: true });
+const PROMPT_DB_FILE = process.env.MATCHGAME_DB_PATH || path.join(PERSIST_DIR, 'match-game-prompts.sqlite');
+console.log(`[db] Match Game SQLite path: ${PROMPT_DB_FILE}`);
 const PROMPT_DB = new DatabaseSync(PROMPT_DB_FILE);
 PROMPT_DB.exec(`
   CREATE TABLE IF NOT EXISTS prompt_history (
@@ -122,6 +125,18 @@ PROMPT_DB.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_prompt_root_history_kind_last
     ON prompt_root_history(kind, last_used_at DESC);
+
+  CREATE TABLE IF NOT EXISTS gift_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gift_key TEXT NOT NULL UNIQUE,
+    gift TEXT NOT NULL,
+    first_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    times_used INTEGER NOT NULL DEFAULT 1
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_gift_history_last
+    ON gift_history(last_used_at DESC);
 `);
 
 const hasPromptBeenUsed = (kind, prompt) => Boolean(PROMPT_DB.prepare(
@@ -166,13 +181,39 @@ const hasPromptRootBeenUsed = (kind, root) => Boolean(PROMPT_DB.prepare(
   'SELECT 1 FROM prompt_root_history WHERE kind = ? AND root = ? LIMIT 1'
 ).get(kind, root));
 
+const giftKey = (gift = '') => normalizePromptKey(gift).replace(/[^a-z0-9 ]/g, ' ').trim();
+
+const hasGiftBeenUsed = (gift) => Boolean(PROMPT_DB.prepare(
+  'SELECT 1 FROM gift_history WHERE gift_key = ? LIMIT 1'
+).get(giftKey(gift)));
+
+const markGiftUsed = (gift) => {
+  const clean = String(gift || '').trim();
+  if (!clean) return;
+  PROMPT_DB.prepare(`
+    INSERT INTO gift_history (gift_key, gift)
+    VALUES (?, ?)
+    ON CONFLICT(gift_key) DO UPDATE SET
+      last_used_at = CURRENT_TIMESTAMP,
+      times_used = times_used + 1
+  `).run(giftKey(clean), clean);
+  console.log(`[gift-db] using gift: ${clean}`);
+};
+
+const recentGifts = (limit = 25) => PROMPT_DB.prepare(
+  'SELECT gift FROM gift_history ORDER BY last_used_at DESC LIMIT ?'
+).all(limit).map(row => row.gift).filter(Boolean);
+
 const promptHistoryStats = () => ({
+  dbPath: PROMPT_DB_FILE,
   promptRows: PROMPT_DB.prepare('SELECT kind, COUNT(*) as count FROM prompt_history GROUP BY kind').all(),
   rootRows: PROMPT_DB.prepare('SELECT kind, COUNT(*) as count FROM prompt_root_history GROUP BY kind').all(),
+  giftRows: PROMPT_DB.prepare('SELECT COUNT(*) as count FROM gift_history').get(),
   recentSuper: usedPromptSamples('super', 10),
   recentFinal: usedPromptSamples('final', 10),
   recentSuperRoots: usedPromptRoots('super', 20),
   recentFinalRoots: usedPromptRoots('final', 20),
+  recentGifts: recentGifts(10),
 });
 
 const migrateLegacyPromptHistory = () => {
@@ -481,7 +522,10 @@ const PARTING_GIFTS = [
   'a handsome clock radio for your bedside table',
   'a mystery box from the prop department'
 ];
-const randomPartingGift = () => PARTING_GIFTS[Math.floor(Math.random() * PARTING_GIFTS.length)];
+const randomPartingGift = () => {
+  const unused = PARTING_GIFTS.filter(g => !hasGiftBeenUsed(g));
+  return shuffle(unused.length ? unused : PARTING_GIFTS)[0];
+};
 
 const CREDIT_FALLBACKS = {
   wardrobe: [
@@ -542,20 +586,29 @@ Return exactly:
 };
 
 const generatePartingGift = async () => {
+  const avoid = recentGifts(25).map(g => `- ${g}`).join('\n');
   try {
     const text = await callLLM(
       `Invent ONE funny 1970s game-show parting gift for a losing Match Game contestant.
 Make it silly, concrete, family-friendly, and short enough for an announcer to read in one breath.
-Examples: a suspicious fondue set, a year's supply of Rice-A-Roni, a deluxe set of blue index cards.
+Do NOT repeat or closely resemble these recent gifts:
+${avoid || '(none)'}
+
+Examples of the vibe: a suspicious fondue set, a deluxe set of blue index cards, a toaster that only works on Wednesdays.
 Return only the prize phrase, no quotation marks.`,
-      40, false
+      70, false
     );
     const clean = String(text || '').replace(/[\r\n]+/g, ' ').replace(/^['"“”‘’]+|['"“”‘’.,!]+$/g, '').trim();
-    if (clean && clean.length <= 140) return clean;
+    if (clean && clean.length <= 140 && !hasGiftBeenUsed(clean)) {
+      markGiftUsed(clean);
+      return clean;
+    }
   } catch (e) {
     console.warn('parting gift generation failed:', e.message);
   }
-  return randomPartingGift();
+  const fallback = randomPartingGift();
+  markGiftUsed(fallback);
+  return fallback;
 };
 
 const prepareElimination = async (room, loserSlot) => {
@@ -1579,7 +1632,7 @@ const maybeScheduleAiAction = (room) => {
       const choices = (room.superMatchCelebIndices || []).map(i => room.panel[i]?.answer).filter(Boolean);
       const top = (room.superMatchTopAnswers || []).map(a => a.answer).filter(Boolean);
       const answer = choices[0] || top[0] || 'answer';
-      await completeSuperMatchContestantAnswer(room, answer);
+      await completeSuperMatchContestantAnswer(room, answer, { type: 'celeb', celebIndex: (room.superMatchCelebIndices || [])[0] });
     });
   }
 
@@ -1721,6 +1774,7 @@ const resetRoomForPlayAgain = (room) => {
   room.superMatchCelebAnswers = [];
   room.superMatchRevealIndex = -1;
   room.superMatchContestantAnswer = null;
+  room.superMatchAnswerSource = null;
   room.superMatchWinnings = 0;
   room.superMatchPromptReady = false;
   room.finalMatchPrompt = null;
@@ -2242,8 +2296,11 @@ app.post('/api/room/:code/supermatch-reveal-next', (req, res) => {
 });
 
 // ─── API: SUPER MATCH — CONTESTANT ANSWER ─────────────────────
-const completeSuperMatchContestantAnswer = async (room, answer) => {
+const completeSuperMatchContestantAnswer = async (room, answer, source = {}) => {
   room.superMatchContestantAnswer = String(answer || '').trim().slice(0, 50);
+  room.superMatchAnswerSource = source?.type === 'celeb'
+    ? { type: 'celeb', celebIndex: Number(source.celebIndex), celebName: room.panel?.[Number(source.celebIndex)]?.name || 'a celebrity' }
+    : { type: 'own' };
 
   // Score against top answers
   const topAnswers = room.superMatchTopAnswers || [];
@@ -2255,7 +2312,7 @@ const completeSuperMatchContestantAnswer = async (room, answer) => {
     }
   }
   room.superMatchWinnings = winnings;
-  room.partingGift = winnings > 0 ? null : randomPartingGift();
+  room.partingGift = winnings > 0 ? null : await generatePartingGift();
   room.superMatchTopRevealIndex = -1;
   room.phase = winnings > 0 ? 'superMatch_won' : 'superMatch_lost';
   bump(room);
@@ -2264,9 +2321,9 @@ const completeSuperMatchContestantAnswer = async (room, answer) => {
 app.post('/api/room/:code/supermatch-answer', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  const { answer } = req.body;
+  const { answer, sourceType, celebIndex } = req.body;
   if (!answer?.trim()) return res.status(400).json({ error: 'answer required' });
-  await completeSuperMatchContestantAnswer(room, answer);
+  await completeSuperMatchContestantAnswer(room, answer, sourceType === 'celeb' ? { type: 'celeb', celebIndex } : { type: 'own' });
   res.json({ room });
 });
 
