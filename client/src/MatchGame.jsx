@@ -1223,13 +1223,37 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
     "three leisure suits and a dream"
   ];
   const wardrobeBy = wardrobeSources[Math.floor(Math.random() * wardrobeSources.length)];
+  const nextShows = [
+    'Password',
+    'Tattletales',
+    'The Newlywed Game',
+    'Hollywood Squares',
+    'Family Feud',
+    'The Gong Show',
+    'Card Sharks',
+    'The Price Is Right',
+    'To Tell the Truth',
+    'Let\'s Make a Deal'
+  ];
+  const nextShow = nextShows[Math.floor(Math.random() * nextShows.length)];
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    let cancelled = false;
+    const musicTimer = setTimeout(() => {
       try { startCreditsMusic(); } catch {}
     }, 350);
+    const voiceTimer = setTimeout(() => {
+      if (cancelled) return;
+      speakTTS({
+        text: `Match Game is a Jason Brown, Claude, and Chat GPT production. Stay tuned for ${nextShow}.`,
+        isAnnouncer: true,
+        fallbackProfile: ANNOUNCER_PROFILE,
+      }).catch(() => {});
+    }, 900);
     return () => {
-      clearTimeout(timer);
+      cancelled = true;
+      clearTimeout(musicTimer);
+      clearTimeout(voiceTimer);
       try { stopCreditsMusic(); } catch {}
     };
   }, []);
@@ -1250,7 +1274,8 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
       <div className="mg-credit-only-card scrolling">
         <div className="mg-credit-scroll-content">
           <div className="mg-credit-only-title">Match Game</div>
-          <div>A collaboration between Jason Brown, Claude AI, and ChatGPT</div>
+          <div>A Jason Brown / Claude / ChatGPT production</div>
+          <div>Stay tuned for more questionable television!</div>
           <div>Created by Jason Brown</div>
           <div>Question chaos by Claude AI</div>
           <div>Code wrangling by ChatGPT</div>

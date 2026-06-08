@@ -955,6 +955,7 @@ ANSWER RULES:
 - Round 1: answers may vary, but they must stay in the same answer neighborhood. About 2 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, 1 should give a plausible in-character answer, and 1 should give a funny answer.
 - Round 2: make matching likely by staying inside a limited answer set, not by making everyone identical. Usually 3-4 celebrities should use the #1 answer or a very close variant, 1-2 should use the #2 answer or a close variant, and 1 may give a funny/adult-innuendo answer that still fits the same answer neighborhood.
 - The funny answer should be a quick laugh. Lean into classic Match Game double-entendre and adult innuendo when the prompt allows it, but keep it non-explicit and TV-PG/PG-13.
+- If the prompt contains the word "accidentally", treat that as a comedy trigger: the panel's answers should be funny, embarrassing, or mischievous while still fitting the blank and staying matchable. Do not give bland literal answers for an "accidentally" prompt.
 - Do NOT make the same celebrity type the oddball every time; follow the designated funny position.
 - Do NOT make every celebrity different, but also do NOT make all six identical. A good Round 2 panel should feel spontaneous while clustering around 2-3 plausible answers.
 - Do NOT be too clever, abstract, or niche.
