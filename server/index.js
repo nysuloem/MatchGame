@@ -295,6 +295,9 @@ const extractJSON = (text) => {
 const BLANK = '__________';
 const normalizePromptBlank = (prompt = '') => String(prompt || '')
   .replace(/_{3,}/g, BLANK)
+  // Never leave punctuation immediately after the blank; TTS reads it awkwardly.
+  .replace(new RegExp(`${BLANK}[\\s\\.!,?;:]+$`), BLANK)
+  .replace(new RegExp(`${BLANK}[\\s\\.!,?;:]+`), BLANK + ' ')
   .replace(/\s+/g, ' ')
   .trim();
 
@@ -313,11 +316,13 @@ const promptIsUsable = (prompt, kind = 'round') => {
   if (kind === 'round') {
     const words = t.split(/\s+/).length;
     const blankPos = t.indexOf(BLANK);
-    const afterBlank = t.slice(blankPos + BLANK.length).replace(/[\s.!?"'’”]+/g, '');
-    const blankNearEnd = afterBlank.length === 0 || afterBlank.length <= 16;
+    const rawAfterBlank = t.slice(blankPos + BLANK.length);
+    if (/^[\s\.!,?;:]+$/.test(rawAfterBlank)) return false;
+    const afterBlank = rawAfterBlank.replace(/[\s.!?"'’”]+/g, '');
+    const blankNearEnd = afterBlank.length === 0 || afterBlank.length <= 10;
     return t.length >= 28 && t.length <= 135 && words <= 24 && blankNearEnd;
   }
-  return t.length >= 5 && t.length <= 80;
+  return t.length >= 5 && t.length <= 80 && !new RegExp(`${BLANK}[\\s\\.!,?;:]+$`).test(t);
 };
 
 const stripAnswerToBlank = (prompt = '', answer = '') => {
@@ -362,6 +367,10 @@ const cleanGeneratedBlankAnswer = (prompt = '', answer = '') => {
   cleaned = stripAnswerToBlank(prompt, cleaned).split(/\s+/).slice(0, 2).join(' ').trim();
   if (!/[a-z0-9]/i.test(cleaned)) return '';
   if (/^(pass|uh|umm|hmm|dot|dots)$/i.test(cleaned)) return '';
+  // Reject partial phrase fragments that indicate the model is completing
+  // words around the blank instead of filling only the blank.
+  if (/\b(a|an|the|in|on|at|to|for|of|with|from|by)$/i.test(cleaned)) return '';
+  if (/^(a|an|the|in|on|at|to|for|of|with|from|by)\b/i.test(cleaned)) return '';
   return cleaned;
 };
 
@@ -995,13 +1004,18 @@ The panel should NOT give six unrelated answers.
 
 ANSWER RULES:
 - 1-2 WORDS MAXIMUM per celebrity.
-- Fill ONLY the missing blank. Do NOT repeat words already in the prompt. If the clue is "Dream __________", answer "job", not "dream job".
+- Fill ONLY the missing blank. Look carefully at the exact location of __________.
+- Do NOT provide the whole phrase, and do NOT include words before/after the blank.
+- Never end an answer with a dangling little word such as "in", "a", "the", "of", "to", or "with". Bad answer: "cat in a". Good answer: "cat".
+- If the clue is "Dream __________", answer "job", not "dream job".
 - Use simple concrete words, not explanations.
 - The answer must fit the blank naturally when read in the prompt.
 - Round 1: answers may vary, but they must stay in the same answer neighborhood. About 2 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, 1 should give a plausible in-character answer, and 1 should give a funny answer.
 - Round 2: make matching likely by staying inside a limited answer set, not by making everyone identical. Usually 3-4 celebrities should use the #1 answer or a very close variant, 1-2 should use the #2 answer or a close variant, and 1 may give a funny/adult-innuendo answer that still fits the same answer neighborhood.
 - The funny answer should be a quick laugh. Lean into classic Match Game double-entendre and adult innuendo when the prompt allows it, but keep it non-explicit and TV-PG/PG-13.
-- If the prompt contains the word "accidentally", treat that as a comedy trigger: the panel's answers should be funny, embarrassing, or mischievous while still fitting the blank and staying matchable. Do not give bland literal answers for an "accidentally" prompt.
+- At least one answer should usually have a playful adult wink or double meaning, in the old Match Game style.
+- If the prompt contains "accidentally", "bedroom", "alarm", "doctor", "plumber", "dating", "pants", "nurse", "wedding night", "honeymoon", or "secret", treat that as a comedy trigger: choose answers that are funny, embarrassing, suggestive, or mischievous while still fitting the blank and staying matchable.
+- Avoid bland sweet words like "honey" or "sugar" unless the prompt specifically calls for pet names or food.
 - Do NOT make the same celebrity type the oddball every time; follow the designated funny position.
 - Do NOT make every celebrity different, but also do NOT make all six identical. A good Round 2 panel should feel spontaneous while clustering around 2-3 plausible answers.
 - Do NOT be too clever, abstract, or niche.
@@ -1014,8 +1028,9 @@ Return JSON: {"answers": ["answer1","answer2","answer3","answer4","answer5","ans
   );
   const parsed = extractJSON(text);
   let answers = Array.isArray(parsed) ? parsed : (parsed.answers || []);
-  answers = answers.map(a => stripAnswerToBlank(promptText, a || '???').split(/\s+/).slice(0, 2).join(' '));
-  while (answers.length < 6) answers.push(key[0] || '???');
+  answers = answers.map(a => cleanGeneratedBlankAnswer(promptText, a || ''));
+  while (answers.length < 6) answers.push('');
+  answers = answers.map((a, i) => a || key[i % Math.max(1, key.length)] || key[0] || 'answer');
 
   // Safety net: keep the model funny, but enforce Match Game convergence with randomized positions.
   if (key.length) {
@@ -1474,9 +1489,7 @@ Return JSON only: {"match":true} or {"match":false}`,
 };
 
 const scoreAnswerAsync = async (playerAnswer, panel, prompt = '') => {
-  const results = [];
-  for (const p of panel) results.push(await llmMatch(prompt, playerAnswer, p.answer || ''));
-  return results;
+  return Promise.all((panel || []).map(p => llmMatch(prompt, playerAnswer, p.answer || '')));
 };
 
 
