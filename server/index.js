@@ -3,7 +3,7 @@ import cors from 'cors';
 import OpenAI from 'openai';
 import path from 'path';
 import fs from 'fs';
-import initSqlJs from 'sql.js';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -63,24 +63,12 @@ const GLOBAL_USED_ROUND_PROMPTS = new Set();
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// Persistent prompt memory.
-// This uses SQLite via sql.js (pure JS/WASM), so prompt history survives
-// restarts/redeployments without needing a native SQLite build step.
+// Persistent prompt memory using Node's built-in SQLite support.
+// This avoids extra npm SQLite packages, so Railway does not need to download
+// or compile sql.js / better-sqlite3 during deployment.
 const PROMPT_DB_FILE = path.join(DATA_DIR, 'match-game-prompts.sqlite');
-const SQL = await initSqlJs({
-  locateFile: (file) => {
-    const local = path.join(__dirname, 'node_modules', 'sql.js', 'dist', file);
-    if (fs.existsSync(local)) return local;
-    const workspace = path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', file);
-    if (fs.existsSync(workspace)) return workspace;
-    return file;
-  }
-});
-const PROMPT_DB = fs.existsSync(PROMPT_DB_FILE)
-  ? new SQL.Database(fs.readFileSync(PROMPT_DB_FILE))
-  : new SQL.Database();
-
-PROMPT_DB.run(`
+const PROMPT_DB = new DatabaseSync(PROMPT_DB_FILE);
+PROMPT_DB.exec(`
   CREATE TABLE IF NOT EXISTS prompt_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
@@ -96,58 +84,25 @@ PROMPT_DB.run(`
     ON prompt_history(kind, last_used_at DESC);
 `);
 
-const savePromptDb = () => {
-  try {
-    fs.writeFileSync(PROMPT_DB_FILE, Buffer.from(PROMPT_DB.export()));
-  } catch (err) {
-    console.warn('Could not save SQLite prompt database:', err.message);
-  }
-};
-
-const dbGet = (sql, params = []) => {
-  const stmt = PROMPT_DB.prepare(sql);
-  try {
-    stmt.bind(params);
-    return stmt.step() ? stmt.getAsObject() : undefined;
-  } finally {
-    stmt.free();
-  }
-};
-
-const dbAll = (sql, params = []) => {
-  const stmt = PROMPT_DB.prepare(sql);
-  const rows = [];
-  try {
-    stmt.bind(params);
-    while (stmt.step()) rows.push(stmt.getAsObject());
-  } finally {
-    stmt.free();
-  }
-  return rows;
-};
-
-const hasPromptBeenUsed = (kind, prompt) => Boolean(dbGet(
-  'SELECT 1 FROM prompt_history WHERE kind = ? AND prompt_key = ? LIMIT 1',
-  [kind, normalizePromptKey(prompt)]
-));
+const hasPromptBeenUsed = (kind, prompt) => Boolean(PROMPT_DB.prepare(
+  'SELECT 1 FROM prompt_history WHERE kind = ? AND prompt_key = ? LIMIT 1'
+).get(kind, normalizePromptKey(prompt)));
 
 const markPromptUsed = (kind, prompt) => {
   const clean = String(prompt || '').trim();
   if (!clean) return;
-  PROMPT_DB.run(`
+  PROMPT_DB.prepare(`
     INSERT INTO prompt_history (kind, prompt_key, prompt)
     VALUES (?, ?, ?)
     ON CONFLICT(kind, prompt_key) DO UPDATE SET
       last_used_at = CURRENT_TIMESTAMP,
       times_used = times_used + 1
-  `, [kind, normalizePromptKey(clean), clean]);
-  savePromptDb();
+  `).run(kind, normalizePromptKey(clean), clean);
 };
 
-const usedPromptSamples = (kind, limit = 80) => dbAll(
-  'SELECT prompt FROM prompt_history WHERE kind = ? ORDER BY last_used_at DESC LIMIT ?',
-  [kind, limit]
-).map(row => row.prompt).filter(Boolean);
+const usedPromptSamples = (kind, limit = 80) => PROMPT_DB.prepare(
+  'SELECT prompt FROM prompt_history WHERE kind = ? ORDER BY last_used_at DESC LIMIT ?'
+).all(kind, limit).map(row => row.prompt).filter(Boolean);
 
 const migrateLegacyPromptHistory = () => {
   const legacyFile = path.join(DATA_DIR, 'prompt-history.json');
