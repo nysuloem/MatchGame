@@ -482,7 +482,24 @@ But this is still a matching game:
 - use exactly one blank marker, written as __________;
 - usually put the blank at the end;
 - never write the word "blank" in the screen prompt.
+
+DIVERSITY RULE:
+Do not keep returning the same domestic-party situations. Avoid overusing karaoke, spilled drinks, weddings, alarm clocks, doctors, plumbers, restaurants, and dates.
+Use a broad rotating mix of settings. Example breadth includes: airport, zoo, museum, gym, dentist office, courtroom, funeral home, garden centre, aquarium, cruise ship, camping trip, high school reunion, magic show, bowling alley, subway, elevator, department store, hair salon, yoga studio, mechanic shop, library, beach, office, church bingo, science lab, TV studio, haunted house, hotel lobby, DMV, vet clinic, carnival, hockey arena, cooking show, retirement home, laundromat, amusement park, farmers market, movie theatre, spa, neighbour's yard, pet groomer, bank, casino, charity auction, family barbecue.
+These are examples, not limits. Extrapolate to other equally varied everyday, workplace, vacation, family, public, hobby, and oddball settings.
 `;
+
+const ROUND_THEME_MENU = [
+  'airport security', 'zoo', 'museum', 'gym locker room', 'dentist office', 'courtroom',
+  'funeral home', 'garden centre', 'aquarium', 'cruise ship', 'camping trip',
+  'high school reunion', 'magic show', 'bowling alley', 'subway train', 'elevator',
+  'department store', 'hair salon', 'yoga studio', 'mechanic shop', 'library',
+  'beach', 'office', 'church bingo', 'science lab', 'TV studio', 'haunted house',
+  'hotel lobby', 'DMV', 'vet clinic', 'carnival', 'hockey arena', 'cooking show',
+  'retirement home', 'laundromat', 'amusement park', 'farmers market', 'movie theatre',
+  'spa', 'neighbour\'s yard', 'pet groomer', 'bank', 'casino', 'charity auction',
+  'family barbecue', 'garage sale', 'tax office', 'school dance', 'boat dock'
+];
 
 const SUPER_MATCH_WRITER_STYLE = `
 You are writing a Match Game Super Match audience-survey clue.
@@ -939,6 +956,7 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], us
   ];
   const avoidList = localUsed.slice(-80).map(p => `- ${p}`).join('\n');
   const categories = shuffle(PROMPT_CATEGORIES.filter(c => allowDumbDora || !/dumb/i.test(c))).slice(0, 6).join(', ');
+  const themeMenu = shuffle(ROUND_THEME_MENU).slice(0, 12).join(', ');
   const roundSpecificGuidance = roundNum >= 2
     ? 'ROUND 2 MUST BE MORE MATCHABLE: write prompts with a clearer, more definitive best answer. The #1 answer should be something an ordinary player and at least 4 celebrities could plausibly converge on. Still funny, but less ambiguous than Round 1.'
     : 'ROUND 1 can allow a little more variety, but it still needs a clear answer neighborhood with one best answer.';
@@ -955,10 +973,15 @@ Generate TWO brand-new Match Game-style fill-in-the-blank prompts for a family g
 IMPORTANT: These must not repeat or closely resemble any prior prompt listed below.
 Avoid prior prompts:\n${avoidList || '(none)'}
 
-Use fresh situations from these areas: ${categories}.
+Use fresh situations from these broad comedy areas: ${categories}.
+Here is a randomized inspiration menu showing the breadth expected: ${themeMenu}.
+You may use one of these settings OR invent a similarly different setting. Do not treat the menu as exhaustive.
+The key requirement is variety: each prompt should feel like it comes from a different corner of life, not another version of the same party/date/restaurant mishap.
+Do not use both prompts from the same setting. Avoid karaoke, spilled drinks, wedding receptions, restaurants, dates, or alarms unless the avoid list clearly shows no recent overlap and you have a genuinely fresh angle.
 ${allowDumbDora ? 'You may include AT MOST ONE call-and-response prompt in this pair. It can be Dumb Dora or another name/adjective setup, e.g. \"Dumb Dora is so dumb, she thought a Hoover was a __________.\" or \"Drunk Danny is so clumsy, when he tried to pour a drink he filled his __________.\" The screen prompt should NOT include the audience callback; the TV host will pause after the opening phrase like \"Dumb Dora is so dumb\" or \"Drunk Danny is so clumsy\" so the people playing can yell a response.' : 'Do NOT generate a Dumb Dora / so-anything call-and-response prompt in this pair; this game has already used that style.'}
 
 CRITICAL PROMPT QUALITY RULES:
+- DIVERSITY FIRST: choose a setting that feels different from the avoid list. Repeated karaoke/spilled drink/party/date prompts are failures.
 - Do NOT use generic "Favourite __________" prompts.
 - Do NOT use trivia, factual definitions, niche references, or questions with only one logical fact-answer.
 - Do NOT use prompts where the blank could be almost any object/body part/food/place.
@@ -1053,7 +1076,8 @@ Designated funny/innuendo celebrity position: ${funnyIndex + 1}
 
 THE BIG FIX:
 The game should feel like classic Match Game. Answers must be matchable, but still funny.
-The panel should NOT give six unrelated answers.
+Imagine six quick-witted human panelists writing on blue cards, not a chatbot trying to be logical.
+The panel should NOT give six unrelated answers, but they should feel spontaneous and human.
 
 ANSWER RULES:
 - 1-2 WORDS MAXIMUM per celebrity.
@@ -1063,11 +1087,15 @@ ANSWER RULES:
 - If the clue is "Dream __________", answer "job", not "dream job".
 - Use simple concrete words, not explanations.
 - The answer must fit the blank naturally when read in the prompt.
+- Prefer ordinary human first-instinct answers, not polite chatbot answers.
+- For double entendres, use classic TV-safe suggestive nouns that can plausibly fit the blank: pants, underwear, bedroom, zipper, lap, behind, kiss, date, shower, robe, handcuffs, hose, pump, pickle, sausage, melons, headlights, buns. Use only when the prompt context makes it funny and matchable.
+- Avoid sterile answers like "honey", "sugar", "kindness", "friendship", "love", or "joy" unless the prompt very clearly points there.
 - Round 1: answers may vary, but they must stay in the same answer neighborhood. About 2 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, 1 should give a plausible in-character answer, and 1 should give a funny answer.
 - Round 2: make matching likely by staying inside a limited answer set, not by making everyone identical. Usually 3-4 celebrities should use the #1 answer or a very close variant, 1-2 should use the #2 answer or a close variant, and 1 may give a funny/adult-innuendo answer that still fits the same answer neighborhood.
 - The funny answer should be a quick laugh. Lean into classic Match Game double-entendre and adult innuendo when the prompt allows it, but keep it non-explicit and TV-PG/PG-13.
 - At least one answer should usually have a playful adult wink or double meaning, in the old Match Game style.
-- If the prompt contains "accidentally", "bedroom", "alarm", "doctor", "plumber", "dating", "pants", "nurse", "wedding night", "honeymoon", or "secret", treat that as a comedy trigger: choose answers that are funny, embarrassing, suggestive, or mischievous while still fitting the blank and staying matchable.
+- If the prompt contains "accidentally", "bedroom", "alarm", "doctor", "plumber", "dating", "pants", "nurse", "wedding night", "honeymoon", "secret", "stuck", "zipper", "bathroom", "hotel", "gym", or "costume", treat that as a comedy trigger: choose answers that are funny, embarrassing, suggestive, or mischievous while still fitting the blank and staying matchable.
+- Weak example: prompt about accidentally programming an alarm to respond to __________ -> bad answers are "honey" or "sugar"; better answer directions are "clapping", "snoring", "kissing", "moaning", "whistling", or "spanking" if they fit the exact prompt.
 - Avoid bland sweet words like "honey" or "sugar" unless the prompt specifically calls for pet names or food.
 - Do NOT make the same celebrity type the oddball every time; follow the designated funny position.
 - Do NOT make every celebrity different, but also do NOT make all six identical. A good Round 2 panel should feel spontaneous while clustering around 2-3 plausible answers.
@@ -2021,9 +2049,9 @@ const startNewRound = async (room, roundNum) => {
     } else if (roundNum === 1) {
       room.activeSlot = room.cointossWinner;
     } else {
-      // Lower score picks first (or slot 1 if tied after wipe)
+      // Lower score picks first. If tied, the original coin-toss winner starts.
       const s1 = room.scores[1], s2 = room.scores[2];
-      room.activeSlot = s1 <= s2 ? 1 : 2;
+      room.activeSlot = s1 === s2 ? (room.cointossWinner || 1) : (s1 < s2 ? 1 : 2);
     }
     room.turnInRound = 1;
     room.phase = 'pick_prompt';
