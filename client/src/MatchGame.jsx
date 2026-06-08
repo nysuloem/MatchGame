@@ -46,8 +46,10 @@ const api = {
   finalMatchPickReady:(code) => req(`/api/room/${code}/finalmatch-pick-ready`, { method:'POST' }),
   finalMatchCelebAnswer:(code, slot, answer) => req(`/api/room/${code}/finalmatch-celeb-answer`, { method:'POST', body:{slot,answer} }),
   finalMatchDone:  (code) => req(`/api/room/${code}/finalmatch-done`, { method:'POST' }),
+  roundEndDone:   (code) => req(`/api/room/${code}/round-end-done`, { method:'POST' }),
   superMatchLostDone: (code) => req(`/api/room/${code}/supermatch-lost-done`, { method:'POST' }),
   playAgain: (code) => req(`/api/room/${code}/play-again`, { method:'POST' }),
+  creditsBits: () => fetch('/api/credits-bits').then(r => r.json()),
   speak: (params) => fetch('/api/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(params) }),
 };
 
@@ -672,6 +674,8 @@ function DisplayView({ room, roomCode, setRoom }) {
           isAnnouncer: true,
           fallbackProfile: { rate: 1.03, pitch: 1.15 },
         });
+        await delay(500);
+        try { await api.roundEndDone(roomCode); } catch {}
       })();
     }
     if (phase === 'superMatch_pickCelebs' && prevPhase !== 'superMatch_pickCelebs') {
@@ -1201,6 +1205,12 @@ function DisplaySuperMatchResult({ room, roomCode }) {
 }
 
 function DisplayGameOver({ room, roomCode, setRoom }) {
+  const [creditBits, setCreditBits] = useState({
+    wardrobe: 'Someone\'s Closet',
+    food: 'the snack table',
+    blueCards: 'imagination',
+    travel: 'a man with a clipboard'
+  });
   const safeMoney = (n) => `$${Number(n || 0).toLocaleString()}`;
   let headline = 'Thanks for playing!';
   try {
@@ -1211,18 +1221,6 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
     else if (room && room.partingGift) headline = `Parting gift: ${room.partingGift}`;
   } catch {}
 
-  const wardrobeSources = [
-    "Someone's Closet",
-    "the 1974 Sears catalogue",
-    "a suspicious basement trunk",
-    "Brett Somers' yard sale",
-    "the polyester appreciation society",
-    "a clearance rack in Encino",
-    "the lost-and-found at Studio 33",
-    "a very brave aunt",
-    "three leisure suits and a dream"
-  ];
-  const wardrobeBy = wardrobeSources[Math.floor(Math.random() * wardrobeSources.length)];
   const nextShows = [
     'Password',
     'Tattletales',
@@ -1239,6 +1237,7 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
 
   useEffect(() => {
     let cancelled = false;
+    api.creditsBits().then(bits => { if (!cancelled && bits) setCreditBits(bits); }).catch(() => {});
     const musicTimer = setTimeout(() => {
       try { startCreditsMusic(); } catch {}
     }, 350);
@@ -1280,12 +1279,12 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
           <div>Question chaos by Claude AI</div>
           <div>Code wrangling by ChatGPT</div>
           <div>Photos via Wikipedia / Wikimedia Commons where available</div>
-          <div>Wardrobe provided by {wardrobeBy}</div>
-          <div>Blue cards supplied by imagination</div>
+          <div>Wardrobe provided by {creditBits.wardrobe}</div>
+          <div>Blue cards supplied by {creditBits.blueCards}</div>
           <div>Celebrity handwriting approved by nobody</div>
           <div>Legal services by Dewey, Cheatem & Howe</div>
-          <div>Travel arranged by a man with a clipboard</div>
-          <div>Catering by the snack table</div>
+          <div>Travel arranged by {creditBits.travel}</div>
+          <div>Catering by {creditBits.food}</div>
           <div>No actual celebrities were harmed</div>
           <div>Good night, stars!</div>
         </div>
@@ -1618,9 +1617,9 @@ function PhoneView({ room, roomCode, playerSlot }) {
             ) : isHumanCeleb && room.panel?.[celebIndex] && !(room.round === 2 && (room.round1Matches?.[room.activeSlot] || []).includes(celebIndex)) && !room.humanPanelAnswers?.[celebIndex] ? (
               <>
                 <p className="mg-status" style={{fontSize:18,marginBottom:8}}>
-                  You are a celebrity panelist. Write your answer before the contestant is revealed:
+                  You are a celebrity panelist. Listen to the TV, then write your answer before the contestant is revealed:
                 </p>
-                <div className="mg-prompt phone">{room.chosenPrompt}</div>
+                <p className="mg-help" style={{marginBottom:12}}>The question is only shown on the TV screen.</p>
                 <input className="mg-input" value={myAnswer}
                   onChange={e => setMyAnswer(e.target.value)}
                   placeholder="Your celeb answer" maxLength={50}
@@ -1689,8 +1688,8 @@ function PhoneView({ room, roomCode, playerSlot }) {
             {isHumanCeleb && (room.superMatchCelebIndices || []).includes(celebIndex) && !room.superMatchHumanAnswers?.[celebIndex] && !submitted ? (
               <>
                 <div className="mg-display-round super">★ Super Match ★</div>
-                <div className="mg-prompt phone">{room.superMatchPrompt}</div>
-                <p className="mg-status">You were selected to help. Write your answer:</p>
+                <p className="mg-status">You were selected to help. Listen to the TV, then write your answer:</p>
+                <p className="mg-help" style={{marginBottom:12}}>The prompt is only shown on the TV screen.</p>
                 <input className="mg-input" value={myAnswer}
                   onChange={e => setMyAnswer(e.target.value)}
                   placeholder="Your Super Match answer" maxLength={30}
@@ -1815,8 +1814,8 @@ function PhoneView({ room, roomCode, playerSlot }) {
               <p className="mg-status">Watch the TV — the host is reading the Final Match question.</p>
             ) : (
               <>
-                <div className="mg-prompt phone">{room.finalMatchPrompt}</div>
-                <p className="mg-status">You were chosen for the Final Match. Write your answer now:</p>
+                <p className="mg-status">You were chosen for the Final Match. Listen to the TV, then write your answer now:</p>
+                <p className="mg-help" style={{marginBottom:12}}>The prompt is only shown on the TV screen.</p>
                 <input className="mg-input" value={myAnswer}
                   onChange={e => setMyAnswer(e.target.value)}
                   placeholder="Your Final Match answer" maxLength={30}

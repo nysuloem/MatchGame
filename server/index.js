@@ -142,6 +142,7 @@ const markPromptUsed = (kind, prompt) => {
   // Also store root words so "Birthday ___" and "Birthday Cake ___" do not
   // sneak through as "different" prompts. This is especially important for
   // Super Match and Final Match clues, where the root word is the whole game.
+  console.log(`[prompt-db] using ${kind}: ${clean} | roots=${promptClueRootWords(clean).join(',')}`);
   for (const root of promptClueRootWords(clean)) {
     PROMPT_DB.prepare(`
       INSERT INTO prompt_root_history (kind, root, prompt)
@@ -164,6 +165,15 @@ const usedPromptRoots = (kind, limit = 250) => PROMPT_DB.prepare(
 const hasPromptRootBeenUsed = (kind, root) => Boolean(PROMPT_DB.prepare(
   'SELECT 1 FROM prompt_root_history WHERE kind = ? AND root = ? LIMIT 1'
 ).get(kind, root));
+
+const promptHistoryStats = () => ({
+  promptRows: PROMPT_DB.prepare('SELECT kind, COUNT(*) as count FROM prompt_history GROUP BY kind').all(),
+  rootRows: PROMPT_DB.prepare('SELECT kind, COUNT(*) as count FROM prompt_root_history GROUP BY kind').all(),
+  recentSuper: usedPromptSamples('super', 10),
+  recentFinal: usedPromptSamples('final', 10),
+  recentSuperRoots: usedPromptRoots('super', 20),
+  recentFinalRoots: usedPromptRoots('final', 20),
+});
 
 const migrateLegacyPromptHistory = () => {
   const legacyFile = path.join(DATA_DIR, 'prompt-history.json');
@@ -463,6 +473,64 @@ const PARTING_GIFTS = [
   'a mystery box from the prop department'
 ];
 const randomPartingGift = () => PARTING_GIFTS[Math.floor(Math.random() * PARTING_GIFTS.length)];
+
+const CREDIT_FALLBACKS = {
+  wardrobe: [
+    'the 1974 Sears catalogue',
+    'a suspicious basement trunk',
+    'Brett Somers\' yard sale',
+    'the polyester appreciation society',
+    'a clearance rack in Encino'
+  ],
+  food: [
+    'the snack table',
+    'a fondue pot with legal representation',
+    'three warm deviled eggs',
+    'a suspicious gelatin mold',
+    'the studio vending machine'
+  ],
+  blueCards: [
+    'a box found under Gene Rayburn\'s podium',
+    'the office supply closet',
+    'a nervous intern with a marker',
+    'leftover cue cards from a cancelled pilot',
+    'the National Association of Blank Fillers'
+  ],
+  travel: [
+    'a man with a clipboard',
+    'a station wagon with no brakes',
+    'economy seats on Polyester Airlines',
+    'a bus that only turns left',
+    'the Los Angeles escalator authority'
+  ]
+};
+const fallbackCreditBits = () => ({
+  wardrobe: shuffle(CREDIT_FALLBACKS.wardrobe)[0],
+  food: shuffle(CREDIT_FALLBACKS.food)[0],
+  blueCards: shuffle(CREDIT_FALLBACKS.blueCards)[0],
+  travel: shuffle(CREDIT_FALLBACKS.travel)[0],
+});
+const generateCreditBits = async () => {
+  try {
+    const text = await callLLM(
+      `Generate four short fake 1970s game-show credit gags as JSON.
+Make them family-friendly, weird, and no more than 8 words each.
+Return exactly:
+{"wardrobe":"...","food":"...","blueCards":"...","travel":"..."}`,
+      160, true
+    );
+    const p = extractJSON(text);
+    const fb = fallbackCreditBits();
+    return {
+      wardrobe: String(p.wardrobe || fb.wardrobe).slice(0, 80),
+      food: String(p.food || fb.food).slice(0, 80),
+      blueCards: String(p.blueCards || fb.blueCards).slice(0, 80),
+      travel: String(p.travel || fb.travel).slice(0, 80),
+    };
+  } catch {
+    return fallbackCreditBits();
+  }
+};
 
 const generatePartingGift = async () => {
   try {
@@ -1177,46 +1245,68 @@ const FINAL_MATCH_PROMPTS = [
 ];
 
 const generateFinalMatchPrompt = async (usedPrompts = []) => {
-  const localUsed = [...(usedPrompts || []), ...usedPromptSamples('final', 250), ...usedPromptSamples('super', 250)];
-  const avoidList = localUsed.slice(-120).map(p => `- ${p}`).join('\n');
+  const localUsed = [...(usedPrompts || []), ...usedPromptSamples('final', 300), ...usedPromptSamples('super', 300)];
+  const avoidList = localUsed.slice(-150).map(p => `- ${p}`).join('\n');
+  const usedRoots = [...new Set([
+    ...usedPromptRoots('final', 300),
+    ...usedPromptRoots('super', 300),
+    ...localUsed.flatMap(p => promptClueRootWords(p))
+  ])].slice(0, 180).join(', ');
+
+  const validate = (candidate, answers = []) => {
+    const prompt = normalizePromptBlank(candidate || '');
+    const cleanedAnswers = (answers || []).map(a => stripAnswerToBlank(prompt, String(a || '').trim())).filter(Boolean).slice(0,3);
+    if (!promptIsUsable(prompt, 'short')) return null;
+    if (!cleanedAnswers.length) return null;
+    if (promptHasForbiddenSuperFinalRoot(prompt)) return null;
+    if (promptRootAlreadyUsed(prompt, localUsed, ['super','final'])) return null;
+    if (promptAlreadyUsedOrSimilar('final', prompt, localUsed)) return null;
+    return { prompt, answers: cleanedAnswers };
+  };
 
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const text = await callLLM(
         `${FINAL_MATCH_WRITER_STYLE}
 
-Generate ONE brand-new Final Match clue as JSON.
-
-It must be a short, familiar survey-style phrase with exactly one blank marker written as __________.
-Examples of the FORM ONLY: "Birthday __________", "Movie __________", "Phone __________", "__________ Dog", "Hot __________", "Golden __________". Answers must be ONLY the missing word/phrase, not the entire completed phrase.
-Avoid "Favourite/Favorite" entirely. Do NOT use Pizza. Avoid any clue root already listed below.
-Avoid awkward/redundant clues like "First Date ___".
+Generate SIX brand-new Final Match clues as JSON.
+Each must be a short, familiar phrase completion with exactly one blank marker written as __________.
+Each clue should have one strong obvious answer so two people can match exactly.
+Answers must be ONLY the missing word/phrase, not the completed phrase.
+Do NOT use Favourite/Favorite, Pizza, or Birthday.
+Avoid roots already used: ${usedRoots || '(none)'}
 Avoid anything identical or similar to these previous Super/Final Match prompts:
 ${avoidList || '(none)'}
 
-Return JSON exactly: {"prompt":"... __________", "answers":["most obvious", "second", "third"]}`,
-        180, true
+Return JSON exactly:
+{"items":[{"prompt":"... __________","answers":["most obvious","second","third"]},{"prompt":"__________ ...","answers":["most obvious","second","third"]}]}`,
+        420, true
       );
       const parsed = extractJSON(text);
-      const prompt = String(parsed.prompt || '').trim();
-      const answers = Array.isArray(parsed.answers) ? parsed.answers.map(a => stripAnswerToBlank(prompt, String(a).trim())).filter(Boolean).slice(0,3) : [];
-      if (promptIsUsable(prompt, 'short') && answers.length && !promptHasForbiddenSuperFinalRoot(prompt) && !promptRootAlreadyUsed(prompt, localUsed) && !promptAlreadyUsedOrSimilar('final', prompt, localUsed)) {
-        markPromptUsed('final', prompt);
-        return { prompt, answers };
+      const items = Array.isArray(parsed) ? parsed : (parsed.items || []);
+      for (const item of shuffle(items)) {
+        const valid = validate(item.prompt, item.answers);
+        if (valid) {
+          markPromptUsed('final', valid.prompt);
+          return valid;
+        }
       }
     } catch (e) {
       console.warn('fresh final prompt generation failed:', e.message);
     }
   }
 
-  let unused = FINAL_MATCH_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !promptRootAlreadyUsed(p.prompt, localUsed) && !promptAlreadyUsedOrSimilar('final', p.prompt, localUsed));
-  if (!unused.length) unused = FINAL_MATCH_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !(usedPrompts || []).some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
-  if (!unused.length) unused = FINAL_MATCH_PROMPTS.filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt));
-  if (!unused.length) unused = FINAL_MATCH_PROMPTS;
-  const fallback = shuffle(unused)[0];
-  const finalFallback = { ...fallback, prompt: normalizePromptBlank(fallback.prompt) };
-  markPromptUsed('final', finalFallback.prompt);
-  return { ...finalFallback, answers: finalFallback.answers.map(ans => stripAnswerToBlank(finalFallback.prompt, ans)) };
+  let unused = FINAL_MATCH_PROMPTS
+    .map(p => validate(p.prompt, p.answers))
+    .filter(Boolean);
+  if (!unused.length) {
+    unused = FINAL_MATCH_PROMPTS
+      .filter(p => !promptHasForbiddenSuperFinalRoot(p.prompt) && !hasPromptBeenUsed('final', p.prompt))
+      .map(p => ({ prompt: normalizePromptBlank(p.prompt), answers: p.answers.map(ans => stripAnswerToBlank(p.prompt, ans)).filter(Boolean).slice(0,3) }));
+  }
+  const fallback = shuffle(unused.length ? unused : FINAL_MATCH_PROMPTS.map(p => ({ prompt: normalizePromptBlank(p.prompt), answers: p.answers })))[0];
+  markPromptUsed('final', fallback.prompt);
+  return fallback;
 };
 
 const generateFinalMatchCelebAnswer = async (prompt, celeb, contestantName, answerKey = []) => {
@@ -1808,6 +1898,16 @@ app.get('/api/room/:code', (req, res) => {
   res.json({ room });
 });
 
+app.get('/api/prompt-history-stats', (req, res) => {
+  try { res.json(promptHistoryStats()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/credits-bits', async (req, res) => {
+  try { res.json(await generateCreditBits()); }
+  catch (e) { res.json(fallbackCreditBits()); }
+});
+
 // ─── ROUND LOGIC ──────────────────────────────────────────────
 const startNewRound = async (room, roundNum) => {
   const isSuper = roundNum === 'super';
@@ -1860,7 +1960,7 @@ const startNewRound = async (room, roundNum) => {
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
-    const prompt = await generateSuperMatchPrompt(room.usedSuperPrompts || []);
+    const prompt = await generateSuperMatchPrompt([...(room.usedSuperPrompts || []), ...(room.usedFinalPrompts || [])]);
     room.superMatchPrompt = prompt;
     room.usedSuperPrompts = [...(room.usedSuperPrompts || []), prompt];
     room.superMatchCelebIndices = [];
@@ -1971,9 +2071,11 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
       bump(room);
       res.json({ room });
       setTimeout(async () => {
-        try { await startNewRound(room, 'super'); }
+        try {
+          if (room.phase === 'round_end' && room.eliminatedSlot) await startNewRound(room, 'super');
+        }
         catch(e) { console.error('start super match:', e); }
-      }, 8500);
+      }, 16000);
       return;
     }
     // Otherwise, second contestant now answers the remaining prompt.
@@ -2031,7 +2133,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     setTimeout(async () => {
       try { await startNewRound(room, 'super'); }
       catch(e) { console.error('start super match:', e); }
-    }, 8500);
+    }, 16000);
     return;
   }
 
@@ -2317,6 +2419,18 @@ app.post('/api/room/:code/finalmatch-done', (req, res) => {
   res.json({ room });
 });
 
+
+app.post('/api/room/:code/round-end-done', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.phase === 'round_end' && room.eliminatedSlot && Number(room.round) >= 2) {
+    res.json({ room });
+    try { await startNewRound(room, 'super'); }
+    catch(e) { console.error('round-end-done start super:', e); room.phase = 'error'; bump(room); }
+    return;
+  }
+  res.json({ room });
+});
 
 app.post('/api/room/:code/play-again', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
