@@ -494,7 +494,7 @@ Avoid overused clues, especially Pizza, Favorite/Favourite, or anything too simi
 
 const FINAL_MATCH_WRITER_STYLE = `
 You are writing a Final Match clue for a contestant to match one celebrity exactly.
-It must be a short, familiar phrase completion with exactly one __________ marker.
+It must be a very short, familiar cue-style phrase with exactly one __________ marker. The visible clue should have only one or two words besides the blank, like Hot __________ or __________ Dog.
 The most obvious answer should be strong enough that two people could independently match.
 Avoid awkward/redundant clues and avoid overused roots like Pizza or Favorite/Favourite.
 `;
@@ -1324,7 +1324,15 @@ const generateFinalMatchPrompt = async (usedPrompts = []) => {
   const validate = (candidate, answers = []) => {
     const prompt = normalizePromptBlank(candidate || '');
     const cleanedAnswers = (answers || []).map(a => stripAnswerToBlank(prompt, String(a || '').trim())).filter(Boolean).slice(0,3);
-    if (!promptIsUsable(prompt, 'short')) return null;
+    const cueWords = prompt
+      .replace(BLANK, ' ')
+      .replace(/[^a-zA-Z0-9'’\s]/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    const isShortCue = cueWords.length >= 1 && cueWords.length <= 2;
+    const hasSentencePunctuation = /[.!?;]/.test(prompt.replace(BLANK, ''));
+    if (!promptIsUsable(prompt, 'short') || !isShortCue || hasSentencePunctuation) return null;
     if (!cleanedAnswers.length) return null;
     if (promptHasForbiddenSuperFinalRoot(prompt)) return null;
     if (promptRootAlreadyUsed(prompt, localUsed, ['super','final'])) return null;
@@ -1338,7 +1346,10 @@ const generateFinalMatchPrompt = async (usedPrompts = []) => {
         `${FINAL_MATCH_WRITER_STYLE}
 
 Generate SIX brand-new Final Match clues as JSON.
-Each must be a short, familiar phrase completion with exactly one blank marker written as __________.
+Each must be a very short cue-style phrase with exactly one blank marker written as __________.
+The visible clue must contain only ONE or TWO words besides the blank.
+Good forms: "Dream __________", "Hot __________", "__________ Dog", "Golden __________", "Phone __________".
+Bad forms: full sentences, poetic phrases, "__________ of the mind", anything with a period.
 Each clue should have one strong obvious answer so two people can match exactly.
 Answers must be ONLY the missing word/phrase, not the completed phrase.
 Do NOT use Favourite/Favorite, Pizza, or Birthday.

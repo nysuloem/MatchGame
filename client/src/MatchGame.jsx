@@ -831,7 +831,6 @@ function DisplayView({ room, roomCode, setRoom }) {
             </div>
             <div className="mg-contestant-name-side">{p1name}</div>
           </div>
-          {isActive(1) && <div className="mg-your-turn" style={{color:room.triangleSlot===1?'var(--tri-green)':'var(--cir-red)'}}>{p1name}, it's your turn!</div>}
         </div>
         <div className="mg-display-title-center">
           <div className="mg-display-show-title">The Match Game</div>
@@ -850,7 +849,6 @@ function DisplayView({ room, roomCode, setRoom }) {
               <span className="mg-contestant-num">{displayScores[2]}</span>
             </div>
           </div>
-          {isActive(2) && <div className="mg-your-turn" style={{color:room.triangleSlot===2?'var(--tri-green)':'var(--cir-red)'}}>{p2name}, it's your turn!</div>}
         </div>
       </div>
 
