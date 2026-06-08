@@ -228,7 +228,8 @@ const normalizePromptBlank = (prompt = '') => String(prompt || '')
   .trim();
 
 const blankCount = (prompt = '') => (String(prompt || '').match(/_{3,}/g) || []).length;
-const isDumbDoraPrompt = (prompt = '') => /\bDumb Dora\b/i.test(String(prompt || ''));
+const isCallbackPrompt = (prompt = '') => /\b[A-Z][A-Za-z'’-]*(?:\s+[A-Z][A-Za-z'’-]*)?\s+is\s+so\s+\w+/i.test(String(prompt || ''));
+const isDumbDoraPrompt = isCallbackPrompt;
 
 const promptIsUsable = (prompt, kind = 'round') => {
   const t = normalizePromptBlank(prompt);
@@ -349,7 +350,7 @@ You are the head writer for a 1970s Match Game-inspired comedy game.
 
 The prompt must feel like classic Match Game:
 - mild innuendo, double entendre, teasing absurdity, or broad sitcom-style embarrassment is encouraged;
-- recurring fictional archetypes are welcome: Dumb Dora, Dumb Donald, Big Betty, Weird Willie, the local streaker, the cheap doctor, the nervous newlywed, the confused plumber;
+- recurring fictional archetypes are welcome: Dumb Dora, Dumb Donald, Big Betty, Weird Willie, Drunk Danny, Clumsy Carla, the local streaker, the cheap doctor, the nervous newlywed, the confused plumber;
 - the setup should be funny before the blank appears;
 - keep it short enough to read aloud smoothly.
 
@@ -799,7 +800,7 @@ IMPORTANT: These must not repeat or closely resemble any prior prompt listed bel
 Avoid prior prompts:\n${avoidList || '(none)'}
 
 Use fresh situations from these areas: ${categories}.
-${allowDumbDora ? 'You may include AT MOST ONE Dumb Dora prompt in this pair. A valid Dumb Dora prompt should look like: \"Dumb Dora is so dumb, she thought a Hoover was a __________.\" The screen prompt should NOT include the audience callback; the TV host will pause after \"Dumb Dora is so dumb\" so the audience can yell \"How dumb is she?\"' : 'Do NOT generate a Dumb Dora prompt in this pair; this game has already used that style.'}
+${allowDumbDora ? 'You may include AT MOST ONE call-and-response prompt in this pair. It can be Dumb Dora or another name/adjective setup, e.g. \"Dumb Dora is so dumb, she thought a Hoover was a __________.\" or \"Drunk Danny is so clumsy, when he tried to pour a drink he filled his __________.\" The screen prompt should NOT include the audience callback; the TV host will pause after the opening phrase like \"Dumb Dora is so dumb\" or \"Drunk Danny is so clumsy\" so the people playing can yell a response.' : 'Do NOT generate a Dumb Dora / so-anything call-and-response prompt in this pair; this game has already used that style.'}
 
 CRITICAL PROMPT QUALITY RULES:
 - Do NOT use generic "Favourite __________" prompts.
@@ -811,6 +812,7 @@ CRITICAL PROMPT QUALITY RULES:
 - Use exactly one blank marker, written as __________. Never use [BLANK]. Never write the word blank in the prompt.
 - Keep the setup to one sentence, usually 10-20 words. Put the blank almost always at the END.
 - Light innuendo is encouraged; keep it TV-PG/PG-13, playful, not explicit.
+- No more than one call-and-response prompt per whole game, so only use that style when allowed.
 
 For each prompt return 3 likely answers in order. The #1 answer should be the answer the panel can cluster around. For Round 2, make the #1 answer especially strong and concrete.
 Return JSON exactly:
@@ -822,14 +824,14 @@ Return JSON exactly:
         .map(x => ({ ...x, prompt: normalizePromptBlank(x.prompt) }))
         .filter(x => promptIsUsable(x.prompt) && Array.isArray(x.answers) && x.answers.length >= 2);
       const fresh = [];
-      let dumbCountInPair = 0;
+      let callbackCountInPair = 0;
       for (const pr of prompts) {
-        const isDumb = isDumbDoraPrompt(pr.prompt);
+        const isDumb = isCallbackPrompt(pr.prompt);
         if (isDumb && !allowDumbDora) continue;
-        if (isDumb && dumbCountInPair >= 1) continue;
+        if (isDumb && callbackCountInPair >= 1) continue;
         if (promptAlreadyUsedOrSimilar('round', pr.prompt, [...localUsed, ...fresh.map(f => f.prompt)])) continue;
         fresh.push(pr);
-        if (isDumb) dumbCountInPair += 1;
+        if (isDumb) callbackCountInPair += 1;
       }
       if (fresh.length >= 2) {
         const [a,b] = fresh;
@@ -851,16 +853,16 @@ Return JSON exactly:
 
   // Fallback only: curated bank still exists so the game never crashes if API generation fails.
   let unused = FALLBACK_ROUND_PROMPTS
-    .filter(p => allowDumbDora || !isDumbDoraPrompt(p.prompt))
+    .filter(p => allowDumbDora || !isCallbackPrompt(p.prompt))
     .filter(p => !promptAlreadyUsedOrSimilar('round', p.prompt, localUsed));
   if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS
-    .filter(p => allowDumbDora || !isDumbDoraPrompt(p.prompt))
+    .filter(p => allowDumbDora || !isCallbackPrompt(p.prompt))
     .filter(p => !localUsed.some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
-  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => allowDumbDora || !isDumbDoraPrompt(p.prompt));
+  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => allowDumbDora || !isCallbackPrompt(p.prompt));
   if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS;
   const pool = shuffle(unused);
   const a = { ...pool[0], prompt: normalizePromptBlank(pool[0].prompt) };
-  const b0 = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt) && !(isDumbDoraPrompt(a.prompt) && isDumbDoraPrompt(p.prompt))) || pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
+  const b0 = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt) && !(isCallbackPrompt(a.prompt) && isCallbackPrompt(p.prompt))) || pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
   const b = { ...b0, prompt: normalizePromptBlank(b0.prompt) };
   markPromptUsed('round', a.prompt);
   markPromptUsed('round', b.prompt);
@@ -1745,7 +1747,7 @@ const startNewRound = async (room, roundNum) => {
     room.usedCharacters.push(charA, charB);
     room.usedCategories = [...(room.usedCategories || []), categoryA, categoryB];
     room.usedRoundPrompts = [...(room.usedRoundPrompts || []), promptA, promptB];
-    if (isDumbDoraPrompt(promptA) || isDumbDoraPrompt(promptB)) room.dumbDoraUsed = true;
+    if (isCallbackPrompt(promptA) || isCallbackPrompt(promptB)) room.dumbDoraUsed = true;
 
     // Determine who picks first
     if (room.soloTest) {

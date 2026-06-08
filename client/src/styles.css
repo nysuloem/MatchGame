@@ -1268,3 +1268,51 @@ body { margin: 0; }
   border-radius: 8px;
   background: var(--cream);
 }
+
+
+/* v40: stable credits screen. Avoid animated transform/audio dependencies that caused blank screens. */
+.mg-credits-screen.stable {
+  overflow: hidden !important;
+  background: radial-gradient(circle at center, #2b1810 0%, #070404 78%) !important;
+  color: var(--cream);
+  padding: clamp(20px, 4vh, 46px);
+  box-sizing: border-box;
+}
+.mg-credits-headline {
+  font-family: 'Bowlby One', sans-serif;
+  font-size: clamp(28px, 4.8vw, 54px);
+  color: var(--yellow);
+  text-align: center;
+  margin: 0 0 18px;
+  text-shadow: 3px 3px 0 #000;
+}
+.mg-credit-roll.stable {
+  width: min(860px, 90vw);
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  background: rgba(255,244,214,0.96);
+  border: 4px solid var(--brown);
+  box-shadow: 6px 6px 0 #000;
+  margin-top: 8px;
+  padding: clamp(14px, 2.5vh, 28px);
+}
+.mg-credit-content.stable {
+  animation: none !important;
+  transform: none !important;
+  padding-top: 0 !important;
+  font-family: 'DM Serif Display', serif;
+  font-size: clamp(18px, 2.4vw, 30px);
+  line-height: 1.15;
+  text-align: center;
+  color: var(--brown);
+}
+.mg-credit-content.stable p {
+  margin: 0 0 12px !important;
+}
+.mg-credit-content.stable .mg-credit-title {
+  font-family: 'Bowlby One', sans-serif;
+  font-size: clamp(34px, 5.2vw, 64px);
+  color: var(--orange-deep);
+  margin-bottom: 18px !important;
+}

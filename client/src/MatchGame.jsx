@@ -278,21 +278,25 @@ const quickFuzzyMatch = (a,b) => {
   return false;
 };
 const promptForSpeech = (s='') => s.replace(/_{3,}/g, ', blank, ').replace(/\s+/g, ' ').trim();
-const isDumbDoraPrompt = (s='') => /^\s*Dumb Dora is so dumb\b/i.test(s);
+const getCallbackOpening = (s='') => {
+  const text = String(s || '').trim();
+  const m = text.match(/^\s*((?:[A-Z][A-Za-z'’-]*)(?:\s+[A-Z][A-Za-z'’-]*)?\s+is\s+so\s+\w+)\b/i);
+  return m ? m[1] : '';
+};
+const isCallbackPrompt = (s='') => Boolean(getCallbackOpening(s));
 const readGamePrompt = async (prompt, roomCode) => {
   const text = String(prompt || '').trim();
-  if (!isDumbDoraPrompt(text)) {
+  if (!isCallbackPrompt(text)) {
     await speakTTS({ text: promptForSpeech(text), isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     return;
   }
-  // Classic Match Game call-and-response: the host says "Dumb Dora is so dumb!"
-  // and then pauses so the people in the room can yell "How dumb is she?"
-  // The host does not say the callback.
-  const rest = text.replace(/^\s*Dumb Dora is so dumb,?\s*/i, '').trim();
-  await speakTTS({ text: 'Dumb Dora is so dumb!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-  await delay(1450);
-  playAudience('laugh');
-  await delay(250);
+  // Classic Match Game call-and-response: the host says the opening
+  // ("Dumb Dora is so dumb!" / "Drunk Danny is so clumsy!") and pauses.
+  // The people playing provide the callback; the host does not say it.
+  const opening = getCallbackOpening(text);
+  const rest = text.slice(text.toLowerCase().indexOf(opening.toLowerCase()) + opening.length).replace(/^,?\s*/,'').trim();
+  await speakTTS({ text: `${opening}!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+  await delay(1600);
   await speakTTS({ text: promptForSpeech(rest), isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
 };
 
@@ -459,13 +463,6 @@ export default function MatchGame() {
                 <option value="contestant">I'd rather be a contestant</option>
                 <option value="celebrity">I'd rather be a celebrity</option>
               </select>
-              <label className="mg-label">Optional selfie for the panel</label>
-              <input className="mg-input" type="file" accept="image/*" capture="user"
-                onChange={e=>handleSelfieFile(e.target.files?.[0])} />
-              {selfieData && <div className="mg-selfie-preview">
-                <img src={selfieData} alt="Selfie preview" />
-                <button className="mg-linkbtn" type="button" onClick={()=>setSelfieData('')}>Remove selfie</button>
-              </div>}
               <label className="mg-label">Optional selfie for the panel</label>
               <input className="mg-input" type="file" accept="image/*" capture="user"
                 onChange={e=>handleSelfieFile(e.target.files?.[0])} />
@@ -1200,20 +1197,18 @@ function DisplaySuperMatchResult({ room, roomCode }) {
 }
 
 function DisplayGameOver({ room, roomCode, setRoom }) {
-  const ranRef = useRef(false);
+  // Keep credits deliberately simple and non-audio-dependent. Previous versions
+  // tried to start music/TTS here, which caused blank/black screens on some laptops.
   useEffect(() => {
-    if (ranRef.current) return;
-    ranRef.current = true;
-    startCreditsMusic();
-    (async () => {
-      await delay(450);
-      await speakTTS({
-        text: 'Match Game is a collaboration between Jason Brown, Claude AI, and ChatGPT.',
-        isAnnouncer: true,
-        fallbackProfile: ANNOUNCER_PROFILE,
-      });
-    })();
-    return () => stopCreditsMusic();
+    try { stopIntroMusic(); } catch {}
+    try { stopThinkingMusic(); } catch {}
+    try { stopCreditsMusic(); } catch {}
+    try {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+      }
+    } catch {}
   }, []);
 
   const activeName = room?.players?.[room?.activeSlot] || 'Our contestant';
@@ -1227,7 +1222,6 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
 
   const handlePlayAgain = async () => {
     try {
-      stopCreditsMusic();
       const { room: updated } = await api.playAgain(roomCode);
       setRoom?.(updated);
     } catch (e) {
@@ -1236,13 +1230,12 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
   };
 
   return (
-    <div className="mg-display-center-msg mg-credits-screen">
-      <div className="mg-bigsymbol" style={{fontSize:60}}>🎉</div>
-      <h2 style={{fontFamily:'Bowlby One,sans-serif',fontSize:40,color:'var(--orange-deep)',textAlign:'center'}}>{headline}</h2>
-      <div className="mg-credit-roll">
-        <div className="mg-credit-content">
-          <p>Match Game</p>
-          <p>A mostly serious production</p>
+    <div className="mg-display-center-msg mg-credits-screen stable">
+      <h2 className="mg-credits-headline">{headline}</h2>
+      <div className="mg-credit-roll stable">
+        <div className="mg-credit-content stable">
+          <p className="mg-credit-title">Match Game</p>
+          <p>A collaboration between Jason Brown, Claude AI, and ChatGPT</p>
           <p>Created by Jason Brown</p>
           <p>Question chaos by Claude AI</p>
           <p>Code wrangling by ChatGPT</p>
