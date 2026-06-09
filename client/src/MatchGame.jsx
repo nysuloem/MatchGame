@@ -279,8 +279,14 @@ const quickFuzzyMatch = (a,b) => {
   }
   return false;
 };
+const speechClean = (s='') => String(s || '')
+  .replace(/\.{2,}|…+/g, ' ')
+  .replace(/\bdot\s+dot(?:\s+dot)?\b/gi, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
 const promptForSpeech = (s='') => {
-  let text = String(s || '').replace(/_+/g, ' __________ ').replace(/\s+/g, ' ').trim();
+  let text = speechClean(s).replace(/_+/g, ' __________ ').replace(/\s+/g, ' ').trim();
   const before = text.split('__________')[0] || '';
   const after = text.split('__________')[1] || '';
   const beforeWords = before.trim().split(/\s+/).filter(Boolean).length;
@@ -640,7 +646,7 @@ function DisplayView({ room, roomCode, setRoom }) {
       if (turnPromptAnnouncedRef.current !== `${turnKey}-pick`) {
         turnPromptAnnouncedRef.current = `${turnKey}-pick`;
         const promise = speakTTS({
-          text: `${room.players[room.activeSlot]}, it's your turn. Choose A or B.`,
+          text: `${room.players[room.activeSlot]}, it's your turn. Would you like Question A or B?`,
           isAnnouncer: true,
           fallbackProfile: ANNOUNCER_PROFILE,
         });
@@ -785,7 +791,7 @@ function DisplayView({ room, roomCode, setRoom }) {
 
   const runReveal = async (r) => {
     await Promise.all((r.panel || []).map((p, i) => p.answer ? prefetchTTS({
-      text: p.answer, code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length],
+      text: speechClean(p.answer), code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length],
     }).catch(() => null) : Promise.resolve(null)));
     await delay(350);
     await speakTTS({
@@ -797,7 +803,7 @@ function DisplayView({ room, roomCode, setRoom }) {
     for (let i = 0; i < r.panel.length; i++) {
       setRevealIndex(i);
       if (r.panel[i].answer) {
-        await speakTTS({ text: r.panel[i].answer, code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length] });
+        await speakTTS({ text: speechClean(r.panel[i].answer), code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length] });
         if (r.matches?.[i]) playAudience('cheer');
         else playAudience(i % 2 === 0 ? 'chuckle' : 'groan');
         await delay(r.matches?.[i] ? 700 : 420);
@@ -1152,13 +1158,13 @@ function DisplaySuperMatchResult({ room, roomCode }) {
       const src = room.superMatchAnswerSource || { type: 'own' };
       if (src.type === 'celeb') {
         await speakTTS({
-          text: `${name} has decided to go with ${src.celebName || 'a celebrity'}'s answer: ${contestantAnswer}.`,
+          text: `${name} has decided to go with ${src.celebName || 'a celebrity'}'s answer: ${speechClean(contestantAnswer)}.`,
           isAnnouncer: true,
           fallbackProfile: ANNOUNCER_PROFILE,
         });
       } else {
         await speakTTS({
-          text: `${name} has decided to go with their own answer: ${contestantAnswer}.`,
+          text: `${name} has decided to go with their own answer: ${speechClean(contestantAnswer)}.`,
           isAnnouncer: true,
           fallbackProfile: ANNOUNCER_PROFILE,
         });
@@ -1170,7 +1176,7 @@ function DisplaySuperMatchResult({ room, roomCode }) {
         const ta = topAnswers[i];
         playAudience('drumroll');
         await delay(450);
-        await speakTTS({ text: `For ${fmt$(ta.value)}... ${ta.answer}`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+        await speakTTS({ text: `For ${fmt$(ta.value)}. ${speechClean(ta.answer)}`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         setVisibleCount(i + 1);
         const isMatch = winnings > 0 && ta.value === winnings;
         if (isMatch) {
@@ -1316,7 +1322,7 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
         <div className="mg-credit-scroll-content">
           <div className="mg-credit-only-title">Match Game</div>
           <div>A Jason Brown / Claude / ChatGPT production</div>
-          <div>Stay tuned for more questionable television!</div>
+          <div>Stay tuned for more questionable television</div>
           <div>Created by Jason Brown</div>
           <div>Question chaos by Claude AI</div>
           <div>Code wrangling by ChatGPT</div>
@@ -1385,7 +1391,7 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
       if (cancelled) return;
       await delay(450);
       await speakTTS({
-        text: `${celeb?.name || 'Our star'} ${['looks nervous','looks sweaty','looks pale','looks worried','looks a little dejected','looks like they need a commercial break'][Math.floor(Math.random()*6)]}...`,
+        text: `${celeb?.name || 'Our star'} ${['looks nervous','looks sweaty','looks pale','looks worried','looks a little dejected','looks like they need a commercial break'][Math.floor(Math.random()*6)]}.`,
         isAnnouncer: true,
         fallbackProfile: ANNOUNCER_PROFILE,
       });
@@ -1394,7 +1400,7 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
       await delay(650);
       setStage('reveal');
       await speakTTS({
-        text: room.finalMatchCelebAnswer || '',
+        text: speechClean(room.finalMatchCelebAnswer || ''),
         code: roomCode,
         slot: room.finalMatchCelebIndex,
         fallbackProfile: VOICE_PROFILES[(room.finalMatchCelebIndex || 0) % VOICE_PROFILES.length],

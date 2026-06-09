@@ -60,7 +60,7 @@ const PROMPT_ROOT_STOPWORDS = new Set([
   'with','from','that','this','your','their','there','match','game','when','what','were',
   'they','them','then','than','into','onto','over','under','round','final','super',
   'blank','said','thought','because','would','could','should','going','after','before',
-  'party','room','money','show','night','thing','stuff'
+  'room','money','show','night','thing','stuff'
 ]);
 
 const promptRootWords = (prompt = '') => normalizePromptKey(prompt)
@@ -96,6 +96,9 @@ const PERSIST_DIR = process.env.MATCHGAME_DATA_DIR || (fs.existsSync('/data') ? 
 if (!fs.existsSync(PERSIST_DIR)) fs.mkdirSync(PERSIST_DIR, { recursive: true });
 const PROMPT_DB_FILE = process.env.MATCHGAME_DB_PATH || path.join(PERSIST_DIR, 'match-game-prompts.sqlite');
 console.log(`[db] Match Game SQLite path: ${PROMPT_DB_FILE}`);
+if (PERSIST_DIR !== '/data' && !process.env.MATCHGAME_DB_PATH && !process.env.MATCHGAME_DATA_DIR) {
+  console.warn('[db] WARNING: /data volume not detected. Railway redeploys will wipe prompt history unless you attach a Railway Volume mounted at /data or set MATCHGAME_DB_PATH to a persistent volume path.');
+}
 const PROMPT_DB = new DatabaseSync(PROMPT_DB_FILE);
 PROMPT_DB.exec(`
   CREATE TABLE IF NOT EXISTS prompt_history (
@@ -206,6 +209,8 @@ const recentGifts = (limit = 25) => PROMPT_DB.prepare(
 
 const promptHistoryStats = () => ({
   dbPath: PROMPT_DB_FILE,
+  persistentDir: PERSIST_DIR,
+  railwayVolumeDetected: PERSIST_DIR === '/data',
   promptRows: PROMPT_DB.prepare('SELECT kind, COUNT(*) as count FROM prompt_history GROUP BY kind').all(),
   rootRows: PROMPT_DB.prepare('SELECT kind, COUNT(*) as count FROM prompt_root_history GROUP BY kind').all(),
   giftRows: PROMPT_DB.prepare('SELECT COUNT(*) as count FROM gift_history').get(),
@@ -400,7 +405,8 @@ const stripAnswerToBlank = (prompt = '', answer = '') => {
 const cleanGeneratedBlankAnswer = (prompt = '', answer = '') => {
   let cleaned = String(answer || '')
     .replace(/```[\s\S]*?```/g, '')
-    .replace(/[.…]+/g, ' ')
+    .replace(/\.{2,}|…+|[.…]+/g, ' ')
+    .replace(/\bdot\s+dot(?:\s+dot)?\b/gi, ' ')
     .replace(/^(answer|my answer is|i would say|i'd say|i say|says|said)\s*[:\-]?\s*/i, '')
     .replace(/^['"“”‘’]+|['"“”‘’.,!?;:]+$/g, '')
     .replace(/\s+/g, ' ')
@@ -428,7 +434,7 @@ const promptsTooSimilar = (a, b) => {
 };
 
 const SUPER_FINAL_FORBIDDEN_ROOTS = new Set([
-  'pizza', 'pizzas', 'birthday', 'birthdays', 'favourite', 'favorite', 'favorites', 'favourites'
+  'pizza', 'pizzas', 'birthday', 'birthdays', 'favourite', 'favorite', 'favorites', 'favourites', 'party', 'parties', 'golden'
 ]);
 
 const promptHasForbiddenSuperFinalRoot = (prompt = '') => promptRootWords(prompt)
@@ -598,17 +604,17 @@ Good examples:
 - Fondue Lou's Questionable Catering
 - Stan's One-Way Bus Lines
 Bad example: road trip to Mars next weekend, who's in?
-Keep each one 3-7 words. Return exactly:
+No ellipses, no dot-dot-dot, no sentence fragments. Keep each one 3-7 words. Return exactly:
 {"wardrobe":"...","food":"...","blueCards":"...","travel":"..."}`,
       160, true
     );
     const p = extractJSON(text);
     const fb = fallbackCreditBits();
     return {
-      wardrobe: String(p.wardrobe || fb.wardrobe).slice(0, 80),
-      food: String(p.food || fb.food).slice(0, 80),
-      blueCards: String(p.blueCards || fb.blueCards).slice(0, 80),
-      travel: String(p.travel || fb.travel).slice(0, 80),
+      wardrobe: cleanLooseAnswerText(p.wardrobe || fb.wardrobe).slice(0, 80),
+      food: cleanLooseAnswerText(p.food || fb.food).slice(0, 80),
+      blueCards: cleanLooseAnswerText(p.blueCards || fb.blueCards).slice(0, 80),
+      travel: cleanLooseAnswerText(p.travel || fb.travel).slice(0, 80),
     };
   } catch {
     return fallbackCreditBits();
@@ -853,8 +859,7 @@ const FALLBACK_SUPER_PROMPTS = [
   { prompt:'Office ___', topAnswers:[{rank:1,answer:'Party',value:500},{rank:2,answer:'Chair',value:250},{rank:3,answer:'Space',value:100}] },
   { prompt:'Shopping ___', topAnswers:[{rank:1,answer:'Cart',value:500},{rank:2,answer:'Bag',value:250},{rank:3,answer:'Mall',value:100}] },
   { prompt:'Remote ___', topAnswers:[{rank:1,answer:'Control',value:500},{rank:2,answer:'Work',value:250},{rank:3,answer:'Island',value:100}] },
-  { prompt:'Cheese ___', topAnswers:[{rank:1,answer:'Cake',value:500},{rank:2,answer:'Burger',value:250},{rank:3,answer:'Ball',value:100}] },
-  { prompt:'Golden ___', topAnswers:[{rank:1,answer:'Ticket',value:500},{rank:2,answer:'Rule',value:250},{rank:3,answer:'Retriever',value:100}] }
+  { prompt:'Cheese ___', topAnswers:[{rank:1,answer:'Cake',value:500},{rank:2,answer:'Burger',value:250},{rank:3,answer:'Ball',value:100}] }
 ];
 
 const generatePanel = async () => {
@@ -1223,7 +1228,16 @@ Return JSON exactly: {"prompts":["... __________","__________ ...", "..."]}`,
   return superPrompt;
 };
 
-const cleanSurveyAnswer = (prompt, answer) => stripAnswerToBlank(prompt, String(answer || '')).split(/\s+/).slice(0, 2).join(' ').trim();
+const cleanLooseAnswerText = (answer = '') => String(answer || '')
+  .replace(/```[\s\S]*?```/g, '')
+  .replace(/\.{2,}|…+/g, ' ')
+  .replace(/\bdot\s+dot(?:\s+dot)?\b/gi, ' ')
+  .replace(/^(answer|my answer is|i would say|i'd say|i say|says|said)\s*[:\-]?\s*/i, '')
+  .replace(/^['"“”‘’\s.,!?;:]+|['"“”‘’\s.,!?;:]+$/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const cleanSurveyAnswer = (prompt, answer) => stripAnswerToBlank(prompt, cleanLooseAnswerText(answer)).split(/\s+/).slice(0, 2).join(' ').trim();
 
 const surveyBoardLooksBad = (prompt, answers = []) => {
   const cleaned = answers.map(a => cleanSurveyAnswer(prompt, a.answer || a)).filter(Boolean);
@@ -1345,7 +1359,6 @@ const FINAL_MATCH_PROMPTS = [
   { prompt:'Hot ___', answers:['Dog','Tub','Sauce'] },
   { prompt:'First ___', answers:['Date','Kiss','Love'] },
   { prompt:'___ Dog', answers:['Hot','Guard','Big'] },
-  { prompt:'___ Party', answers:['Birthday','House','Pool'] },
   { prompt:'Wedding ___', answers:['Cake','Ring','Dress'] },
   { prompt:'Rock ___', answers:['Star','Music','Band'] },
   { prompt:'Coffee ___', answers:['Cup','Shop','Break'] },
