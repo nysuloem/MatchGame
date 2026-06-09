@@ -279,7 +279,24 @@ const quickFuzzyMatch = (a,b) => {
   }
   return false;
 };
-const promptForSpeech = (s='') => s.replace(/_{3,}/g, ', blank, ').replace(/\s+/g, ' ').trim();
+const promptForSpeech = (s='') => {
+  let text = String(s || '').replace(/_+/g, ' __________ ').replace(/\s+/g, ' ').trim();
+  const before = text.split('__________')[0] || '';
+  const after = text.split('__________')[1] || '';
+  const beforeWords = before.trim().split(/\s+/).filter(Boolean).length;
+  const afterWords = after.replace(/[.,;:!?]/g, ' ').trim().split(/\s+/).filter(Boolean).length;
+
+  // Sentence-style regular questions should end at the blank. If the generator
+  // accidentally leaves words after it ("blank on"), do not read those words.
+  // Short survey clues like "__________ Dog" or "Hot __________" are preserved.
+  if (beforeWords > 3 && afterWords > 0) text = `${before.trim()} __________`;
+
+  return text
+    .replace(/\s*__________\s*/g, ' blank ')
+    .replace(/[\s,.;:!?]*\bblank\b[\s,.;:!?]*/gi, ' blank ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
 const getCallbackOpening = (s='') => {
   const text = String(s || '').trim();
   const m = text.match(/^\s*((?:[A-Z][A-Za-z'’-]*)(?:\s+[A-Z][A-Za-z'’-]*)?\s+is\s+so\s+\w+)\b/i);
@@ -465,12 +482,23 @@ export default function MatchGame() {
                 <option value="contestant">I'd rather be a contestant</option>
                 <option value="celebrity">I'd rather be a celebrity</option>
               </select>
-              <label className="mg-label">Optional selfie for the panel</label>
-              <input className="mg-input" type="file" accept="image/*" capture="user"
-                onChange={e=>handleSelfieFile(e.target.files?.[0])} />
+              <label className="mg-label">Optional panel photo</label>
+              <div className="mg-photo-options">
+                <label className="mg-photo-pick">
+                  Take selfie
+                  <input type="file" accept="image/*" capture="user"
+                    onChange={e=>handleSelfieFile(e.target.files?.[0])} />
+                </label>
+                <label className="mg-photo-pick secondary">
+                  Choose from photos
+                  <input type="file" accept="image/*"
+                    onChange={e=>handleSelfieFile(e.target.files?.[0])} />
+                </label>
+              </div>
+              <p className="mg-help" style={{marginTop:6}}>Used only if you become a celebrity panelist.</p>
               {selfieData && <div className="mg-selfie-preview">
-                <img src={selfieData} alt="Selfie preview" />
-                <button className="mg-linkbtn" type="button" onClick={()=>setSelfieData('')}>Remove selfie</button>
+                <img src={selfieData} alt="Panel photo preview" />
+                <button className="mg-linkbtn" type="button" onClick={()=>setSelfieData('')}>Remove photo</button>
               </div>}
               <div className="mg-row">
                 <button className="mg-btn" onClick={joinAsContestant}

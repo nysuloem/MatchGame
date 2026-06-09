@@ -358,10 +358,10 @@ const promptIsUsable = (prompt, kind = 'round') => {
     const words = t.split(/\s+/).length;
     const blankPos = t.indexOf(BLANK);
     const rawAfterBlank = t.slice(blankPos + BLANK.length);
-    if (/^[\s\.!,?;:]+$/.test(rawAfterBlank)) return false;
     const afterBlank = rawAfterBlank.replace(/[\s.!?"'’”]+/g, '');
-    const blankNearEnd = afterBlank.length === 0 || afterBlank.length <= 10;
-    return t.length >= 28 && t.length <= 135 && words <= 24 && blankNearEnd;
+    // Regular Round questions must end at the blank. If words follow the blank
+    // ("blank on", etc.), the host reading becomes confusing.
+    return t.length >= 28 && t.length <= 135 && words <= 24 && afterBlank.length === 0;
   }
   return t.length >= 5 && t.length <= 80 && !new RegExp(`${BLANK}[\\s\\.!,?;:]+$`).test(t);
 };
@@ -546,32 +546,32 @@ const randomPartingGift = () => {
 
 const CREDIT_FALLBACKS = {
   wardrobe: [
-    'the 1974 Sears catalogue',
-    'a suspicious basement trunk',
-    'Brett Somers\' yard sale',
-    'the polyester appreciation society',
-    'a clearance rack in Encino'
+    'Scott\'s Suits for Less',
+    'Brett Somers\' House of Polyester',
+    'Naked Dave\'s Former Closet',
+    'Leisure Larry\'s Discount Tuxedos',
+    'The Encino Belt & Trouser Company'
   ],
   food: [
-    'the snack table',
-    'a fondue pot with legal representation',
-    'three warm deviled eggs',
-    'a suspicious gelatin mold',
-    'the studio vending machine'
+    'Fondue Lou\'s Questionable Catering',
+    'Deviled Eggs Incorporated',
+    'The Warm Shrimp Cartel',
+    'Snack Table & Sons',
+    'Jell-O Mold Brothers Catering'
   ],
   blueCards: [
-    'a box found under Gene Rayburn\'s podium',
-    'the office supply closet',
-    'a nervous intern with a marker',
-    'leftover cue cards from a cancelled pilot',
-    'the National Association of Blank Fillers'
+    'Blue Card Betty\'s Office Supplies',
+    'The National Blank Card Company',
+    'Rayburn Marker & Index Ltd.',
+    'Cue Cards While-U-Wait',
+    'The Slightly Bent Card Factory'
   ],
   travel: [
-    'a man with a clipboard',
-    'a station wagon with no brakes',
-    'economy seats on Polyester Airlines',
-    'a bus that only turns left',
-    'the Los Angeles escalator authority'
+    'Stan\'s One-Way Bus Lines',
+    'Clipboard Charlie Travel Agency',
+    'Left Turn Limousine Service',
+    'Polyester Airlines',
+    'The Greater Encino Shuttle Concern'
   ]
 };
 const fallbackCreditBits = () => ({
@@ -584,8 +584,21 @@ const generateCreditBits = async () => {
   try {
     const text = await callLLM(
       `Generate four short fake 1970s game-show credit gags as JSON.
-Make them family-friendly, weird, and no more than 8 words each.
-Return exactly:
+Each value must sound like a fake company, supplier, agency, or named person/business that fits after:
+- Wardrobe provided by ...
+- Catering by ...
+- Blue cards supplied by ...
+- Travel arranged by ...
+
+Style: funny, 1970s game-show, concrete, like real credit names.
+Good examples:
+- Scott's Suits for Less
+- Brett Somers' House of Polyester
+- Naked Dave's Former Closet
+- Fondue Lou's Questionable Catering
+- Stan's One-Way Bus Lines
+Bad example: road trip to Mars next weekend, who's in?
+Keep each one 3-7 words. Return exactly:
 {"wardrobe":"...","food":"...","blueCards":"...","travel":"..."}`,
       160, true
     );
@@ -989,7 +1002,7 @@ CRITICAL PROMPT QUALITY RULES:
 - Round 1: one clear best answer plus two plausible alternatives.
 - Round 2: a clearer, more definitive best answer so matching is likely.
 - Use exactly one blank marker, written as __________. Never use [BLANK]. Never write the word blank in the prompt.
-- Keep the setup to one sentence, usually 10-20 words. Put the blank almost always at the END.
+- Keep the setup to one sentence, usually 10-20 words. For regular Round 1/Round 2 prompts, the blank MUST be the final thing on the screen: no words and no punctuation after __________.
 - Light innuendo is encouraged; keep it TV-PG/PG-13, playful, not explicit.
 - No more than one call-and-response prompt per whole game, so only use that style when allowed.
 
@@ -2565,7 +2578,9 @@ app.post('/api/speak', async (req, res) => {
   let voice = 'alloy', instructions = '';
   if (isAnnouncer) {
     voice = 'verse';
-    instructions = 'Speak like a very enthusiastic 1970s game-show host: bright, energetic, smiling, theatrical, quick but clear, with big excitement on contestant names and prize reveals.';
+    instructions = text.toLowerCase().includes('blank')
+      ? 'Speak like a very enthusiastic 1970s game-show host: bright, energetic, smiling, theatrical, quick but clear. If the script contains the word blank, say exactly the word blank once. Do not guess, complete, replace, or fill in the answer.'
+      : 'Speak like a very enthusiastic 1970s game-show host: bright, energetic, smiling, theatrical, quick but clear, with big excitement on contestant names and prize reveals.';
   } else if (code && typeof slot === 'number') {
     const room = rooms.get(code?.toUpperCase());
     if (room?.panel[slot]) {

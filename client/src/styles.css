@@ -1395,3 +1395,41 @@ body { margin: 0; }
   0% { transform: translateY(42%); }
   100% { transform: translateY(-100%); }
 }
+
+
+.mg-photo-options {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0 4px;
+}
+.mg-photo-pick {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 150px;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 3px solid var(--brown);
+  border-radius: 8px;
+  background: var(--orange);
+  color: var(--cream);
+  font-family: 'Bowlby One', sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  box-shadow: 4px 4px 0 rgba(43,24,16,0.35);
+  cursor: pointer;
+}
+.mg-photo-pick.secondary {
+  background: var(--yellow);
+  color: var(--brown);
+}
+.mg-photo-pick input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
