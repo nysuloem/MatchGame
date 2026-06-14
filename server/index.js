@@ -672,7 +672,14 @@ const CHARACTER_ARCHETYPES = [
   'Librarian Louise','Astronaut Al','Kindergarten Teacher Karen',
   'Pirate Pete','Viking Vern','Scientist Sally','Mime Marcel',
   'Lifeguard Larry','Detective Drake','Clown Carlos','Barber Bob',
-  'Judge Judy-Ann','Mailman Morris'
+  'Judge Judy-Ann','Mailman Morris','Airport Alan','Bingo Brenda',
+  'Mechanic Manny','Aunt Linda','Uncle Tony','Cousin Rita','Neighbor Nick',
+  'Principal Pamela','Dentist Dennis','Casino Connie','Museum Marty',
+  'Cruise Director Carl','Funeral Fred','Spa Sheila','Bank Teller Bonnie',
+  'Tax-Time Tammy','Bowling Barry','Hotel Hank','Vet Veronica',
+  'Garden Gary','Movie-Theater Mona','Laundry Larry','Subway Sue',
+  'Hockey Harold','Science Sally','Carnival Carmen','Garage-Sale Gail',
+  'Retirement-Home Ralph','Charity Chuck','Pet-Groomer Gloria'
 ];
 
 
@@ -992,6 +999,8 @@ IMPORTANT: These must not repeat or closely resemble any prior prompt listed bel
 Avoid prior prompts:\n${avoidList || '(none)'}
 
 Use fresh situations from these broad comedy areas: ${categories}.
+Use fresh character names. Do NOT keep leaning on Clumsy Carla, Dumb Donald, Dumb Dora, Weird Willie, or the same few stock names.
+Invent new alliterative names or ordinary names that fit the setting. Once in a while, you may use one of the current celebrity panel names in the setup: ${celebrityNameHints || '(none)'}.
 Here is a randomized inspiration menu showing the breadth expected: ${themeMenu}.
 You may use one of these settings OR invent a similarly different setting. Do not treat the menu as exhaustive.
 The key requirement is variety: each prompt should feel like it comes from a different corner of life, not another version of the same party/date/restaurant mishap.
@@ -1541,12 +1550,22 @@ const fuzzyMatch = (a, b) => {
   const tokensB = nb.split(/\s+/).filter(Boolean);
   // If the contestant gave a concise answer and that exact word/phrase appears
   // inside the celebrity's longer answer, count it: "skills" matches
-  // "unbelievable skills". This is intentionally one-way so broad celebrity
-  // answers do not swallow specific contestant answers.
+  // "unbelievable skills".
   if (tokensA.length <= 2 && tokensA.every(w => w.length > 2)) {
     for (let i = 0; i <= tokensB.length - tokensA.length; i++) {
       if (tokensA.every((w, j) => tokensB[i + j] === w)) return true;
     }
+  }
+
+  // Also allow obvious compound-word containment in either direction:
+  // fire/campfire, house/treehouse, ball/snowball. Require 4+ letters so
+  // tiny fragments like "car" in "carpet" or "cat" in "catfish" do not match.
+  if (tokensA.length === 1 && tokensB.length === 1) {
+    const [wa] = tokensA, [wb] = tokensB;
+    const shorter = wa.length <= wb.length ? wa : wb;
+    const longer = wa.length <= wb.length ? wb : wa;
+    if (shorter.length >= 4 && longer.length >= shorter.length + 2 &&
+        (longer.endsWith(shorter) || longer.startsWith(shorter))) return true;
   }
 
   // Allow obvious typos only when both answers are short single-word attempts.
@@ -1582,6 +1601,7 @@ COUNT AS A MATCH:
 - singular/plural of the same word
 - abbreviation vs full phrase: TV/television, abs/abdominals
 - the contestant's concise answer appears as a complete word/phrase inside the celebrity answer: skills/unbelievable skills
+- obvious compound-word containment in either direction: fire/campfire, house/treehouse, ball/snowball
 - one answer is a very common synonym that would create essentially the same completed phrase
 
 DO NOT MATCH:
@@ -2057,7 +2077,7 @@ const startNewRound = async (room, roundNum) => {
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
-    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || [], room.usedRoundPrompts || [], !room.dumbDoraUsed, roundNum);
+    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || [], room.usedRoundPrompts || [], !room.dumbDoraUsed, roundNum, (room.panel || []).map(p => p.name));
     room.promptA = promptA;
     room.promptB = promptB;
     room.promptAnswerKeys = { A: answersA, B: answersB };
@@ -2207,7 +2227,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
           if (room.phase === 'round_end' && room.eliminatedSlot) await startNewRound(room, 'super');
         }
         catch(e) { console.error('start super match:', e); }
-      }, 16000);
+      }, 60000);
       return;
     }
     // Otherwise, second contestant now answers the remaining prompt.
@@ -2265,7 +2285,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     setTimeout(async () => {
       try { await startNewRound(room, 'super'); }
       catch(e) { console.error('start super match:', e); }
-    }, 16000);
+    }, 60000);
     return;
   }
 
@@ -2575,7 +2595,7 @@ app.post('/api/room/:code/play-again', async (req, res) => {
     resetRoomForPlayAgain(room);
     bump(room);
     res.json({ room });
-    setTimeout(() => assignRolesAndStart(room).catch(e => { console.error('play again:', e); room.phase = 'error'; bump(room); }), 400);
+    setTimeout(() => assignRolesAndStart(room).catch(e => { console.error('play again:', e); room.phase = 'error'; bump(room); }), 900);
   } catch (e) {
     console.error('play again:', e);
     room.phase = 'error'; bump(room);

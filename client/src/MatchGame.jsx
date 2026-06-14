@@ -277,6 +277,12 @@ const quickFuzzyMatch = (a,b) => {
       if (tx.every((w, j) => ty[i + j] === w)) return true;
     }
   }
+  if (tx.length === 1 && ty.length === 1) {
+    const shorter = tx[0].length <= ty[0].length ? tx[0] : ty[0];
+    const longer = tx[0].length <= ty[0].length ? ty[0] : tx[0];
+    if (shorter.length >= 4 && longer.length >= shorter.length + 2 &&
+        (longer.endsWith(shorter) || longer.startsWith(shorter))) return true;
+  }
   return false;
 };
 const speechClean = (s='') => String(s || '')
@@ -628,6 +634,23 @@ function DisplayView({ room, roomCode, setRoom }) {
     const prevPhase = prevPhaseRef.current;
     prevPhaseRef.current = phase;
 
+    // Play Again keeps the same TV component alive, so refs from the previous
+    // game must be reset or the new intro/round flow can get stuck.
+    if (phase === 'lobby' && ['gameOver','error'].includes(prevPhase)) {
+      introRunRef.current = false;
+      turnPromptAnnouncedRef.current = null;
+      inheritedTurnAnnouncedRef.current = null;
+      revealRunRef.current = null;
+      pickPromptSpeechRef.current = { key: '', promise: Promise.resolve() };
+      finalMatchSpeechRef.current = { pick: '', answer: '' };
+      setIntroIndex(-1);
+      setIntroStage('waiting');
+      setIntroComplete(false);
+      setPromptReadyFor(null);
+      setSuperPromptReady(false);
+      setRevealIndex(-1);
+    }
+
     if (phase === 'intro' && prevPhase !== 'intro' && !introRunRef.current && room.panel?.length > 0) {
       introRunRef.current = true;
       runIntro(room);
@@ -717,9 +740,11 @@ function DisplayView({ room, roomCode, setRoom }) {
       (async () => {
         await speakTTS({ text: `${room.players[room.activeSlot]}, you're moving on to the Super Match!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         await delay(250);
-        await speakTTS({ text: `Time for the Super Match. We polled a recent studio audience and got their best responses to this...`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+        await speakTTS({ text: `Time for the Super Match. We polled a recent studio audience and got their best responses to this.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         await delay(250);
         await readGamePrompt(room.superMatchPrompt, roomCode);
+        await delay(250);
+        await speakTTS({ text: `${room.players[room.activeSlot]}, you get to ask three celebrities for their advice. Which ones do you choose?`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         try { await api.superMatchPromptRead(roomCode); } catch {}
         setSuperPromptReady(true);
       })();
@@ -744,6 +769,9 @@ function DisplayView({ room, roomCode, setRoom }) {
         finalMatchSpeechRef.current.answer = key;
         (async () => {
           await delay(300);
+          const chosen = room.panel?.[room.finalMatchCelebIndex]?.name || 'our celebrity';
+          await speakTTS({ text: `${room.players[room.activeSlot]} has chosen ${chosen}.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+          await delay(250);
           await speakTTS({ text: `Here's the question.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
           await delay(200);
           await readGamePrompt(room.finalMatchPrompt, roomCode);
@@ -1072,6 +1100,18 @@ function DisplaySuperMatchReveal({ room, roomCode, setRevealIndex = () => {} }) 
 
   const runSuperReveal = async () => {
     const indices = room.superMatchCelebIndices || [];
+    const chosenNames = indices.map(i => room.panel?.[i]?.name).filter(Boolean);
+    if (chosenNames.length) {
+      const list = chosenNames.length === 3
+        ? `${chosenNames[0]}, ${chosenNames[1]}, and ${chosenNames[2]}`
+        : chosenNames.join(', ');
+      await speakTTS({
+        text: `${room.players[room.activeSlot]} has chosen ${list}.`,
+        isAnnouncer: true,
+        fallbackProfile: ANNOUNCER_PROFILE,
+      });
+      await delay(450);
+    }
     await Promise.all(indices.map(panelIdx => prefetchTTS({
       text: room.panel[panelIdx]?.answer || '',
       code: roomCode, slot: panelIdx,
@@ -1259,6 +1299,8 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
     blueCards: 'imagination',
     travel: 'a man with a clipboard'
   });
+  const creditCelebs = (room?.panel || []).filter(Boolean);
+  const [creditCelebIndex, setCreditCelebIndex] = useState(0);
   const safeMoney = (n) => `$${Number(n || 0).toLocaleString()}`;
   let headline = 'Thanks for playing!';
   try {
@@ -1297,10 +1339,14 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
         fallbackProfile: ANNOUNCER_PROFILE,
       }).catch(() => {});
     }, 900);
+    const celebTimer = setInterval(() => {
+      setCreditCelebIndex(i => creditCelebs.length ? (i + 1) % creditCelebs.length : 0);
+    }, 3200);
     return () => {
       cancelled = true;
       clearTimeout(musicTimer);
       clearTimeout(voiceTimer);
+      clearInterval(celebTimer);
       try { stopCreditsMusic(); } catch {}
     };
   }, []);
@@ -1318,6 +1364,13 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
   return (
     <div className="mg-credit-only-screen scrolling">
       <div className="mg-credit-only-headline">{headline}</div>
+      {creditCelebs.length > 0 && (
+        <div className="mg-credit-celeb-spotlight">
+          <CelebVisual celeb={creditCelebs[creditCelebIndex % creditCelebs.length]} size={150} />
+          <div className="mg-credit-celeb-name">{creditCelebs[creditCelebIndex % creditCelebs.length]?.name}</div>
+          <div className="mg-credit-celeb-caption">appeared as themselves</div>
+        </div>
+      )}
       <div className="mg-credit-only-card scrolling">
         <div className="mg-credit-scroll-content">
           <div className="mg-credit-only-title">Match Game</div>
