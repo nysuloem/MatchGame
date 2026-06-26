@@ -969,12 +969,37 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
   return await enrichPanelWithWikipediaImages(normalizedPanel);
 };
 
+
+const EMERGENCY_ROUND_PROMPTS = [
+  { prompt: "Airport Alan panicked at security when the scanner found a rubber __________", answers: ["chicken","duck","snake"] },
+  { prompt: "Bingo Brenda got excited and accidentally yelled out __________", answers: ["bingo","number","pants"] },
+  { prompt: "Mechanic Manny opened the hood and found a family of __________", answers: ["mice","raccoons","squirrels"] },
+  { prompt: "Museum Marty leaned on the exhibit and broke the ancient __________", answers: ["vase","statue","mummy"] },
+  { prompt: "Laundry Larry shrank his pants until they fit a __________", answers: ["doll","baby","hamster"] },
+  { prompt: "Hotel Hank complained because his pillow was stuffed with __________", answers: ["rocks","feathers","spaghetti"] }
+];
+
+const pickDistinctRoundPromptPair = (pool = [], allowDumbDora = true) => {
+  const usable = shuffle((pool || [])
+    .map(p => ({ ...p, prompt: normalizePromptBlank(p.prompt) }))
+    .filter(p => p.prompt && (allowDumbDora || !isCallbackPrompt(p.prompt))));
+  for (let i = 0; i < usable.length; i++) {
+    for (let j = i + 1; j < usable.length; j++) {
+      if (normalizePromptKey(usable[i].prompt) !== normalizePromptKey(usable[j].prompt) &&
+          !promptsTooSimilar(usable[i].prompt, usable[j].prompt)) {
+        return [usable[i], usable[j]];
+      }
+    }
+  }
+  const emergency = shuffle(EMERGENCY_ROUND_PROMPTS);
+  return [emergency[0], emergency[1]];
+};
+
 const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], usedRoundPrompts = [], allowDumbDora = true, roundNum = 1, panelNames = []) => {
   const availableChars = CHARACTER_ARCHETYPES.filter(c => !usedCharacters.includes(c));
   const shuffled = shuffle(availableChars);
   const charA = shuffled[0] || 'Old Timer Terry';
   const charB = shuffled[1] || 'Newcomer Nick';
-  const celebrityNameHints = (panelNames || []).filter(Boolean).slice(0, 6).join(', ');
   const localUsed = [
     ...(usedRoundPrompts || []),
     ...(usedCategories || []).filter(x => String(x).startsWith('PROMPT:')).map(x => String(x).slice(7)),
@@ -1001,7 +1026,7 @@ Avoid prior prompts:\n${avoidList || '(none)'}
 
 Use fresh situations from these broad comedy areas: ${categories}.
 Use fresh character names. Do NOT keep leaning on Clumsy Carla, Dumb Donald, Dumb Dora, Weird Willie, or the same few stock names.
-Invent new alliterative names or ordinary names that fit the setting. Once in a while, you may use one of the current celebrity panel names in the setup: ${celebrityNameHints || '(none)'}.
+Invent new alliterative names or ordinary names that fit the setting. Once in a while, you may use one of the current celebrity panel names in the setup: ${(panelNames || []).filter(Boolean).slice(0, 6).join(', ') || '(none)'}.
 Here is a randomized inspiration menu showing the breadth expected: ${themeMenu}.
 You may use one of these settings OR invent a similarly different setting. Do not treat the menu as exhaustive.
 The key requirement is variety: each prompt should feel like it comes from a different corner of life, not another version of the same party/date/restaurant mishap.
@@ -1044,6 +1069,7 @@ Return JSON exactly:
         const [a,b] = fresh;
         GLOBAL_USED_ROUND_PROMPTS.add(normalizePromptKey(a.prompt));
         GLOBAL_USED_ROUND_PROMPTS.add(normalizePromptKey(b.prompt));
+        if (normalizePromptKey(a.prompt) === normalizePromptKey(b.prompt)) console.warn('[prompt-db] duplicate generated A/B blocked but still equal; forcing fallback next time');
         markPromptUsed('round', a.prompt);
         markPromptUsed('round', b.prompt);
         return {
@@ -1066,11 +1092,8 @@ Return JSON exactly:
     .filter(p => allowDumbDora || !isCallbackPrompt(p.prompt))
     .filter(p => !localUsed.some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
   if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => allowDumbDora || !isCallbackPrompt(p.prompt));
-  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS;
-  const pool = shuffle(unused);
-  const a = { ...pool[0], prompt: normalizePromptBlank(pool[0].prompt) };
-  const b0 = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt) && !promptsTooSimilar(p.prompt, a.prompt) && !(isCallbackPrompt(a.prompt) && isCallbackPrompt(p.prompt))) || pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt) && !promptsTooSimilar(p.prompt, a.prompt)) || pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
-  const b = { ...b0, prompt: normalizePromptBlank(b0.prompt) };
+  const [a, b] = pickDistinctRoundPromptPair(unused.length ? unused : FALLBACK_ROUND_PROMPTS, allowDumbDora);
+  console.log(`[prompt-db] fallback pair A=${a.prompt} | B=${b.prompt}`);
   markPromptUsed('round', a.prompt);
   markPromptUsed('round', b.prompt);
   return {
