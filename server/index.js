@@ -1878,6 +1878,7 @@ const resetRoomForPlayAgain = (room) => {
   room.panelAnswers = [];
   room.humanPanelAnswers = {};
   room.matches = [];
+  room.superMatchStarted = false;
   room.superMatchPrompt = null;
   room.superMatchTopAnswers = null;
   room.superMatchCelebIndices = [];
@@ -1985,6 +1986,7 @@ app.post('/api/room', async (req, res) => {
       panelAnswers: [],
       humanPanelAnswers: {},
       matches: [],
+      superMatchStarted: false,
       superMatchPrompt: null,
       superMatchTopAnswers: null,
       superMatchCelebIndices: [],
@@ -2088,6 +2090,13 @@ app.get('/api/credits-bits', async (req, res) => {
 // ─── ROUND LOGIC ──────────────────────────────────────────────
 const startNewRound = async (room, roundNum) => {
   const isSuper = roundNum === 'super';
+  if (isSuper) {
+    if (room.superMatchStarted && isSuperOrLaterPhase(room.phase)) {
+      console.log(`[supermatch] startNewRound duplicate ignored; phase=${room.phase}; prompt=${room.superMatchPrompt || '(none)'}`);
+      return;
+    }
+    room.superMatchStarted = true;
+  }
   if (!isSuper) room.round = roundNum;
   room.phase = 'generating';
   bump(room);
@@ -2158,6 +2167,23 @@ const startNewRound = async (room, roundNum) => {
 
 // Determine the "other" contestant slot
 const otherSlot = (slot) => slot === 1 ? 2 : 1;
+const isSuperOrLaterPhase = (phase = '') =>
+  String(phase || '').startsWith('superMatch_') ||
+  String(phase || '').startsWith('finalMatch_') ||
+  phase === 'gameOver';
+
+const safeStartSuperMatch = async (room, source = 'unknown') => {
+  if (!room) return false;
+  if (room.superMatchStarted || isSuperOrLaterPhase(room.phase)) {
+    console.log(`[supermatch] duplicate start ignored from ${source}; phase=${room.phase}; prompt=${room.superMatchPrompt || '(none)'}`);
+    return false;
+  }
+  room.superMatchStarted = true;
+  console.log(`[supermatch] starting from ${source}`);
+  await startNewRound(room, 'super');
+  return true;
+};
+
 
 // ─── API: PICK PROMPT ─────────────────────────────────────────
 app.post('/api/room/:code/pick-prompt', async (req, res) => {
@@ -2233,7 +2259,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     setTimeout(async () => {
       try {
         if (Number(room.round) < 2) await startNewRound(room, Number(room.round) + 1);
-        else await startNewRound(room, 'super');
+        else await safeStartSuperMatch(room, 'solo-after-round2');
       }
       catch(e) { console.error('solo next round/super match:', e); }
     }, 3000);
@@ -2253,7 +2279,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
       res.json({ room });
       setTimeout(async () => {
         try {
-          if (room.phase === 'round_end' && room.eliminatedSlot) await startNewRound(room, 'super');
+          if (room.phase === 'round_end' && room.eliminatedSlot) await safeStartSuperMatch(room, 'round-end-fallback');
         }
         catch(e) { console.error('start super match:', e); }
       }, 60000);
@@ -2315,7 +2341,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     bump(room);
     res.json({ room });
     setTimeout(async () => {
-      try { await startNewRound(room, 'super'); }
+      try { await safeStartSuperMatch(room, 'round2-complete-fallback'); }
       catch(e) { console.error('start super match:', e); }
     }, 60000);
     return;
@@ -2611,10 +2637,9 @@ app.post('/api/room/:code/round-end-done', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
   if (room.phase === 'round_end' && room.eliminatedSlot && Number(room.round) >= 2) {
-    res.json({ room });
-    try { await startNewRound(room, 'super'); }
+    try { await safeStartSuperMatch(room, 'round-end-done'); }
     catch(e) { console.error('round-end-done start super:', e); room.phase = 'error'; bump(room); }
-    return;
+    return res.json({ room });
   }
   res.json({ room });
 });
