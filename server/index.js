@@ -969,11 +969,12 @@ Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"..
   return await enrichPanelWithWikipediaImages(normalizedPanel);
 };
 
-const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], usedRoundPrompts = [], allowDumbDora = true, roundNum = 1) => {
+const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], usedRoundPrompts = [], allowDumbDora = true, roundNum = 1, panelNames = []) => {
   const availableChars = CHARACTER_ARCHETYPES.filter(c => !usedCharacters.includes(c));
   const shuffled = shuffle(availableChars);
   const charA = shuffled[0] || 'Old Timer Terry';
   const charB = shuffled[1] || 'Newcomer Nick';
+  const celebrityNameHints = (panelNames || []).filter(Boolean).slice(0, 6).join(', ');
   const localUsed = [
     ...(usedRoundPrompts || []),
     ...(usedCategories || []).filter(x => String(x).startsWith('PROMPT:')).map(x => String(x).slice(7)),
@@ -1068,7 +1069,7 @@ Return JSON exactly:
   if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS;
   const pool = shuffle(unused);
   const a = { ...pool[0], prompt: normalizePromptBlank(pool[0].prompt) };
-  const b0 = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt) && !(isCallbackPrompt(a.prompt) && isCallbackPrompt(p.prompt))) || pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
+  const b0 = pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt) && !promptsTooSimilar(p.prompt, a.prompt) && !(isCallbackPrompt(a.prompt) && isCallbackPrompt(p.prompt))) || pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt) && !promptsTooSimilar(p.prompt, a.prompt)) || pool.find(p => normalizePromptKey(p.prompt) !== normalizePromptKey(a.prompt)) || pool[1] || a;
   const b = { ...b0, prompt: normalizePromptBlank(b0.prompt) };
   markPromptUsed('round', a.prompt);
   markPromptUsed('round', b.prompt);
@@ -1679,6 +1680,7 @@ const maybeScheduleAiAction = (room) => {
     scheduleAi(room, 'pickPrompt', 1200, async () => {
       if (room.phase !== 'pick_prompt' || !isAiContestantSlot(room, room.activeSlot)) return;
       const choice = Math.random() < 0.5 ? 'A' : 'B';
+      room.chosenPromptChoice = choice;
       room.chosenPrompt = choice === 'A' ? room.promptA : room.promptB;
       room.chosenAnswerKey = choice === 'A' ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
       room.phase = 'answering';
@@ -1841,7 +1843,7 @@ const resetRoomForPlayAgain = (room) => {
   room.cointossWinner = null;
   room.panel = [];
   room.round1Matches = { 1: [], 2: [] };
-  room.promptA = null; room.promptB = null; room.chosenPrompt = null;
+  room.promptA = null; room.promptB = null; room.chosenPrompt = null; room.chosenPromptChoice = null;
   room.usedCharacters = [];
   room.usedCategories = [];
   room.usedRoundPrompts = preservedUsedRoundPrompts;
@@ -2070,6 +2072,7 @@ const startNewRound = async (room, roundNum) => {
   if (!isSuper) {
     // Regular round (1, 2, or tiebreaker 3+)
     room.chosenPrompt = null;
+    room.chosenPromptChoice = null;
     room.contestantAnswer = null;
     room.panelAnswers = [];
     room.matches = [];
@@ -2106,6 +2109,7 @@ const startNewRound = async (room, roundNum) => {
   } else {
     // Super Match
     room.chosenPrompt = null;
+    room.chosenPromptChoice = null;
     room.contestantAnswer = null;
     room.matches = [];
     room.humanPanelAnswers = {};
@@ -2140,8 +2144,10 @@ app.post('/api/room/:code/pick-prompt', async (req, res) => {
   const role = room.roles?.[slot];
   if (!role || role.role !== 'contestant' || role.contestantSlot !== room.activeSlot) return res.status(403).json({ error: 'Not your turn to pick' });
 
-  room.chosenPrompt = choice === 'A' ? room.promptA : room.promptB;
-  room.chosenAnswerKey = choice === 'A' ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
+  const pickedChoice = String(choice || '').toUpperCase() === 'A' ? 'A' : 'B';
+  room.chosenPromptChoice = pickedChoice;
+  room.chosenPrompt = pickedChoice === 'A' ? room.promptA : room.promptB;
+  room.chosenAnswerKey = pickedChoice === 'A' ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
   room.phase = 'answering';
   bump(room);
   res.json({ room });
@@ -2231,11 +2237,14 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
       return;
     }
     // Otherwise, second contestant now answers the remaining prompt.
+    // Use the stored A/B choice, not prompt text comparison. Text comparison can
+    // fail if prompts are normalized, duplicated, or regenerated similarly.
     room.turnInRound = 2;
     room.activeSlot = other;
-    const remainingIsA = room.promptA !== room.chosenPrompt;
-    room.chosenPrompt = remainingIsA ? room.promptA : room.promptB;
-    room.chosenAnswerKey = remainingIsA ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
+    const remainingChoice = room.chosenPromptChoice === 'A' ? 'B' : 'A';
+    room.chosenPromptChoice = remainingChoice;
+    room.chosenPrompt = remainingChoice === 'A' ? room.promptA : room.promptB;
+    room.chosenAnswerKey = remainingChoice === 'A' ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
     room.humanPanelAnswers = {};
     room.contestantAnswer = null;
