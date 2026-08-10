@@ -869,6 +869,12 @@ const FALLBACK_SUPER_PROMPTS = [
   { prompt:'Cheese ___', topAnswers:[{rank:1,answer:'Cake',value:500},{rank:2,answer:'Burger',value:250},{rank:3,answer:'Ball',value:100}] }
 ];
 
+// Boards generated alongside a fresh clue are retained until the Super Match
+// begins. This prevents an unrelated curated board from ever being attached to
+// an AI-generated clue when a later model call fails.
+const GENERATED_SUPER_BOARDS = new Map();
+const superPromptKey = (prompt = '') => normalizePromptKey(normalizePromptBlank(prompt));
+
 const generatePanel = async () => {
   const classic = CLASSIC_MATCH_GAMERS[Math.floor(Math.random() * CLASSIC_MATCH_GAMERS.length)];
   const varietySeed = Math.random().toString(36).slice(2, 8);
@@ -1215,25 +1221,31 @@ const generateSuperMatchPrompt = async (usedPrompts = []) => {
       const text = await callLLM(
         `${SUPER_MATCH_WRITER_STYLE}
 
-Generate EIGHT brand-new Super Match survey-board prompts.
+Generate EIGHT brand-new Super Match survey-board prompts WITH their likely audience board.
 Each should be a short phrase with exactly one blank marker: __________
 Good FORM examples only: "Hot __________", "__________ Dog", "Golden __________", "Coffee __________".
 Do NOT copy those examples unless they are not in the avoid list.
 Each clue must have many ordinary answers a real audience might give, with one obvious top answer and two plausible runners-up.
+For each clue, mentally ask 100 ordinary North American adults to say the first completion that comes to mind. Include only answers that would receive several independent responses. Never invent a quirky third answer merely to fill the board.
 Avoid generic, overused, or obvious repeated roots.
 Do NOT use "Favourite" or "Favorite" anywhere. Do NOT use Pizza or Birthday.
 Avoid roots already used: ${usedRoots || '(none)'}
 Avoid prior prompts:
 ${avoidList || '(none)'}
 
-Return JSON exactly: {"prompts":["... __________","__________ ...", "..."]}`,
+Return JSON exactly: {"prompts":[{"prompt":"... __________","topAnswers":["first","second","third"]}]}`,
         360, true
       );
       const parsed = extractJSON(text);
       const prompts = Array.isArray(parsed) ? parsed : (parsed.prompts || []);
       for (const candidate of shuffle(prompts)) {
-        const prompt = validate(candidate);
+        const prompt = validate(typeof candidate === 'string' ? candidate : candidate?.prompt);
         if (prompt) {
+          const board = Array.isArray(candidate?.topAnswers)
+            ? candidate.topAnswers.map(a => cleanSurveyAnswer(prompt, a)).filter(Boolean).slice(0, 3)
+            : [];
+          if (board.length !== 3 || surveyBoardLooksBad(prompt, board)) continue;
+          GENERATED_SUPER_BOARDS.set(superPromptKey(prompt), board);
           markPromptUsed('super', prompt);
           return prompt;
         }
@@ -1286,14 +1298,44 @@ const surveyBoardLooksBad = (prompt, answers = []) => {
   return false;
 };
 
+const judgeSurveyBoard = async (prompt, answers = []) => {
+  const cleaned=answers.map(a=>cleanSurveyAnswer(prompt,a.answer||a)).filter(Boolean).slice(0,3);
+  if(surveyBoardLooksBad(prompt,cleaned))return null;
+  try {
+    const text=await callLLM(
+`You are the strict editor of a classic Match Game audience survey.
+Clue: "${prompt}"
+Proposed ranked answers: ${cleaned.map((a,i)=>`${i+1}. ${a}`).join('; ')}
+
+Evaluate these as predictions of what 100 ordinary North American adults would say FIRST, under time pressure.
+- Every answer must form a familiar, natural phrase with the clue.
+- #1 must be the dominant obvious response.
+- #2 and #3 must each be responses several unrelated real people would independently give.
+- Reject clever wordplay, niche references, strained associations, category errors, and an answer included merely to make three.
+- If the ordering is wrong but all three are strong, reorder them.
+- Be skeptical. When uncertain, return valid:false.
+
+Return JSON only: {"valid":true,"rankedAnswers":["...","...","..."]}`,
+      220,true
+    );
+    const parsed=extractJSON(text);
+    const ranked=Array.isArray(parsed.rankedAnswers)?parsed.rankedAnswers.map(a=>cleanSurveyAnswer(prompt,a)).filter(Boolean).slice(0,3):[];
+    return parsed.valid===true&&ranked.length===3&&!surveyBoardLooksBad(prompt,ranked)?ranked:null;
+  }catch(e){console.warn('super survey judge failed:',e.message);return null;}
+};
+
 const generateSuperMatchAnswers = async (prompt, celebNames) => {
-  const fallback = FALLBACK_SUPER_PROMPTS.find(p => p.prompt.toLowerCase() === String(prompt).toLowerCase())
-    || FALLBACK_SUPER_PROMPTS[Math.floor(Math.random() * FALLBACK_SUPER_PROMPTS.length)];
+  const exactFallback = FALLBACK_SUPER_PROMPTS.find(p => superPromptKey(p.prompt) === superPromptKey(prompt));
+  const generatedBoard = GENERATED_SUPER_BOARDS.get(superPromptKey(prompt));
+  const fallback = exactFallback || {
+    prompt,
+    topAnswers:(generatedBoard||[]).map((answer,i)=>({rank:i+1,answer,value:[500,250,100][i]}))
+  };
 
   // IMPORTANT: The survey board and celebrity suggestions are generated in two separate calls.
   // The celebrities are NOT shown the top-three survey answers. This prevents the AI panel
   // from suspiciously giving the exact $500/$250/$100 answers every time.
-  let topAnswers = fallback.topAnswers.map((ta, i) => ({
+  let topAnswers = (fallback.topAnswers||[]).map((ta, i) => ({
     rank: i + 1,
     answer: cleanSurveyAnswer(prompt, ta.answer),
     value: [500,250,100][i]
@@ -1304,7 +1346,7 @@ const generateSuperMatchAnswers = async (prompt, celebNames) => {
       const surveyText = await callLLM(
       `Super Match survey board. Prompt: "${prompt}"
 
-Generate the TOP 3 most popular/obvious survey answers for adults and 17+ teenagers.
+Simulate asking 100 ordinary North American adults and 17+ teenagers to say the FIRST completion that enters their mind. Generate the TOP 3 responses by estimated frequency.
 Classic Match Game survey logic: obvious beats clever. These are the hidden studio-audience results, NOT celebrity guesses.
 
 Rules:
@@ -1314,25 +1356,30 @@ Rules:
 - Use COMMON, boring, survey-plausible answers. Do not be quirky, meta, gross, random, overly clever, or absurd.
 - The #1 answer should be the answer a normal audience would most likely say first.
 - The #2 and #3 answers should also be strong ordinary completions, not joke answers.
+- Do not manufacture a third answer just to make the list. Set "valid" to false if the clue does not genuinely support three common independent responses.
 - Reject answers that only make sense as a joke, a prop, or a forced association.
 - The three answers should be distinct.
+- Include an estimated audience count for each answer. Counts must descend and should reflect a believable distribution out of 100 respondents.
 - Prize values must be exactly 500, 250, 100.
 
 Return JSON only:
 {
+  "valid": true,
   "topAnswers": [
-    {"rank": 1, "answer": "...", "value": 500},
-    {"rank": 2, "answer": "...", "value": 250},
-    {"rank": 3, "answer": "...", "value": 100}
+    {"rank": 1, "answer": "...", "count": 52, "value": 500},
+    {"rank": 2, "answer": "...", "count": 21, "value": 250},
+    {"rank": 3, "answer": "...", "count": 9, "value": 100}
   ]
 }`,
       350, true
     );
     const parsedSurvey = extractJSON(surveyText);
-    if (Array.isArray(parsedSurvey.topAnswers) && parsedSurvey.topAnswers.length >= 3 && !surveyBoardLooksBad(prompt, parsedSurvey.topAnswers)) {
-      topAnswers = parsedSurvey.topAnswers.slice(0, 3).map((ta, i) => ({
+    if (parsedSurvey.valid!==false && Array.isArray(parsedSurvey.topAnswers) && parsedSurvey.topAnswers.length >= 3 && !surveyBoardLooksBad(prompt, parsedSurvey.topAnswers)) {
+      const judged=await judgeSurveyBoard(prompt,parsedSurvey.topAnswers);
+      if(!judged)continue;
+      topAnswers = judged.map((answer, i) => ({
         rank: i + 1,
-        answer: cleanSurveyAnswer(prompt, ta.answer || fallback.topAnswers[i].answer),
+        answer,
         value: [500,250,100][i]
       }));
       break;
@@ -1340,6 +1387,17 @@ Return JSON only:
     } catch (e) {
       console.warn('super survey generation failed:', e.message);
     }
+  }
+
+  // A generated clue always carries its own candidate board. Use it only
+  // after the stricter audience editor approves it; never borrow answers from
+  // an unrelated clue.
+  if(topAnswers.length<3&&generatedBoard){
+    const judged=await judgeSurveyBoard(prompt,generatedBoard);
+    if(judged)topAnswers=judged.map((answer,i)=>({rank:i+1,answer,value:[500,250,100][i]}));
+  }
+  if(topAnswers.length<3){
+    throw new Error(`Could not produce a plausible Super Match survey board for: ${prompt}`);
   }
 
   let celebAnswers = [];
