@@ -1112,8 +1112,8 @@ const generatePanelAnswers = async (panel, promptText, contestantName, roundNum 
   const key = (answerKey || []).filter(Boolean).slice(0, 3);
   const order = [0,1,2,3,4,5].sort(() => Math.random() - 0.5);
   const funnyIndex = order[0];
-  const topCount = roundNum === 1 ? 2 : (Math.random() < 0.55 ? 3 : 4);
-  const altCount = roundNum === 1 ? 2 : (6 - topCount - 1);
+  const topCount = roundNum === 1 ? 2 : 3;
+  const altCount = 2;
   const topSlots = new Set(order.slice(0, topCount));
   const alternateSlots = new Set(order.slice(topCount, topCount + altCount));
   const funnySlots = new Set(order.slice(topCount + altCount));
@@ -1143,8 +1143,8 @@ ANSWER RULES:
 - Prefer ordinary human first-instinct answers, not polite chatbot answers.
 - For double entendres, use classic TV-safe suggestive nouns that can plausibly fit the blank: pants, underwear, bedroom, zipper, lap, behind, kiss, date, shower, robe, handcuffs, hose, pump, pickle, sausage, melons, headlights, buns. Use only when the prompt context makes it funny and matchable.
 - Avoid sterile answers like "honey", "sugar", "kindness", "friendship", "love", or "joy" unless the prompt very clearly points there.
-- Round 1: answers may vary, but they must stay in the same answer neighborhood. About 2 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, 1 should give a plausible in-character answer, and 1 should give a funny answer.
-- Round 2: make matching likely by staying inside a limited answer set, not by making everyone identical. Usually 3-4 celebrities should use the #1 answer or a very close variant, 1-2 should use the #2 answer or a close variant, and 1 may give a funny/adult-innuendo answer that still fits the same answer neighborhood.
+- Round 1: about 2 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, and 2 should give distinct, plausible punchlines, with at least one playful double meaning when the clue allows it.
+- Round 2: 3 celebrities should use the #1 answer, 2 should use #2/#3 or close synonyms, and 1 should give a funny, plausible answer. Keep that last comic answer even if it differs from the likely answer key.
 - The funny answer should be a quick laugh. Lean into classic Match Game double-entendre and adult innuendo when the prompt allows it, but keep it non-explicit and TV-PG/PG-13.
 - At least one answer should usually have a playful adult wink or double meaning, in the old Match Game style.
 - If the prompt contains "accidentally", "bedroom", "alarm", "doctor", "plumber", "dating", "pants", "nurse", "wedding night", "honeymoon", "secret", "stuck", "zipper", "bathroom", "hotel", "gym", or "costume", treat that as a comedy trigger: choose answers that are funny, embarrassing, suggestive, or mischievous while still fitting the blank and staying matchable.
@@ -1184,9 +1184,7 @@ Return JSON: {"answers": ["answer1","answer2","answer3","answer4","answer5","ans
       for (const i of topSlots) answers[i] = top;
       for (const i of alternateSlots) answers[i] = Math.random() < 0.75 ? second : third;
       for (const i of funnySlots) {
-        const base = Math.random() < 0.6 ? top : (Math.random() < 0.75 ? second : third);
-        answers[i] = answers[i] && answers[i] !== '???' ? answers[i] : base;
-        if (!similarEnoughToAny(answers[i], [top, second, third])) answers[i] = base;
+        if (!answers[i] || answers[i] === '???') answers[i] = third;
       }
     }
   }

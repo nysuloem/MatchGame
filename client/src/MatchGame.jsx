@@ -106,14 +106,25 @@ const playRetroSting = () => {
     osc.stop(now + i * 0.12 + 0.18);
   });
 };
-const playIntroClip = (src, { volume = .42, loop = false, start = 0 } = {}) => {
-  if (introMusicAudio) { introMusicAudio.pause(); introMusicAudio = null; }
+const playIntroClip = (src, { volume = .42, loop = false, start = 0, fadeMs = 0 } = {}) => {
+  const previous = introMusicAudio;
+  if (previous && !fadeMs) { previous.pause(); introMusicAudio = null; }
   const audio = new Audio(src);
-  audio.volume = volume;
+  audio.volume = fadeMs ? 0 : volume;
   audio.loop = loop;
   if (start) audio.currentTime = start;
   introMusicAudio = audio;
   safePlayAudio(audio);
+  if (fadeMs) {
+    if (previous) fadeAndStop(previous, fadeMs);
+    const steps = 12;
+    let n = 0;
+    const id = setInterval(() => {
+      n += 1;
+      audio.volume = Math.min(volume, volume * n / steps);
+      if (n >= steps) clearInterval(id);
+    }, Math.max(25, fadeMs / steps));
+  }
   return audio;
 };
 const waitForIntroEnd = async (audio, timeoutMs = 6000) => {
@@ -694,7 +705,7 @@ function DisplayView({ room, roomCode, setRoom }) {
       if (turnPromptAnnouncedRef.current !== `${turnKey}-pick`) {
         turnPromptAnnouncedRef.current = `${turnKey}-pick`;
         const promise = speakTTS({
-          text: `${room.players[room.activeSlot]}, it's your turn. Would you like Question A or B?`,
+          text: `${room.turnInRound === 1 && room.round <= 2 ? `Let's begin Round ${room.round}. ` : ''}${room.players[room.activeSlot]}, it's your turn. Would you like Question A or B?`,
           isAnnouncer: true,
           fallbackProfile: ANNOUNCER_PROFILE,
         });
@@ -820,6 +831,7 @@ function DisplayView({ room, roomCode, setRoom }) {
           await speakTTS({ text: `Here's the question.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
           await delay(200);
           await readGamePrompt(room.finalMatchPrompt, roomCode);
+          await speakTTS({ text: `${room.players[room.activeSlot]?.split(' ')[0]}, how do you fill in that blank?`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
           try { await api.finalMatchPromptRead(roomCode); } catch {}
         })();
       }
@@ -843,8 +855,8 @@ function DisplayView({ room, roomCode, setRoom }) {
     // The long recording starts with 'Get ready to match the stars'. The
     // theme carries the replacement celebrity roll call.
     playIntroClip(OPENING_CALL, { volume: .55 });
-    await delay(4800);
-    playIntroClip(THEME_TRACK, { volume: .24, loop: true });
+    await delay(4400);
+    playIntroClip(THEME_TRACK, { volume: .24, loop: true, fadeMs: 400 });
     for (let i = 0; i < r.panel.length; i++) {
       setIntroStage('celeb');
       setIntroIndex(i);
@@ -856,7 +868,7 @@ function DisplayView({ room, roomCode, setRoom }) {
     // introduction. The marquee lifts, the set lights up, then Gene enters.
     setIntroStage('logo');
     setIntroIndex(-1);
-    const archival = playIntroClip(OPENING_CALL, { volume: .55, start: 16.5 });
+    const archival = playIntroClip(OPENING_CALL, { volume: .55, start: 16.3, fadeMs: 450 });
     await delay(3700);
     setIntroStage('logo-lift');
     await delay(1800);
@@ -968,7 +980,6 @@ function DisplayView({ room, roomCode, setRoom }) {
           className={`mg-stage-score seat-${slot} ${slot===room.triangleSlot?'triangle':'circle'}`}>{room.completedQuestionsBySlot?.[slot] ? (room.scores?.[slot] || 0) : ''}</div>)}
       </div>}
       {phase.startsWith('superMatch') && <div className="mg-super-board" aria-label="Super Match board">
-        <img src="/images/super-match-board.png" alt="" />
         <div className={`mg-super-board-blank ${room.superMatchPromptReady || superPromptReady ? 'revealed' : ''}`}>
           <span>{room.superMatchPrompt}</span><div className="mg-super-board-cover" />
         </div>
@@ -1121,7 +1132,7 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
 }
 
 
-function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex, superSpeakingIndex = -1 }) {
+function DisplayPanelGrid({ room, revealIndex, revealOnlyIndex, finalRevealAnswer, roomCode, matches, introIndex, superSpeakingIndex = -1 }) {
   const activeIsTriangle = room?.activeSlot === room?.triangleSlot;
   const round1MatchedByActive = room?.round >= 2
     ? (room?.round1Matches?.[room?.activeSlot] || [])
@@ -1131,7 +1142,7 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex, su
   return (
     <div className="mg-panel-grid display">
       {(room?.panel || []).map((p, i) => {
-        const shown = revealIndex != null && i <= revealIndex;
+        const shown = revealOnlyIndex === undefined ? (revealIndex != null && i <= revealIndex) : i === revealOnlyIndex;
         const matched = matches && shown && matches[i];
         const prelit = round1MatchedByActive.includes(i);
         const litAsTriangle = (matched && activeIsTriangle) || (prelit && room?.triangleSlot === room?.activeSlot);
@@ -1150,7 +1161,7 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex, su
             <CelebVisual celeb={p} size={100} />
             <div className="mg-panelist-name">{p.name?.trim().split(/\s+/)[0]}</div>
             <div className={`mg-panelist-answer hand-${i % 6} ${shown ? 'blue-card' : 'blank'}`}>
-              {shown ? (p.answer || (prelit ? 'Matched' : '')) : ''}
+              {shown ? (i === revealOnlyIndex && finalRevealAnswer ? finalRevealAnswer : p.answer || (prelit ? 'Matched' : '')) : ''}
             </div>
             <div className="mg-symbol-row">
               <span className={`mg-symbol tri ${litAsTriangle ? 'lit' : ''}`}>▲</span>
@@ -1457,20 +1468,7 @@ function DisplayFinalMatchReveal({ room, roomCode, onWin }) {
       });
       if (cancelled) return;
       await delay(350);
-      await speakTTS({
-        text: `${room.players[room.activeSlot]} said, ${room.finalMatchContestantAnswer}.`,
-        isAnnouncer: true,
-        fallbackProfile: ANNOUNCER_PROFILE,
-      });
-      if (cancelled) return;
-      await delay(450);
-      await speakTTS({
-        text: `${celeb?.name || 'Our star'} ${['looks nervous','looks sweaty','looks pale','looks worried','looks a little dejected','looks like they need a commercial break'][Math.floor(Math.random()*6)]}.`,
-        isAnnouncer: true,
-        fallbackProfile: ANNOUNCER_PROFILE,
-      });
-      if (cancelled) return;
-      await delay(650);
+      await delay(400);
       setStage('reveal');
       await speakTTS({
         text: speechClean(room.finalMatchCelebAnswer || ''),
@@ -1504,12 +1502,8 @@ function DisplayFinalMatchReveal({ room, roomCode, onWin }) {
   }, []);
 
   return <div className="mg-final-stage-content">
-    <DisplayPanelGrid room={room} revealIndex={-1} />
+    <DisplayPanelGrid room={room} revealIndex={-1} revealOnlyIndex={stage === 'thinking' ? -1 : room.finalMatchCelebIndex} finalRevealAnswer={room.finalMatchCelebAnswer} />
     <div className="mg-final-prompt">{room.finalMatchPrompt}</div>
-    <div className="mg-final-answers">
-      <div>{room.players[room.activeSlot]}: {room.finalMatchContestantAnswer}</div>
-      {stage !== 'thinking' && <div>{celeb?.name}: {room.finalMatchCelebAnswer}</div>}
-    </div>
   </div>;
 
 }
@@ -1561,11 +1555,13 @@ function PhoneView({ room, roomCode, playerSlot }) {
 
   useEffect(() => {
     const role = room?.roles?.[playerSlot];
-    if (room?.phase === 'answering' && room.microphoneReady && role?.role === 'contestant' && role.contestantSlot === room.activeSlot && !room.contestantAnswer) {
+    if (((room?.phase === 'answering' && room.microphoneReady && !room.contestantAnswer) ||
+         (room?.phase === 'finalMatch_answering' && room.finalMatchPromptReady && !room.finalMatchContestantAnswer)) &&
+        role?.role === 'contestant' && role.contestantSlot === room.activeSlot) {
       startAnswerMicrophone();
     }
     return () => { if (recognitionRef.current) { recognitionRef.current.abort(); recognitionRef.current=null; } };
-  }, [room?.microphoneReady, room?.phase, room?.round, room?.turnInRound, room?.activeSlot, playerSlot]);
+  }, [room?.microphoneReady, room?.finalMatchPromptReady, room?.phase, room?.round, room?.turnInRound, room?.activeSlot, playerSlot]);
 
   if (!room) return <PhoneWaiting />;
 
@@ -1913,6 +1909,9 @@ function PhoneView({ room, roomCode, playerSlot }) {
             ) : (
               <>
                 <div className="mg-prompt phone">{room.finalMatchPrompt}</div>
+                <p className="mg-status">Your microphone is on. Say your answer, check it, then submit.</p>
+                <p className="mg-help">{micStatus}</p>
+                <button className="mg-btn secondary" onClick={startAnswerMicrophone}>Tap to speak again</button>
                 <label className="mg-label">Your Answer</label>
                 <input className="mg-input" value={myAnswer}
                   onChange={e => setMyAnswer(e.target.value)}
@@ -1924,7 +1923,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
                 </p>
                 <div className="mg-row">
                   <button className="mg-btn" onClick={handleFinalMatchAnswer} disabled={!myAnswer.trim()}>
-                    Lock It In!
+                  Submit Answer
                   </button>
                 </div>
               </>

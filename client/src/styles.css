@@ -2118,3 +2118,21 @@ body { margin: 0; }
   font:800 clamp(17px,2vw,32px)/1.1 'DM Serif Display',serif;
   box-shadow:0 5px 15px #1c0d0aa8;
 }
+
+/* Keep the entire Super Match prop on one layer over the left podium. */
+.mg-root.super-stage .mg-super-board {
+  background: url('/images/super-match-board.png') center center / 100% 100% no-repeat;
+  z-index: 12;
+}
+.mg-root.super-stage .mg-super-board-blank,
+.mg-root.super-stage .mg-super-board-answer { z-index: 2; }
+.mg-root.final-stage .mg-final-prize {
+  top: 4%; left: 41%; width: 17%; height: 11%;
+  font-size: clamp(30px, 3.5vw, 68px);
+}
+@media (aspect-ratio: 16/9), (max-aspect-ratio: 16/9) {
+  .mg-root.super-stage .mg-super-board { top: 10%; height: 80%; }
+  .mg-root.stage-play.super-stage .mg-panel-grid.display,
+  .mg-root.stage-play.final-stage .mg-panel-grid.display { top: 17%; height: 58%; }
+  .mg-root.final-stage .mg-final-prize { top: 3%; height: 12%; }
+}
