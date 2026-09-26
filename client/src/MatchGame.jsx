@@ -72,7 +72,6 @@ let introMusicAudio = null;
 let creditsMusicAudio = null;
 const THEME_TRACK = '/audio/match-game-73.mp3';
 const OPENING_CALL = '/audio/opening-archival.mp3';
-const OPENING_BED = '/audio/opening-music-bed.mp3';
 const OPENING_CONTESTANT_CUE = '/audio/opening-get-ready.mp3';
 const REGULAR_TRACK = '/audio/regular-music.mp3';
 const safePlayAudio = (audio) => audio.play().catch(() => {});
@@ -841,11 +840,11 @@ function DisplayView({ room, roomCode, setRoom }) {
     setIntroIndex(-1);
     await delay(300);
 
-    // The long recording starts with 'Get ready to match the stars'. Its
-    // vocal-reduced mix carries the replacement celebrity roll call.
+    // The long recording starts with 'Get ready to match the stars'. The
+    // theme carries the replacement celebrity roll call.
     playIntroClip(OPENING_CALL, { volume: .55 });
     await delay(4800);
-    playIntroClip(OPENING_BED, { volume: .46, loop: true, start: 4.5 });
+    playIntroClip(THEME_TRACK, { volume: .24, loop: true });
     for (let i = 0; i < r.panel.length; i++) {
       setIntroStage('celeb');
       setIntroIndex(i);
@@ -869,7 +868,7 @@ function DisplayView({ room, roomCode, setRoom }) {
     // The short cue comes after the recorded Gene introduction, before the
     // contestants introduce themselves on the set.
     const cue = playIntroClip(OPENING_CONTESTANT_CUE, { volume: .52 });
-    await delay(4300);
+    await delay(3800);
     cue.pause();
     introMusicAudio = null;
 
@@ -977,6 +976,12 @@ function DisplayView({ room, roomCode, setRoom }) {
           const revealed = [...(room.superMatchTopAnswers || [])].sort((a,b)=>(a.value||0)-(b.value||0)).slice(0,superBoardRevealCount).find(a => Number(a.value)===value);
           return <div key={value} className={`mg-super-board-answer row-${row+1} ${revealed ? 'revealed' : ''}`}>{revealed?.answer || ''}</div>;
         })}
+      </div>}
+      {phase.startsWith('superMatch') && <div className="mg-super-contestant">
+        {room.participantPhotos?.[room.playerIds?.[room.activeSlot]]
+          ? <img src={room.participantPhotos[room.playerIds[room.activeSlot]]} alt={room.players?.[room.activeSlot] || 'Super Match contestant'} />
+          : <div className="mg-stage-contestant-placeholder" />}
+        <div className="mg-super-contestant-name">{room.players?.[room.activeSlot]?.trim().split(/\s+/)[0]}</div>
       </div>}
       {phase.startsWith('finalMatch') && <div className={`mg-final-prize ${finalPrizeBlink ? 'blinking' : ''}`}>{fmt$(Number(room.superMatchWinnings || 0) * 10)}</div>}
       <div className="mg-display-header">
@@ -1110,6 +1115,7 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
       <div className="mg-opening-rotor">
         <CelebVisual celeb={p} size={390} className="opening-celeb" />
       </div>
+      {p.showIntroSign && p.signMessage && <div className="mg-opening-blue-card">{p.signMessage}</div>}
     </div>
   </div>;
 }

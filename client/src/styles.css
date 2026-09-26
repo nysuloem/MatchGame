@@ -2074,3 +2074,47 @@ body { margin: 0; }
 .mg-final-stage-content .mg-final-answers { position:absolute; z-index:5; left:4%; bottom:18%; width:33%; display:grid; gap:8px; }
 .mg-final-stage-content .mg-final-answers div { background:#95dce4; border:3px solid #4d8c9a; color:#173039; padding:8px 12px; font:900 clamp(16px,1.7vw,28px)/1.1 'DM Serif Display',serif; }
 .mg-root.final-stage .mg-panelist.final-selected .mg-celeb-photo { box-shadow:0 0 0 5px #fff5b4,0 0 20px 8px #ffdd6f; }
+
+/* Super Match uses the same mounted celebrity seats as the regular set. */
+.mg-root.stage-play.super-stage .mg-panel-grid.display {
+  top:17%; right:4%; width:43%; height:58%;
+  padding:0; gap:0; border:0 !important; outline:0;
+  border-radius:0; box-shadow:none !important;
+  background:transparent !important; overflow:visible;
+}
+.mg-root.stage-play.super-stage .mg-panelist,
+.mg-root.stage-play.super-stage .mg-panelist.super-selected {
+  border:0 !important; background:transparent !important;
+  box-shadow:none !important; overflow:visible;
+}
+.mg-root.super-stage .mg-super-board {
+  z-index:8; left:17%; top:14%; width:25%; height:76%;
+  overflow:visible; isolation:isolate;
+}
+.mg-root.super-stage .mg-super-board > img {
+  display:block; position:absolute; inset:0;
+  width:100% !important; height:100% !important;
+  max-width:none !important; max-height:none !important;
+  object-fit:fill;
+}
+.mg-root.super-stage .mg-super-board-blank { z-index:1; }
+.mg-root.super-stage .mg-super-board-answer { z-index:1; }
+.mg-super-contestant {
+  position:absolute; z-index:9; left:4%; top:59%; width:11%; height:19%;
+  border:3px solid #ead4a0; border-radius:5px;
+  background:#302342; box-shadow:4px 7px 12px #28150699;
+  overflow:hidden;
+}
+.mg-super-contestant > img { display:block; width:100%; height:100%; object-fit:cover; object-position:center 20%; }
+.mg-super-contestant-name {
+  position:absolute; left:0; right:0; bottom:0; padding:3px 2px;
+  background:#eee0ba; color:#251b13; text-align:center;
+  font:900 clamp(11px,1.25vw,22px)/1.1 'DM Serif Display',serif;
+}
+.mg-opening-blue-card {
+  position:absolute; z-index:3; left:8%; right:8%; bottom:3%;
+  padding:8px 12px; border:4px solid #295b83; border-radius:4px;
+  background:#84cde2; color:#172a49; text-align:center;
+  font:800 clamp(17px,2vw,32px)/1.1 'DM Serif Display',serif;
+  box-shadow:0 5px 15px #1c0d0aa8;
+}
