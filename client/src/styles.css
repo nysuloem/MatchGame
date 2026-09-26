@@ -2000,3 +2000,42 @@ body { margin: 0; }
 .mg-stage-score.seat-1 { left:28.5%; }
 .mg-stage-score.seat-2 { left:36%; }
 .mg-opening-set img { left:47%; }
+
+/* The marquee clears to the complete set, with the panel and contestants seated. */
+.mg-opening-logo-lift .mg-opening-set,
+.mg-opening-stage .mg-opening-set,
+.mg-opening-host .mg-opening-set,
+.mg-opening-contestant .mg-opening-set,
+.mg-opening-finale .mg-opening-set { opacity:1; }
+.mg-opening-stage,.mg-opening-contestant,.mg-opening-finale { background:#d94a16; }
+.mg-opening-stage .mg-opening-marquee,.mg-opening-contestant .mg-opening-marquee,.mg-opening-finale .mg-opening-marquee { transform:translateY(-125vh); }
+.mg-opening-stage .mg-opening-bulbs,.mg-opening-contestant .mg-opening-bulbs,.mg-opening-finale .mg-opening-bulbs { opacity:0; }
+.mg-opening-set > .mg-opening-gene { position:absolute; left:47%; bottom:0; height:min(47vh,490px); width:auto; transform:translateX(-50%); opacity:0; transition:opacity .45s; }
+.mg-opening-host .mg-opening-gene,.mg-opening-contestant .mg-opening-gene,.mg-opening-finale .mg-opening-gene { opacity:1; }
+.mg-opening-set .mg-panel-grid.display { position:absolute; top:19%; right:3%; width:43%; height:61%; max-width:none; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); padding:5px; gap:3px; border:4px solid #e6d8b6; border-radius:12px; background:#ede2c0; z-index:1; }
+.mg-opening-set .mg-panelist { position:relative; min-width:0; min-height:0; overflow:hidden; }
+.mg-opening-set .mg-panelist .mg-celeb-photo { position:relative; top:auto; left:auto; height:55% !important; width:88% !important; max-width:none; object-fit:cover; margin:0 auto !important; transform:none; }
+.mg-opening-set .mg-panelist .mg-panelist-name { font-size:clamp(10px,1.2vw,19px); }
+.mg-opening-set .mg-panelist-answer.blank { display:none; }
+.mg-opening-set .mg-stage-contestants { z-index:2; }
+.mg-opening-set .mg-stage-contestant img { position:static; width:100%; height:100%; transform:none; object-fit:cover; }
+
+/* The archival Super Match board replaces the left contestant platform. */
+.mg-root.display-mode.super-stage { background:#5a3027 url('/images/super-match-stage.png') center center / 100% 100% no-repeat !important; }
+.mg-root.super-stage .mg-display-header { display:none; }
+.mg-root.super-stage .mg-display-main { position:absolute; inset:0; width:100%; height:100%; padding:0; }
+.mg-root.super-stage .mg-super-stage-content { position:absolute; inset:0; }
+.mg-root.super-stage .mg-panel-grid.display { position:absolute; top:29%; right:2%; width:33%; height:48%; max-width:none; margin:0; padding:4px; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); gap:2px; border:0; border-radius:0; background:transparent; box-shadow:none; }
+.mg-root.super-stage .mg-panel-grid.display::before { display:none; }
+.mg-root.super-stage .mg-panelist { position:relative; padding:0; overflow:hidden; border:0; background:transparent; box-shadow:none; }
+.mg-root.super-stage .mg-panelist .mg-celeb-photo { position:absolute; top:0; left:9%; width:82% !important; height:62% !important; max-width:none; margin:0; border-radius:4px; object-fit:cover; }
+.mg-root.super-stage .mg-panelist-name { position:absolute; left:4%; right:4%; bottom:4%; padding:2px; margin:0; color:#22180e; background:#eee0ba; text-align:center; font-size:clamp(9px,1vw,18px); }
+.mg-root.super-stage .mg-panelist-answer.blank,.mg-root.super-stage .mg-panelist-answer.blank::after { display:none; }
+.mg-root.super-stage .mg-symbol-row { position:absolute; bottom:0; width:100%; padding:0; margin:0; border:0; }
+.mg-root.super-stage .mg-symbol { font-size:clamp(12px,1.6vw,28px); }
+.mg-root.super-stage .mg-panelist.super-selected .mg-celeb-photo { box-shadow:0 0 0 4px #fff3b3,0 0 18px 8px #ffe45b; filter:brightness(1.25); }
+.mg-root.super-stage .mg-panelist.super-selected { background:#e7b95d; }
+.mg-super-board-blank { position:absolute; left:7.2%; top:32.2%; width:17%; height:20%; overflow:hidden; background:#e9dfcb; border:3px solid #ad6744; display:grid; place-items:center; z-index:3; }
+.mg-super-board-blank span { color:#292733; text-align:center; font:900 clamp(13px,1.8vw,28px)/1.15 'DM Serif Display',serif; padding:5px; }
+.mg-super-board-cover { position:absolute; inset:0; background:#b56a49; border:5px solid #e9b784; transition:transform 1s ease-in-out; }
+.mg-super-board-blank.revealed .mg-super-board-cover { transform:translateY(-105%); }

@@ -2029,6 +2029,7 @@ app.post('/api/room', async (req, res) => {
       superMatchPrompt: null,
       superMatchTopAnswers: null,
       superMatchCelebIndices: [],
+      superMatchPreviewIndices: [],
       superMatchCelebAnswers: [],
       superMatchRevealIndex: -1,
       superMatchContestantAnswer: null,
@@ -2196,6 +2197,7 @@ const startNewRound = async (room, roundNum) => {
     room.superMatchPrompt = prompt;
     room.usedSuperPrompts = [...(room.usedSuperPrompts || []), prompt];
     room.superMatchCelebIndices = [];
+    room.superMatchPreviewIndices = [];
     room.superMatchCelebAnswers = [];
     room.superMatchRevealIndex = -1;
     room.superMatchContestantAnswer = null;
@@ -2447,6 +2449,22 @@ const completeSuperMatchGeneration = async (room) => {
   bump(room);
 };
 
+app.post('/api/room/:code/supermatch-preview', (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room || room.phase !== 'superMatch_pickCelebs' || !room.superMatchPromptReady) {
+    return res.status(400).json({ error: 'Not choosing celebrities' });
+  }
+  const indices = req.body?.celebIndices;
+  if (!Array.isArray(indices) || indices.length > 3 ||
+      indices.some(i => !Number.isInteger(i) || i < 0 || i >= room.panel.length) ||
+      new Set(indices).size !== indices.length) {
+    return res.status(400).json({ error: 'Invalid selection' });
+  }
+  room.superMatchPreviewIndices = indices;
+  bump(room);
+  res.json({ room });
+});
+
 // ─── API: SUPER MATCH — PICK CELEBS ───────────────────────────
 app.post('/api/room/:code/supermatch-pick', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
@@ -2458,6 +2476,7 @@ app.post('/api/room/:code/supermatch-pick', async (req, res) => {
   if (safeIndices.length !== 3) return res.status(400).json({ error: 'Invalid celebrity selection' });
 
   room.superMatchCelebIndices = safeIndices;
+  room.superMatchPreviewIndices = safeIndices;
   room.superMatchHumanAnswers = {};
   const humanSelected = safeIndices.filter(i => room.panel[i]?.isHuman);
   if (humanSelected.length) {
