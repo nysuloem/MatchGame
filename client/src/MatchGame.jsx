@@ -824,14 +824,12 @@ function DisplayView({ room, roomCode, setRoom }) {
       if (finalMatchSpeechRef.current.answer !== key) {
         finalMatchSpeechRef.current.answer = key;
         (async () => {
-          await delay(300);
           const chosen = room.panel?.[room.finalMatchCelebIndex]?.name || 'our celebrity';
-          await speakTTS({ text: `${room.players[room.activeSlot]} has chosen ${chosen}.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-          await delay(250);
-          await speakTTS({ text: `Here's the question.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-          await delay(200);
-          await readGamePrompt(room.finalMatchPrompt, roomCode);
-          await speakTTS({ text: `${room.players[room.activeSlot]?.split(' ')[0]}, how do you fill in that blank?`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+          // One narration request avoids three network waits before the phone can listen.
+          await speakTTS({
+            text: `${room.players[room.activeSlot]} has chosen ${chosen}. ${promptForSpeech(room.finalMatchPrompt)}. ${room.players[room.activeSlot]?.split(' ')[0]}, how do you fill in that blank?`,
+            isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE,
+          });
           try { await api.finalMatchPromptRead(roomCode); } catch {}
         })();
       }
