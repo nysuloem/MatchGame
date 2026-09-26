@@ -1961,3 +1961,25 @@ body { margin: 0; }
   border-radius: 50% 50% 0 0; left: 9%; bottom: 0; background: #c4c1b2;
 }
 .mg-contestant-intro-photo { width: 140px; height: 140px; object-fit: cover; border: 4px solid #ad9258; border-radius: 8px; display: block; margin: 0 auto 12px; }
+
+/* The contestants sit in the left podium's two seats; scores follow each portrait. */
+.mg-root.stage-play .mg-stage-gene { left: 53%; bottom: 0; height: min(47vh, 490px); }
+.mg-stage-contestant { top: 53%; width: 7.2%; height: 17.5%; border: 0; border-radius: 6px 6px 0 0; box-shadow: 0 3px 8px #321b1170; }
+.mg-stage-contestant.seat-1 { left: 18%; }
+.mg-stage-contestant.seat-2 { left: 26%; }
+.mg-stage-score { top: 71.6%; width: 4.2%; height: 6.3%; font-size: clamp(16px,2vw,31px); }
+.mg-stage-score.seat-1 { left: 19.5%; }
+.mg-stage-score.seat-2 { left: 27.5%; }
+.mg-stage-score.triangle { padding-top: 1.2%; }
+
+/* Opening marquee rises to expose the lit studio and Gene at his microphone. */
+.mg-opening-set { position:absolute; inset:0; opacity:0; background: url('/images/match-game-stage.webp') center center / 100% 100% no-repeat; transition: opacity 1.4s ease; }
+.mg-opening-set img { position:absolute; left:53%; bottom:0; height:min(47vh,490px); transform:translateX(-50%); filter:drop-shadow(5px 8px 8px #26170a88); }
+.mg-opening-marquee { position:absolute; z-index:2; width:min(48vw,650px); height:min(55vh,520px); display:grid; place-items:center; background:#090909; border-radius:18%; box-shadow:0 0 0 12px #b87936,0 0 0 18px #241609,0 18px 40px #2a130a99; overflow:hidden; }
+.mg-opening-marquee img { width:100%; height:100%; object-fit:contain; mix-blend-mode:screen; filter:contrast(1.35) saturate(.72); }
+.mg-opening-logo-lift .mg-opening-marquee { animation:mgMarqueeRise 1.8s ease-in forwards; }
+.mg-opening-logo-lift .mg-opening-set,.mg-opening-host .mg-opening-set { opacity:1; }
+.mg-opening-host { background:#d94a16; }
+.mg-opening-host .mg-opening-marquee { transform:translateY(-125vh); }
+.mg-opening-host .mg-opening-bulbs { opacity:0; }
+@keyframes mgMarqueeRise { to { transform:translateY(-125vh); } }

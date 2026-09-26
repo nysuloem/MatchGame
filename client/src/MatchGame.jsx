@@ -88,7 +88,9 @@ let thinkingMusicAudio = null;
 let introMusicAudio = null;
 let creditsMusicAudio = null;
 const THEME_TRACK = '/audio/match-game-73.mp3';
-const INTRO_TRACK = '/audio/match-game-intro-original.mp3';
+const OPENING_CALL = '/audio/opening-get-ready.mp3';
+const OPENING_BED = '/audio/opening-music-bed.mp3';
+const OPENING_ARCHIVAL = '/audio/opening-archival.mp3';
 const REGULAR_TRACK = '/audio/regular-music.mp3';
 const safePlayAudio = (audio) => audio.play().catch(() => {});
 const fadeAndStop = (audio, ms = 450) => {
@@ -122,32 +124,27 @@ const playRetroSting = () => {
     osc.stop(now + i * 0.12 + 0.18);
   });
 };
-const startIntroMusic = () => {
-  if (introMusicAudio) return introMusicAudio;
-  try {
-    introMusicAudio = new Audio(INTRO_TRACK);
-    introMusicAudio.loop = false;
-    introMusicAudio.volume = 0.24;
-    safePlayAudio(introMusicAudio);
-    return introMusicAudio;
-  } catch {
-    playRetroSting();
-    return null;
-  }
+const playIntroClip = (src, { volume = .42, loop = false, start = 0 } = {}) => {
+  if (introMusicAudio) { introMusicAudio.pause(); introMusicAudio = null; }
+  const audio = new Audio(src);
+  audio.volume = volume;
+  audio.loop = loop;
+  if (start) audio.currentTime = start;
+  introMusicAudio = audio;
+  safePlayAudio(audio);
+  return audio;
 };
-const setIntroTrackVolume = (volume) => {
-  if (introMusicAudio) introMusicAudio.volume = Math.max(0, Math.min(1, volume));
-};
-const waitForIntroTime = async (seconds) => {
-  if (!introMusicAudio) return;
-  const deadline = Date.now() + 12000;
-  while (introMusicAudio && introMusicAudio.currentTime < seconds && Date.now() < deadline) {
-    await delay(40);
-  }
+const waitForIntroEnd = async (audio, timeoutMs = 6000) => {
+  await new Promise(resolve => {
+    if (!audio) return resolve();
+    const done = () => { clearTimeout(timer); audio.removeEventListener('ended', done); resolve(); };
+    const timer = setTimeout(done, timeoutMs);
+    audio.addEventListener('ended', done, { once: true });
+  });
 };
 const stopIntroMusic = () => {
   if (!introMusicAudio) return;
-  fadeAndStop(introMusicAudio, 650);
+  fadeAndStop(introMusicAudio, 350);
   introMusicAudio = null;
 };
 const startCreditsMusic = () => {
@@ -852,17 +849,15 @@ function DisplayView({ room, roomCode, setRoom }) {
 
   const runIntro = async (r) => {
     setIntroComplete(false);
-    setIntroStage('waiting');
+    setIntroStage('logo');
     setIntroIndex(-1);
     await delay(300);
 
-    // The archival Match Game opening is authoritative. Johnny Olson, Gene's
-    // introduction, the applause and the studio banter all remain intact.
-    // We duck only the old celebrity-name section so our current stars can be named.
-    startIntroMusic();
-    await waitForIntroTime(2.8);
-
-    setIntroTrackVolume(0.008);
+    // The short opening call plays intact. A vocal-reduced bed from the supplied
+    // recording carries the new celebrity roll call without the old names.
+    const call = playIntroClip(OPENING_CALL, { volume: .55 });
+    await waitForIntroEnd(call, 5600);
+    playIntroClip(OPENING_BED, { volume: .46, loop: true, start: 4.5 });
     for (let i = 0; i < r.panel.length; i++) {
       setIntroStage('celeb');
       setIntroIndex(i);
@@ -870,16 +865,16 @@ function DisplayView({ room, roomCode, setRoom }) {
       await delay(220);
     }
 
-    // Return entirely to the archival recording: Big Money Match Game line,
-    // Gene introduction, applause and Gene/Johnny banter.
-    await waitForIntroTime(18.0);
-    setIntroStage('archival');
+    // Rejoin the original announcer at the show/host introduction. The logo
+    // lifts into the stage reveal as the recorded host entrance begins.
+    setIntroStage('logo');
     setIntroIndex(-1);
-    setIntroTrackVolume(0.42);
-
-    // The source recording starts welcoming the original contestants near the end.
-    // Cut away immediately before that and introduce the actual players ourselves.
-    await waitForIntroTime(54.2);
+    const archival = playIntroClip(OPENING_ARCHIVAL, { volume: .52, start: 18 });
+    await delay(4000);
+    setIntroStage('logo-lift');
+    await delay(1800);
+    setIntroStage('host');
+    await waitForIntroEnd(archival, 24500);
     stopIntroMusic();
 
     const contestantSlots = r.soloTest ? [1] : [1,2];
@@ -978,7 +973,7 @@ function DisplayView({ room, roomCode, setRoom }) {
           </div>;
         })}
         {room.completedQuestions > 0 && [1,2].map(slot => <div key={slot}
-          className={`mg-stage-score ${slot===room.triangleSlot?'triangle':'circle'}`}>{room.scores?.[slot] || 0}</div>)}
+          className={`mg-stage-score seat-${slot} ${slot===room.triangleSlot?'triangle':'circle'}`}>{room.scores?.[slot] || 0}</div>)}
       </div>}
       <div className="mg-display-header">
         <div className="mg-display-contestant left" style={activeStyle(1)}>
@@ -1094,11 +1089,11 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
     </div></div>;
   }
 
-  if (introStage === 'archival' || introStage === 'finale' || !p) {
-    return <div className="mg-classic-opening">
+  if (['logo', 'logo-lift', 'host', 'finale', 'waiting'].includes(introStage) || !p) {
+    return <div className={`mg-classic-opening mg-opening-${introStage}`}>
       <div className="mg-opening-bulbs" />
-      <div className="mg-opening-window closed"><div className="mg-opening-shutter" /></div>
-      <div className="mg-opening-logo">MATCH<br/>GAME</div>
+      <div className="mg-opening-set"><img src="/images/gene-rayburn.webp" alt="" /></div>
+      <div className="mg-opening-marquee"><img src="/images/match-game-logo.png" alt="Match Game" /></div>
     </div>;
   }
 
@@ -1830,19 +1825,18 @@ function PhoneView({ room, roomCode, playerSlot }) {
           <div className="mg-phone-body">
             {isMyTurn && !room.contestantAnswer ? (
               <>
-                <p className="mg-status" style={{fontSize:18,marginBottom:8}}>{room.microphoneReady ? 'Your microphone is on. Say your answer.' : 'The panel is answering. Listen for Gene to call on you.'}</p>
-                {room.microphoneReady && <><p className="mg-help">{micStatus}</p><button className="mg-btn secondary" onClick={startAnswerMicrophone}>Tap to speak</button></>}
+                <p className="mg-status" style={{fontSize:18,marginBottom:8}}>{room.microphoneReady ? 'Your microphone is on. Say your answer.' : 'Think of your answer and wait for Gene to call on you.'}</p>
+                {room.microphoneReady && <><p className="mg-help">{micStatus}</p><button className="mg-btn secondary" onClick={startAnswerMicrophone}>Tap to speak</button>
                 <input className="mg-input" value={myAnswer}
                   onChange={e => setMyAnswer(e.target.value)}
                   placeholder="Your answer (1-2 words)" maxLength={50}
                   onKeyDown={e => { if (e.key==='Enter') handleSubmitAnswer(); }}
-                  disabled={!room.microphoneReady} style={{fontSize:24,padding:'18px 16px'}} />
+                  style={{fontSize:24,padding:'18px 16px'}} />
                 <div className="mg-row">
                   <button className="mg-btn" onClick={handleSubmitAnswer} disabled={!room.microphoneReady || !myAnswer.trim() || submitted}>
                     Submit Answer
                   </button>
-                </div>
-                <p className="mg-help" style={{marginTop:12}}>Listen to the TV for the question!</p>
+                </div></>}
               </>
             ) : isHumanCeleb && room.panel?.[celebIndex] && !(room.round === 2 && (room.round1Matches?.[room.activeSlot] || []).includes(celebIndex)) && !room.humanPanelAnswers?.[celebIndex] ? (
               <>
