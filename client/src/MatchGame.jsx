@@ -930,7 +930,9 @@ function DisplayView({ room, roomCode, setRoom }) {
   }
 
   return (
-    <div className="mg-root display-mode">
+    <div className={`mg-root display-mode ${['pick_prompt','answering','revealing','generating_answers'].includes(phase) ? 'stage-play' : ''}`}>
+      {['pick_prompt','answering','revealing','generating_answers'].includes(phase) &&
+        <img className="mg-stage-gene" src="/images/gene-rayburn.webp" alt="" aria-hidden="true" />}
       <div className="mg-display-header">
         <div className="mg-display-contestant left" style={activeStyle(1)}>
           <div className="mg-contestant-score-block">

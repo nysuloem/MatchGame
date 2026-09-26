@@ -1738,3 +1738,95 @@ body { margin: 0; }
 
 /* Intro signs are simple blue rectangles, never oversized cards. */
 .mg-intro-sign{border-radius:0!important;max-width:320px!important;padding:8px 18px!important;font-size:clamp(18px,2.5vw,32px)!important}
+
+/* Photographic studio stage. The game controls sit over the actual desks and floor. */
+.mg-root.display-mode {
+  background: #d94a16 url('/images/match-game-stage.webp') center center / 100% 100% no-repeat !important;
+  position: relative;
+}
+.mg-root.display-mode::before,
+.mg-root.display-mode::after { display: none !important; }
+.mg-root.display-mode .mg-display-header,
+.mg-root.display-mode .mg-display-main { position: relative; z-index: 4; }
+.mg-stage-gene {
+  position: absolute;
+  left: 43%; bottom: 0;
+  height: min(68vh, 750px); width: auto;
+  transform: translateX(-50%);
+  z-index: 2;
+  pointer-events: none;
+  filter: drop-shadow(6px 9px 7px rgba(37,19,8,.4));
+}
+.mg-root.stage-play .mg-display-header {
+  height: 100%; width: 100%;
+  position: absolute; inset: 0;
+  background: transparent; border: 0;
+  pointer-events: none;
+}
+.mg-root.stage-play .mg-display-title-center {
+  position: absolute; top: 2%; left: 32%; width: 36%;
+  flex: none; padding: 8px;
+  background: rgba(245,226,183,.94);
+  border: 3px solid #aa8248;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px #43240870;
+}
+.mg-root.stage-play .mg-display-contestant {
+  position: absolute; left: 3%; width: 27%; height: auto;
+  padding: 0; flex: none; border: 0;
+}
+.mg-root.stage-play .mg-display-contestant.left { top: 59%; }
+.mg-root.stage-play .mg-display-contestant.right { top: 76%; }
+.mg-root.stage-play .mg-contestant-score-block {
+  min-width: 0; width: 100%; padding: 3px 6px;
+  background: rgba(242,228,192,.96) !important;
+}
+.mg-root.stage-play .mg-display-main {
+  width: 100%; height: 100%; padding: 0;
+}
+.mg-root.stage-play .mg-display-round-active,
+.mg-root.stage-play .mg-display-center-msg:has(.mg-panel-grid) {
+  position: relative; width: 100%; height: 100%; padding: 0;
+}
+.mg-root.stage-play .mg-prompt {
+  position: absolute; left: 31%; top: 12%; width: 23%;
+  max-width: none; z-index: 5;
+  margin: 0; padding: 10px 16px;
+  font-size: clamp(17px, 2vw, 29px);
+  max-height: 24vh; overflow: auto;
+}
+.mg-root.stage-play .mg-contestant-answer-display {
+  position: absolute; left: 31%; top: 39%; width: 30%;
+  z-index: 5; margin: 0; padding: 6px;
+}
+.mg-root.stage-play .mg-panel-grid.display {
+  position: absolute; top: 19%; right: 3%;
+  width: 43%; height: 61%; max-width: none;
+  flex: none; padding: 5px; margin: 0;
+  gap: 3px; border: 4px solid #e6d8b6 !important;
+  border-radius: 12px 12px 4px 4px;
+  background: rgba(237,226,192,.96) !important;
+  outline: 2px solid #9f844f;
+}
+.mg-root.stage-play .mg-panel-grid.display::before { display: none; }
+.mg-root.stage-play .mg-panelist,
+.mg-root.stage-play .mg-panelist.revealed,
+.mg-root.stage-play .mg-panelist.matched,
+.mg-root.stage-play .mg-panelist.prelit {
+  border: 1px solid #a58d5a;
+  background: linear-gradient(to bottom,#f3ecd7 0 58%,#483b90 58% 79%,#eadfc2 79%) !important;
+}
+.mg-root.stage-play .mg-panelist-answer.blue-card {
+  left: 8%; right: 8%; top: 33%; width: 84%;
+  min-height: 0; max-height: 40%; overflow: hidden;
+  font-size: clamp(12px,1.55vw,24px);
+  overflow-wrap: anywhere;
+}
+.mg-root.stage-play .mg-panelist-name { left: 5%; right: 5%; font-size: clamp(9px,1.1vw,17px); }
+.mg-root.stage-play .mg-loading { position: absolute; left: 30%; top: 13%; width: 35%; z-index: 5; }
+@media (max-width: 900px) {
+  .mg-stage-gene { left: 38%; height: 53vh; }
+  .mg-root.stage-play .mg-display-contestant { width: 29%; }
+  .mg-root.stage-play .mg-panel-grid.display { right: 1%; width: 48%; top: 25%; height: 55%; }
+  .mg-root.stage-play .mg-prompt { left: 25%; width: 26%; top: 11%; }
+}
