@@ -1895,6 +1895,7 @@ app.post('/api/room', async (req, res) => {
       soloTest: isSoloTest,
       participants: {},
       participantMessages: {},
+      participantBios: {},
       participantPreferences: {},
       participantPhotos: {},
       nextParticipantId: 1,
@@ -1962,7 +1963,7 @@ app.post('/api/room', async (req, res) => {
 app.post('/api/room/:code/join', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'No room with that code' });
-  const { playerName, signMessage, rolePreference, selfieData } = req.body;
+  const { playerName, signMessage, aboutMe, rolePreference, selfieData } = req.body;
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
   if (room.rolesAssigned) return res.status(409).json({ error: 'Game already started' });
   if (Object.keys(room.participants || {}).length >= room.maxPlayers) return res.status(409).json({ error: 'Room is full' });
@@ -1970,6 +1971,8 @@ app.post('/api/room/:code/join', async (req, res) => {
   room.participants[slot] = playerName.trim().slice(0, 20);
   room.participantMessages = room.participantMessages || {};
   room.participantMessages[slot] = String(signMessage || '').trim().slice(0, 32) || randomSign();
+  room.participantBios = room.participantBios || {};
+  room.participantBios[slot] = String(aboutMe || '').trim().replace(/\s+/g, ' ').slice(0, 180);
   room.participantPreferences = room.participantPreferences || {};
   room.participantPreferences[slot] = ['contestant','celebrity','surprise'].includes(rolePreference) ? rolePreference : 'surprise';
   room.participantPhotos = room.participantPhotos || {};
