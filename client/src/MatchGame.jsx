@@ -69,7 +69,7 @@ let thinkingMusicAudio = null;
 let introMusicAudio = null;
 let creditsMusicAudio = null;
 const THEME_TRACK = '/audio/match-game-73.mp3';
-const INTRO_TRACK = '/audio/match-game-intro-clean.mp3';
+const INTRO_TRACK = '/audio/match-game-intro-original.mp3';
 const REGULAR_TRACK = '/audio/regular-music.mp3';
 const safePlayAudio = (audio) => audio.play().catch(() => {});
 const fadeAndStop = (audio, ms = 450) => {
@@ -104,13 +104,27 @@ const playRetroSting = () => {
   });
 };
 const startIntroMusic = () => {
-  if (introMusicAudio) return;
+  if (introMusicAudio) return introMusicAudio;
   try {
     introMusicAudio = new Audio(INTRO_TRACK);
-    introMusicAudio.loop = true;
-    introMusicAudio.volume = 0.18;
+    introMusicAudio.loop = false;
+    introMusicAudio.volume = 0.24;
     safePlayAudio(introMusicAudio);
-  } catch { playRetroSting(); }
+    return introMusicAudio;
+  } catch {
+    playRetroSting();
+    return null;
+  }
+};
+const setIntroTrackVolume = (volume) => {
+  if (introMusicAudio) introMusicAudio.volume = Math.max(0, Math.min(1, volume));
+};
+const waitForIntroTime = async (seconds) => {
+  if (!introMusicAudio) return;
+  const deadline = Date.now() + 12000;
+  while (introMusicAudio && introMusicAudio.currentTime < seconds && Date.now() < deadline) {
+    await delay(40);
+  }
 };
 const stopIntroMusic = () => {
   if (!introMusicAudio) return;
@@ -800,26 +814,52 @@ function DisplayView({ room, roomCode, setRoom }) {
     setIntroComplete(false);
     setIntroStage('waiting');
     setIntroIndex(-1);
-    await delay(500);
+    await delay(350);
+
+    // Use the original 1970s opening as the spine of the sequence.
+    // We preserve Johnny Olson wherever the wording is still correct, and duck
+    // the archival audio only where it says the old celebrities / "75".
     startIntroMusic();
-    await delay(500);
-    await speakTTS({ text: "Get ready to match the stars!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-    await delay(450);
-    // Classic opening: the announcer introduces exactly one star at a time.
+
+    // Original announcer: "Get ready to match the stars!"
+    await waitForIntroTime(2.8);
+
+    // Old celebrity names live in this section. Silence that speech and put our
+    // current six names in the same place. The archival track keeps running so
+    // we return to the authentic timing afterward.
+    setIntroTrackVolume(0.015);
     for (let i = 0; i < r.panel.length; i++) {
       setIntroStage('celeb');
       setIntroIndex(i);
-      await delay(120);
       await speakTTS({ text: r.panel[i].name, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
       playAudience(i % 2 === 0 ? 'applause' : 'cheer');
-      await delay(950);
+      await delay(260);
     }
+
+    // Hold the mute until the original six-name block has cleared.
+    await waitForIntroTime(18.0);
+
+    // Original announcer: "As we play the star-studded Big Money Match Game..."
+    setIntroTrackVolume(0.24);
+    await waitForIntroTime(24.0);
+
+    // The archival line now says "75", and the following host intro says it
+    // again. Duck that section and supply the timeless host line dynamically.
+    setIntroTrackVolume(0.015);
     setIntroStage('host');
     setIntroIndex(r.panel.length);
-    await delay(250);
+    await delay(650);
     await speakTTS({ text: 'And now, here is the star of Match Game, Gene Rayburn!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     playAudience('applause');
-    await delay(1500);
+
+    // Bring back the original applause/theme tail once the archival "75" host
+    // line has passed, then stop before Gene's studio banter and contestant intro.
+    await waitForIntroTime(31.5);
+    setIntroTrackVolume(0.24);
+    await waitForIntroTime(37.0);
+    stopIntroMusic();
+
+    // Contestants are introduced cleanly, with no background music.
     const contestantSlots = r.soloTest ? [1] : [1,2];
     for (const slot of contestantSlots) {
       const name = r.players?.[slot];
@@ -834,10 +874,9 @@ function DisplayView({ room, roomCode, setRoom }) {
       else await speakTTS({ text: `I'm ${name}, and I'm ready to play Match Game!`, isAnnouncer: false, fallbackProfile: { rate:1.0, pitch:1.0 } });
       await delay(500);
     }
+
     setIntroStage('finale');
-    await speakTTS({ text: 'As we play the star-studded Big Money... Match Game!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-    await delay(1800);
-    stopIntroMusic();
+    await delay(500);
     setIntroComplete(true);
     try { await api.introDone(roomCode); } catch {}
   };
