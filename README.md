@@ -24,7 +24,7 @@ match-game/
 
 The server:
 - Serves the built React frontend statically
-- Provides REST endpoints for room state, polled every 1.5s by clients
+- Provides REST actions plus a real-time Server-Sent Events room stream (with slow polling only as a fallback)
 - Calls the OpenAI API to generate the celebrity panel, prompts, and in-character answers (LLM) and to synthesize each panelist's voice (TTS)
 - Stores rooms in memory (rooms expire after 4 hours of inactivity)
 
@@ -123,3 +123,12 @@ MATCHGAME_DB_PATH=/data/match-game-prompts.sqlite
 ```
 
 Without a Railway Volume, the database will still work during a deployment, but it may be wiped when Railway redeploys or restarts the service.
+
+
+## 2026 studio refurbishment
+
+The presentation now models the classic 1970s Match Game studio: two rows of three panelists, cream/orange/teal set geometry, blue handwritten reveal cards, contestant symbol displays, a survey-board-style Super Match, and a Gene Rayburn host beat in the opening.
+
+AI celebrity panels use six seats across generations: one original Match Game regular, one additional 1970s star, two stars associated with the 1980s/1990s, and two modern stars. Human celebrity participants can still replace AI seats.
+
+Regular-question generation is now trained around the core Match Game principle that the blank is the punchline. Classic broadcast-style double entendre is explicitly understood by both the writer and the match judge. During a regular reveal, the host can click any revealed celebrity card on the display to override a borderline AI MATCH / NO MATCH decision before the score is committed.

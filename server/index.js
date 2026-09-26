@@ -28,7 +28,18 @@ console.log(`Match Game server starting. LLM: ${LLM_MODEL}, TTS: ${TTS_MODEL}`);
 
 // ─── ROOM STORE ───────────────────────────────────────────────
 const rooms = new Map();
+const roomStreams = new Map();
 const ROOM_TTL_MS = 1000 * 60 * 60 * 4;
+
+const broadcastRoom = (room) => {
+  const listeners = roomStreams.get(room?.code);
+  if (!listeners?.size) return;
+  const payload = `data: ${JSON.stringify({ room })}\n\n`;
+  for (const res of [...listeners]) {
+    try { res.write(payload); } catch { listeners.delete(res); }
+  }
+  if (!listeners.size) roomStreams.delete(room.code);
+};
 
 setInterval(() => {
   const now = Date.now();
@@ -45,7 +56,7 @@ const makeRoomCode = () => {
   return code;
 };
 
-const bump = (room) => { room.version++; room.lastActivity = Date.now(); return room; };
+const bump = (room) => { room.version++; room.lastActivity = Date.now(); broadcastRoom(room); return room; };
 const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
 const clampInt = (n, min, max) => Math.max(min, Math.min(max, Number.parseInt(n, 10) || min));
 
@@ -473,26 +484,51 @@ const randomSign = () => WACKY_SIGNS[Math.floor(Math.random() * WACKY_SIGNS.leng
 
 
 const REGULAR_ROUND_WRITER_STYLE = `
-You are the head writer for a 1970s Match Game-inspired comedy game.
+You are the head writer for a classic 1970s Match Game-style comedy show.
 
-The prompt must feel like classic Match Game:
-- mild innuendo, double entendre, teasing absurdity, or broad sitcom-style embarrassment is encouraged;
-- recurring fictional archetypes are welcome: Dumb Dora, Dumb Donald, Big Betty, Weird Willie, Drunk Danny, Clumsy Carla, the local streaker, the cheap doctor, the nervous newlywed, the confused plumber;
-- the setup should be funny before the blank appears;
-- keep it short enough to read aloud smoothly.
+THE CENTRAL RULE: THE BLANK IS THE PUNCHLINE.
+A good clue is a tiny joke setup, quotation, misunderstanding, complaint, or absurd situation that becomes funny when the missing word is supplied. It should not merely ask for a random noun.
 
-But this is still a matching game:
-- there must be a clear answer neighborhood;
-- do not make the blank so wide open that every panelist gives a totally unrelated answer;
-- Round 2 should be easier and more definitive than Round 1;
-- use exactly one blank marker, written as __________;
-- usually put the blank at the end;
-- never write the word "blank" in the screen prompt.
+STYLE REFERENCE — learn the comic grammar, do not copy these verbatim:
+- Kate said, "My husband thinks he's a dog and I'm beginning to believe him. Last night he brought home a __________"
+- Gertrude asked the waiter, "Is this chicken fresh?" and the waiter said, "Lady, if it were any fresher, it would __________"
+- The beachcomber said, "A bottle washed up on shore today and it must have come from a doctor. There was a __________ in the bottle"
+- Ellen said, "I'm thrilled to be named Queen of the Supermarket, but do I have to wear a crown made out of __________"
+- The whale said, "I never want to see Jonah again. I don't know what he was doing inside me, but it made me __________"
+- Dumb Dora was so dumb, she went all the way to Paris to get a French __________
+- At the wedding, as soon as the bride's family saw what the groom looked like, they threw __________ out the window
+- The absent-minded photographer put his camera in the coffee, then tried to take a picture with a __________
 
-DIVERSITY RULE:
-Do not keep returning the same domestic-party situations. Avoid overusing karaoke, spilled drinks, weddings, alarm clocks, doctors, plumbers, restaurants, and dates.
-Use a broad rotating mix of settings. Example breadth includes: airport, zoo, museum, gym, dentist office, courtroom, funeral home, garden centre, aquarium, cruise ship, camping trip, high school reunion, magic show, bowling alley, subway, elevator, department store, hair salon, yoga studio, mechanic shop, library, beach, office, church bingo, science lab, TV studio, haunted house, hotel lobby, DMV, vet clinic, carnival, hockey arena, cooking show, retirement home, laundromat, amusement park, farmers market, movie theatre, spa, neighbour's yard, pet groomer, bank, casino, charity auction, family barbecue.
-These are examples, not limits. Extrapolate to other equally varied everyday, workplace, vacation, family, public, hobby, and oddball settings.
+WHAT MAKES THESE WORK:
+- there is a comic premise BEFORE the blank;
+- the answer completes a joke, image, double meaning, or twist;
+- several people can independently land on the same obvious gag;
+- the clue gives panelists room for one or two alternate funny answers without becoming random.
+
+INNUENDO:
+Classic Match Game lived on double entendre. Mild-to-moderate adult innuendo is welcome for an audience of adults and older teens.
+Do not automatically sanitize a setup that naturally invites a cheeky answer.
+Good innuendo has a clean surface reading plus a knowing second reading. Body-part ambiguity, honeymoon/wedding jokes, underwear, doctors, bedrooms, "big ___", "French ___", hoses, buns, melons, zippers, etc. are acceptable when broadcast-comedy playful rather than graphically sexual.
+Never become explicit, anatomical in a graphic way, hateful, or cruel.
+
+CALL-AND-RESPONSE:
+Recurring "Dumb Dora is SO DUMB..." / "Weird Willie is SO WEIRD..." / similar setups are welcome occasionally. The screen prompt contains the setup and blank; the host handles the audience callback.
+
+MATCHABILITY:
+- There must be a clear answer neighborhood.
+- Round 1: one strong best punchline plus 2 plausible alternatives.
+- Round 2: even more convergent; the best answer should plausibly attract 3-4 panelists.
+- Do not write trivia or factual-definition questions.
+- Do not make the blank so wide open that almost any object/body part/food/place works.
+- Reject flat prompts like "The dog ate the __________", "Grandpa carved the turkey with a __________", or "The doctor found a __________". Those are fill-ins, not Match Game jokes.
+- Keep it short enough to read aloud smoothly.
+- Use exactly one blank marker, written as __________.
+- Usually put the blank at the end.
+- Never write the word "blank" in the screen prompt.
+
+VARIETY:
+Use a broad rotating mix of people, workplaces, marriage, dating, doctors, restaurants, pets, travel, supermarkets, weddings, funerals, schools, neighbourhoods, old-fashioned occupations, show business, sports, family, odd inventions, fairy tales, history-as-comedy, and everyday embarrassment.
+Do not let modern technology dominate. Phones, Zoom, influencers, passwords, apps and social media should be occasional, not the default.
 `;
 
 const ROUND_THEME_MENU = [
@@ -698,6 +734,15 @@ const PROMPT_CATEGORIES = [
 ];
 
 const FALLBACK_ROUND_PROMPTS = [
+  { prompt: "Kate said, \"My husband thinks he's a dog and I'm beginning to believe him. Last night he brought home a __________\"", answers: ['bone','stick','cat'], category: 'marriage' },
+  { prompt: "Gertrude asked the waiter, \"Is this chicken fresh?\" The waiter said, \"Lady, if it were any fresher, it would __________\"", answers: ['cluck','walk','lay eggs'], category: 'restaurant' },
+  { prompt: "The beachcomber said, \"This bottle must have come from a doctor. There was a __________ in the bottle\"", answers: ['prescription','pill','thermometer'], category: 'doctor' },
+  { prompt: "Ellen said, \"I'm thrilled to be Queen of the Supermarket, but do I have to wear a crown made out of __________\"", answers: ['coupons','lettuce','cans'], category: 'supermarket' },
+  { prompt: "The whale said, \"I never want to see Jonah again. Whatever he was doing inside me made me __________\"", answers: ['sick','burp','itch'], category: 'bible comedy' },
+  { prompt: "Dumb Dora is so dumb, she went all the way to Paris to get a French __________", answers: ['kiss','fry','poodle'], category: 'dumb dora' },
+  { prompt: "At the wedding, as soon as the bride's family saw what the groom looked like, they threw __________ out the window", answers: ['him','the bride','rice'], category: 'wedding' },
+  { prompt: "The absent-minded photographer put his camera in the coffee, then tried to take a picture with a __________", answers: ['cup','spoon','donut'], category: 'photographer' },
+
   // These are deliberately "definitive" Match Game prompts: one likely answer,
   // a couple of plausible alternates, and room for one funny/innuendo panel answer.
   { prompt: "Grandma Ethel's dating profile said she was looking for a man with a big ___.", answers: ['wallet','heart','truck'], category: 'dating' },
@@ -875,106 +920,87 @@ const FALLBACK_SUPER_PROMPTS = [
 const GENERATED_SUPER_BOARDS = new Map();
 const superPromptKey = (prompt = '') => normalizePromptKey(normalizePromptBlank(prompt));
 
+const SEVENTIES_GUEST_BACKUPS = [
+  { name:'Carol Burnett', tag:'1970s comedy legend', avatarType:'woman_older', voice:'coral', voiceInstructions:'Warm, mischievous, theatrical comic timing.', answerStyle:'punny', matchBias:0.90 },
+  { name:'Steve Martin', tag:'1970s comedy star', avatarType:'man_older', voice:'verse', voiceInstructions:'Dry, quick, playful and crisp.', answerStyle:'deadpan', matchBias:0.86 },
+  { name:'Lily Tomlin', tag:'1970s comedy icon', avatarType:'woman_older', voice:'sage', voiceInstructions:'Wry, clever, lightly eccentric delivery.', answerStyle:'punny', matchBias:0.88 },
+  { name:'Dolly Parton', tag:'1970s music and TV star', avatarType:'person_glamorous', voice:'shimmer', voiceInstructions:'Warm, bright, charming and playful.', answerStyle:'obvious', matchBias:0.91 },
+  { name:'Cher', tag:'1970s music and television star', avatarType:'person_glamorous', voice:'nova', voiceInstructions:'Cool, dry, confident and amused.', answerStyle:'deadpan', matchBias:0.86 }
+];
+const EIGHTIES_NINETIES_BACKUPS = [
+  { name:'Whoopi Goldberg', tag:'1980s/90s comedy and film star', avatarType:'woman_middle', voice:'sage', voiceInstructions:'Dry, warm, quick and knowingly funny.', answerStyle:'deadpan', matchBias:0.88 },
+  { name:'Martin Short', tag:'1980s/90s comedy star', avatarType:'man_middle', voice:'verse', voiceInstructions:'Big comic energy, theatrical and fast.', answerStyle:'punny', matchBias:0.86 },
+  { name:'Fran Drescher', tag:'1990s sitcom star', avatarType:'woman_middle', voice:'coral', voiceInstructions:'Bright, brassy, playful sitcom timing.', answerStyle:'punny', matchBias:0.87 },
+  { name:'Drew Carey', tag:'1990s comedy and game-show star', avatarType:'man_middle', voice:'ash', voiceInstructions:'Relaxed, jovial and quick with the joke.', answerStyle:'obvious', matchBias:0.90 },
+  { name:'Queen Latifah', tag:'1980s/90s music and screen star', avatarType:'woman_middle', voice:'nova', voiceInstructions:'Confident, warm and playfully direct.', answerStyle:'literal', matchBias:0.89 },
+  { name:'Conan O’Brien', tag:'1990s late-night comedian', avatarType:'man_middle', voice:'fable', voiceInstructions:'Fast, absurd, self-aware comic delivery.', answerStyle:'wildcard', matchBias:0.80 }
+];
+const MODERN_ERA_BACKUPS = [
+  { name:'Keke Palmer', tag:'modern actor and host', avatarType:'woman_young', voice:'coral', voiceInstructions:'Bright, energetic, funny and conversational.', answerStyle:'punny', matchBias:0.89 },
+  { name:'Quinta Brunson', tag:'modern sitcom creator and star', avatarType:'woman_young', voice:'nova', voiceInstructions:'Warm, sharp, dry and playful.', answerStyle:'deadpan', matchBias:0.90 },
+  { name:'Bowen Yang', tag:'modern comedian', avatarType:'man_young', voice:'verse', voiceInstructions:'Quick, arch, theatrical and mischievous.', answerStyle:'punny', matchBias:0.84 },
+  { name:'Pedro Pascal', tag:'modern television and film star', avatarType:'man_middle', voice:'ash', voiceInstructions:'Warm, relaxed, amused and clear.', answerStyle:'obvious', matchBias:0.90 },
+  { name:'Ayo Edebiri', tag:'modern actor and comedian', avatarType:'woman_young', voice:'sage', voiceInstructions:'Dry, quick, natural and lightly chaotic.', answerStyle:'deadpan', matchBias:0.85 },
+  { name:'Simu Liu', tag:'modern film and television star', avatarType:'person_athletic', voice:'verse', voiceInstructions:'Upbeat, confident, playful and crisp.', answerStyle:'obvious', matchBias:0.89 }
+];
+const makeClassicPanelist = (classic) => ({
+  name:classic, era:'match-game-1970s', tag:'original Match Game regular',
+  avatarType:['Betty White','Brett Somers','Fannie Flagg','Patti Deutsch','Marcia Wallace','Joyce Bulifant','Elaine Joyce'].includes(classic)?'woman_older':'man_older',
+  voice:classic==='Richard Dawson'?'fable':'coral',
+  voiceInstructions:'Warm, witty classic game-show timing; crisp, playful, and a little mischievous.',
+  answerStyle:'obvious', matchBias:0.92, signMessage:randomSign()
+});
 const generatePanel = async () => {
-  const classic = CLASSIC_MATCH_GAMERS[Math.floor(Math.random() * CLASSIC_MATCH_GAMERS.length)];
-  const varietySeed = Math.random().toString(36).slice(2, 8);
-  const text = await callLLM(
-    `Generate a panel of 6 well-known public figures for a Match Game style game show.
-
-CRITICAL PANEL RULES:
-- Include EXACTLY ONE classic Match Game regular: ${classic}.
-- The other 5 panelists should feel like people who plausibly belong on a current IMDb STARmeter / current pop-culture Top 100 list: recognizable film/TV actors, comedians, hosts, musicians, athletes, and internet/pop-culture figures. Do not actually claim you checked IMDb live.
-- Make the five modern choices highly varied: choose from different categories such as comedians, sitcom actors, musicians, athletes, internet personalities, movie stars, TV hosts, chefs, reality TV figures, and tech/pop-culture figures.
-- Avoid politicians.
-- Avoid always choosing the same obvious people. Variety seed: ${varietySeed}.
-- Do not duplicate fields, vibes, or sketch/avatar types if you can avoid it.
-
-For each panelist provide:
-- "name": the short public/stage name they are normally known by on screen. No middle names, initials, titles, suffixes, or overly formal full legal names unless that is how the public usually knows them
-- "signMessage": a short silly 1970s-style card/sign message they might hold up during the intro, like "Hi Mom!", "Send snacks!", or "Lakers Forever!". 2-5 words, not a description.
-- "tag": keep this short internally, but it will not be shown on screen
-- "avatarType": one of these sketch styles that best fits them visually: "man_young", "man_middle", "man_older", "woman_young", "woman_middle", "woman_older", "person_athletic", "person_glamorous"
-- "voice": best matching OpenAI TTS voice from: ${TTS_VOICES.join(', ')}. Prefer louder/brighter voices when possible: verse, ash, coral, nova, shimmer, fable. Use onyx only for very deep voices.
-- "voiceInstructions": 1-2 sentences on HOW to deliver lines as this person — energetic, crisp, theatrical, easy to hear. Do not imitate a real voice exactly.
-- "answerStyle": one of "obvious", "literal", "punny", "wildcard", "deadpan", "chaotic". Use mostly obvious/literal/punny, with only one true wildcard.
-- "matchBias": a number from 0.70 to 0.98 describing how hard this panelist usually tries to match contestants.
-
-Assign DIFFERENT voices to different panelists.
-
-Return JSON: {"panel": [{"name":"...","tag":"...","avatarType":"...","voice":"...","voiceInstructions":"...","answerStyle":"...","matchBias":0.85,"signMessage":"Hi Mom!"}, ...]}`,
-    1500, true
-  );
-  const parsed = extractJSON(text);
-  let panel = Array.isArray(parsed) ? parsed : (parsed.panel || []);
-
-  const validAvatarTypes = ['man_young','man_middle','man_older','woman_young','woman_middle','woman_older','person_athletic','person_glamorous'];
-  const usedAvatarTypes = new Set();
-  const uniqueAvatarType = (requested) => {
-    const preferred = validAvatarTypes.includes(requested) ? requested : 'man_middle';
-    if (!usedAvatarTypes.has(preferred)) { usedAvatarTypes.add(preferred); return preferred; }
-    const fallback = validAvatarTypes.find(t => !usedAvatarTypes.has(t)) || preferred;
-    usedAvatarTypes.add(fallback);
-    return fallback;
-  };
-  const cleanPanelName = (name = '') => String(name)
-    .replace(/\b(Mr|Mrs|Ms|Miss|Dr|Sir|Dame)\.?\s+/gi, '')
-    .replace(/\s+(Jr|Sr|II|III|IV)\.?$/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  // Hard guarantee: exactly one classic Match Game regular is present.
-  const hasClassic = panel.some(p => cleanPanelName(p.name).toLowerCase() === classic.toLowerCase());
-  if (!hasClassic) {
-    panel = [{
-      name: classic,
-      tag: 'classic Match Game star',
-      avatarType: classic === 'Betty White' || classic === 'Brett Somers' || classic === 'Fannie Flagg' || classic === 'Patti Deutsch' || classic === 'Marcia Wallace' || classic === 'Joyce Bulifant' || classic === 'Elaine Joyce' ? 'woman_older' : 'man_older',
-      voice: classic === 'Richard Dawson' ? 'fable' : 'coral',
-      voiceInstructions: 'Deliver with warm, witty, classic game-show timing. Clear, upbeat, and a little mischievous.',
-      answerStyle: 'obvious',
-      matchBias: 0.92,
-      signMessage: randomSign()
-    }, ...panel.filter(p => !CLASSIC_MATCH_GAMERS.map(x => x.toLowerCase()).includes(cleanPanelName(p.name).toLowerCase()))];
-  } else {
-    // If more than one classic appears, keep the requested one if possible and remove extras.
-    const seenClassic = new Set();
-    panel = panel.filter(p => {
-      const nm = cleanPanelName(p.name).toLowerCase();
-      if (!CLASSIC_MATCH_GAMERS.map(x => x.toLowerCase()).includes(nm)) return true;
-      if (nm === classic.toLowerCase() && !seenClassic.has(nm)) { seenClassic.add(nm); return true; }
-      return false;
-    });
-  }
-
-  const usedNames = new Set();
-  panel = panel.filter(p => {
-    const nm = cleanPanelName(p.name).toLowerCase();
-    if (!nm || usedNames.has(nm)) return false;
-    usedNames.add(nm);
-    return true;
-  });
-  for (const backup of MODERN_PANEL_BACKUPS.sort(() => Math.random() - 0.5)) {
-    if (panel.length >= 6) break;
-    if (!usedNames.has(backup.name.toLowerCase())) {
-      panel.push(backup);
-      usedNames.add(backup.name.toLowerCase());
+  const classic=CLASSIC_MATCH_GAMERS[Math.floor(Math.random()*CLASSIC_MATCH_GAMERS.length)];
+  const varietySeed=Math.random().toString(36).slice(2,8);
+  let candidates=[];
+  try {
+    const text=await callLLM(
+      `Build FIVE guest celebrities to join ${classic} on a six-seat Match Game panel.
+MANDATORY MIX:
+- ONE additional celebrity strongly associated with the 1970s, not an original Match Game regular.
+- TWO celebrities strongly associated with the 1980s and/or 1990s.
+- TWO modern celebrities whose fame is primarily 2010s/2020s.
+Choose recognizable entertainers, comedians, actors, musicians, hosts, or athletes who would be fun on a comedy panel. Avoid politicians. Do not choose another classic Match Game regular. Vary fields and personalities. Variety seed: ${varietySeed}.
+For every guest return era exactly "1970s", "1980s-1990s", or "modern", plus name, signMessage, tag, avatarType, voice, voiceInstructions, answerStyle, matchBias.
+Allowed voices: ${TTS_VOICES.join(', ')}.
+Return JSON exactly: {"panel":[...]}`, 1500, true);
+    const parsed=extractJSON(text); candidates=Array.isArray(parsed)?parsed:(parsed.panel||[]);
+  } catch(e) { console.warn('generational panel generation failed:',e.message); }
+  const clean=(name='')=>String(name).replace(/\b(Mr|Mrs|Ms|Miss|Dr|Sir|Dame)\.?\s+/gi,'').replace(/\s+(Jr|Sr|II|III|IV)\.?$/gi,'').replace(/\s+/g,' ').trim();
+  const classics=new Set(CLASSIC_MATCH_GAMERS.map(x=>x.toLowerCase()));
+  const used=new Set([classic.toLowerCase()]);
+  const take=(era,count,backups)=>{
+    const out=[];
+    for(const p of shuffle(candidates)){
+      const name=clean(p?.name);
+      if(out.length>=count) break;
+      if(String(p?.era||'').toLowerCase()!==era.toLowerCase()||!name||used.has(name.toLowerCase())||classics.has(name.toLowerCase())) continue;
+      used.add(name.toLowerCase()); out.push({...p,name,era});
     }
-  }
-
-  const normalizedPanel = panel.slice(0, 6).map(p => ({
-    name: cleanPanelName(p.name),
-    tag: p.tag,
-    signMessage: String(p.signMessage || p.tag || randomSign()).slice(0, 32),
-    avatarType: uniqueAvatarType(p.avatarType),
-    voice: TTS_VOICES.includes(p.voice) ? p.voice : 'verse',
-    voiceInstructions: p.voiceInstructions || 'Speak clearly, energetically, and loud enough to carry in a game-show room.',
-    answerStyle: ['obvious','literal','punny','wildcard','deadpan','chaotic'].includes(p.answerStyle) ? p.answerStyle : 'obvious',
-    matchBias: Number.isFinite(Number(p.matchBias)) ? Math.max(0.65, Math.min(0.98, Number(p.matchBias))) : 0.85,
-    answer: null,
+    for(const p of shuffle(backups)){
+      if(out.length>=count) break;
+      if(used.has(p.name.toLowerCase())) continue;
+      used.add(p.name.toLowerCase()); out.push({...p,era});
+    }
+    return out;
+  };
+  const panel=[makeClassicPanelist(classic),...take('1970s',1,SEVENTIES_GUEST_BACKUPS),...take('1980s-1990s',2,EIGHTIES_NINETIES_BACKUPS),...take('modern',2,MODERN_ERA_BACKUPS)];
+  const valid=['man_young','man_middle','man_older','woman_young','woman_middle','woman_older','person_athletic','person_glamorous'];
+  const normalized=panel.slice(0,6).map((p,i)=>({
+    name:clean(p.name), era:p.era||'modern', tag:p.tag||'guest star', signMessage:String(p.signMessage||randomSign()).slice(0,32),
+    avatarType:valid.includes(p.avatarType)?p.avatarType:(i%2?'woman_middle':'man_middle'),
+    voice:TTS_VOICES.includes(p.voice)?p.voice:TTS_VOICES[i%TTS_VOICES.length],
+    voiceInstructions:p.voiceInstructions||'Speak clearly, energetically, and playfully like a game-show panelist.',
+    answerStyle:['obvious','literal','punny','wildcard','deadpan','chaotic'].includes(p.answerStyle)?p.answerStyle:'obvious',
+    matchBias:Number.isFinite(Number(p.matchBias))?Math.max(.65,Math.min(.98,Number(p.matchBias))):.86, answer:null
   }));
-  return await enrichPanelWithWikipediaImages(normalizedPanel);
+  return await enrichPanelWithWikipediaImages(normalized);
 };
-
+const generateHostProfile = async () => {
+  const [host]=await enrichPanelWithWikipediaImages([{name:'Gene Rayburn',era:'host-1970s',tag:'host of Match Game',avatarType:'man_older',voice:'verse',voiceInstructions:'Bright, playful, quick classic game-show host delivery.',answerStyle:'obvious',matchBias:1,signMessage:''}]);
+  return host;
+};
 
 const EMERGENCY_ROUND_PROMPTS = [
   { prompt: "Airport Alan panicked at security when the scanner found a rubber __________", answers: ["chicken","duck","snake"] },
@@ -1025,7 +1051,7 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], us
       const text = await callLLM(
         `${REGULAR_ROUND_WRITER_STYLE}
 
-Generate TWO brand-new Match Game-style fill-in-the-blank prompts for a family game with adults and 17+ teens. Keep each prompt SHORT and punchy. ${roundSpecificGuidance}
+Generate TWO brand-new Match Game-style fill-in-the-blank comedy prompts for adults and older teens. Keep each prompt SHORT and punchy. The blank must function as the punchline, not merely an omitted noun. ${roundSpecificGuidance}
 
 IMPORTANT: These must not repeat or closely resemble any prior prompt listed below.
 Avoid prior prompts:\n${avoidList || '(none)'}
@@ -1040,6 +1066,7 @@ Do not use both prompts from the same setting. Avoid karaoke, spilled drinks, we
 ${allowDumbDora ? 'You may include AT MOST ONE call-and-response prompt in this pair. It can be Dumb Dora or another name/adjective setup, e.g. \"Dumb Dora is so dumb, she thought a Hoover was a __________.\" or \"Drunk Danny is so clumsy, when he tried to pour a drink he filled his __________.\" The screen prompt should NOT include the audience callback; the TV host will pause after the opening phrase like \"Dumb Dora is so dumb\" or \"Drunk Danny is so clumsy\" so the people playing can yell a response.' : 'Do NOT generate a Dumb Dora / so-anything call-and-response prompt in this pair; this game has already used that style.'}
 
 CRITICAL PROMPT QUALITY RULES:
+- PUNCHLINE FIRST: if the clue is not funny before the blank and does not become a joke when completed, reject it and write another.
 - DIVERSITY FIRST: choose a setting that feels different from the avoid list. Repeated karaoke/spilled drink/party/date prompts are failures.
 - Do NOT use generic "Favourite __________" prompts.
 - Do NOT use trivia, factual definitions, niche references, or questions with only one logical fact-answer.
@@ -1049,7 +1076,7 @@ CRITICAL PROMPT QUALITY RULES:
 - Round 2: a clearer, more definitive best answer so matching is likely.
 - Use exactly one blank marker, written as __________. Never use [BLANK]. Never write the word blank in the prompt.
 - Keep the setup to one sentence, usually 10-20 words. For regular Round 1/Round 2 prompts, the blank MUST be the final thing on the screen: no words and no punctuation after __________.
-- Light innuendo is encouraged; keep it TV-PG/PG-13, playful, not explicit.
+- Classic broadcast-style innuendo and double entendre are encouraged. Do not sanitize a naturally cheeky setup. Keep it playful and non-explicit.
 - No more than one call-and-response prompt per whole game, so only use that style when allowed.
 
 For each prompt return 3 likely answers in order. The #1 answer should be the answer the panel can cluster around. For Round 2, make the #1 answer especially strong and concrete.
@@ -1639,17 +1666,6 @@ const fuzzyMatch = (a, b) => {
     }
   }
 
-  // Also allow obvious compound-word containment in either direction:
-  // fire/campfire, house/treehouse, ball/snowball. Require 4+ letters so
-  // tiny fragments like "car" in "carpet" or "cat" in "catfish" do not match.
-  if (tokensA.length === 1 && tokensB.length === 1) {
-    const [wa] = tokensA, [wb] = tokensB;
-    const shorter = wa.length <= wb.length ? wa : wb;
-    const longer = wa.length <= wb.length ? wb : wa;
-    if (shorter.length >= 4 && longer.length >= shorter.length + 2 &&
-        (longer.endsWith(shorter) || longer.startsWith(shorter))) return true;
-  }
-
   // Allow obvious typos only when both answers are short single-word attempts.
   // Do NOT use broad substring/word-overlap matching; that caused bad matches such as
   // related-but-different answers being accepted.
@@ -1662,50 +1678,22 @@ const fuzzyMatch = (a, b) => {
 };
 
 const llmMatch = async (prompt, a, b) => {
-  // Fast local pass is intentionally narrow: exact matches, spelling variants,
-  // typo-level differences, and contestant answer contained as a full phrase
-  // inside a longer celebrity answer. Semantic judging belongs to the API below.
-  if (fuzzyMatch(a, b)) return true;
-
+  if (fuzzyMatch(a,b)) return true;
   try {
-    const text = await callLLM(
-      `You are the STRICT but fair match judge for a 1970s Match Game-style fill-in-the-blank game.
+    const text=await callLLM(
+      `You are the judge on classic Match Game. Be fair, but do NOT turn semantic similarity into a match.
+Prompt: "${prompt||''}"
+Contestant card: "${a||''}"
+Celebrity card: "${b||''}"
 
-Prompt: "${prompt || ''}"
-Contestant answer: "${a || ''}"
-Celebrity answer: "${b || ''}"
-
-Judge whether these should count as the SAME answer for this exact blank.
-
-COUNT AS A MATCH:
-- exact same meaning even with different common wording: swimsuit/bathing suit, sofa/couch, doctor/physician
-- spelling variants or typos: cheque/check, colour/color
-- singular/plural of the same word
-- abbreviation vs full phrase: TV/television, abs/abdominals
-- the contestant's concise answer appears as a complete word/phrase inside the celebrity answer: skills/unbelievable skills
-- obvious compound-word containment in either direction: fire/campfire, house/treehouse, ball/snowball
-- one answer is a very common synonym that would create essentially the same completed phrase
-
-DO NOT MATCH:
-- broad category vs specific member: animal/cat, drink/beer, vehicle/car, food/pizza
-- related or associated words that are not synonyms: salt/pepper, pepper/shaker, school/teacher
-- container/tool/object pairs: drink/glass, salt/shaker, coffee/mug
-- two different common completions of the same clue
-- answers that merely belong to the same topic area
-- jokes that are funny but not the same answer
-
-Important Match Game rule: general terms do not match specific terms.
-Useful test: put each answer into the blank. If the completed phrases mean essentially the same thing, return true. If they produce meaningfully different answers, return false.
-
-Return JSON only: {"match":true} or {"match":false}`,
-      90, true
-    );
-    const parsed = extractJSON(text);
-    return Boolean(parsed.match);
-  } catch (e) {
-    console.warn('llm match judge failed:', e.message);
-    return false;
-  }
+Question: DID THEY WRITE THE SAME ANSWER / SAME GAG?
+MATCH: exact answer after harmless articles/spelling/singular/plural/typos; ordinary equivalent wording everyone treats as the same card (swimsuit/bathing suit, couch/sofa, TV/television); or a longer phrase that only adds an adjective to the same head answer ("bone"/"big bone", "underwear"/"red underwear").
+DO NOT MATCH: two different jokes that are merely similar; two innuendo answers just because both are suggestive; category/member (animal/cat, clothing/pants); associated objects (coffee/mug, doctor/stethoscope); different body parts or garments; or a root hidden inside a different compound unless ordinary speech treats them as the same answer.
+INNUENDO: understand cheeky double meanings without being prudish, but judge the actual cards. "buns" is not "behind"; "hose" is not "sausage". "dog bone" and "bone" usually are the same answer in a dog clue.
+If reasonable judges could argue either way, default to NO MATCH; the human host can override.
+Return JSON only: {"match":true} or {"match":false}`,100,true);
+    return Boolean(extractJSON(text).match);
+  } catch(e){ console.warn('llm match judge failed:',e.message); return false; }
 };
 
 const scoreAnswerAsync = async (playerAnswer, panel, prompt = '') => {
@@ -1833,6 +1821,17 @@ const maybeScheduleAiAction = (room) => {
 // ─── API: HEALTH & CONFIG ──────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ ok: true, rooms: rooms.size }));
 app.get('/api/config', (req, res) => res.json({ ttsEnabled: true }));
+app.get('/api/room/:code/events', (req,res) => {
+  const code=String(req.params.code||'').toUpperCase(), room=rooms.get(code);
+  if(!room) return res.status(404).end();
+  res.set({'Content-Type':'text/event-stream','Cache-Control':'no-cache, no-transform','Connection':'keep-alive','X-Accel-Buffering':'no'});
+  res.flushHeaders?.();
+  if(!roomStreams.has(code)) roomStreams.set(code,new Set());
+  roomStreams.get(code).add(res);
+  res.write(`data: ${JSON.stringify({room})}\n\n`);
+  const heartbeat=setInterval(()=>{try{res.write(': ping\n\n');}catch{}},20000);
+  req.on('close',()=>{clearInterval(heartbeat);roomStreams.get(code)?.delete(res);if(!roomStreams.get(code)?.size)roomStreams.delete(code);});
+});
 
 // ─── API: ROOM MANAGEMENT ─────────────────────────────────────
 const makeAiPanelSeat = async () => (await generatePanel())[0] || MODERN_PANEL_BACKUPS[0];
@@ -1866,6 +1865,7 @@ const assignRolesAndStart = async (room) => {
     ...shuffle(remaining.filter(id => prefs[id] === 'contestant')),
   ].slice(0, 6);
   const basePanel = await generatePanel();
+  room.host = await generateHostProfile().catch(() => ({ name:'Gene Rayburn', tag:'host of Match Game', avatarType:'man_older' }));
   let panel = [...basePanel];
   for (let i = 0; i < humanCelebIds.length && i < 6; i++) {
     const pid = humanCelebIds[i];
@@ -1923,6 +1923,7 @@ const resetRoomForPlayAgain = (room) => {
   room.triangleSlot = null;
   room.cointossWinner = null;
   room.panel = [];
+  room.host = null;
   room.round1Matches = { 1: [], 2: [] };
   room.promptA = null; room.promptB = null; room.chosenPrompt = null; room.chosenPromptChoice = null;
   room.usedCharacters = [];
@@ -2031,6 +2032,7 @@ app.post('/api/room', async (req, res) => {
       triangleSlot: null,
       cointossWinner: null,
       panel: [],
+      host: null,
       round1Matches: { 1: [], 2: [] },
       promptA: null, promptB: null,
       chosenPrompt: null,
@@ -2284,6 +2286,19 @@ app.post('/api/room/:code/answer', async (req, res) => {
   bump(room);
   res.json({ room });
   maybeFinishAnswerPhase(room).catch(e => console.error('finish answer phase:', e));
+});
+
+// ─── API: HOST MATCH OVERRIDE ──────────────────────────────────
+app.post('/api/room/:code/match-override', (req,res) => {
+  const room=rooms.get(req.params.code.toUpperCase());
+  if(!room||room.phase!=='revealing') return res.status(400).json({error:'Match overrides are only available during the reveal.'});
+  const index=Number(req.body?.index);
+  if(!Number.isInteger(index)||index<0||index>=room.panel.length) return res.status(400).json({error:'Invalid panelist.'});
+  if(room.panel[index]?.inactiveThisTurn) return res.status(400).json({error:'That panelist is sitting out this question.'});
+  room.matches[index]=typeof req.body?.match==='boolean'?req.body.match:!room.matches[index];
+  room.pendingScoreDelta=room.matches.filter(Boolean).length;
+  room.pendingMatches=room.matches.map((m,i)=>m?i:-1).filter(i=>i>=0);
+  bump(room); res.json({room});
 });
 
 // ─── API: REVEAL DONE ─────────────────────────────────────────

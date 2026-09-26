@@ -6,7 +6,6 @@ import CelebAvatar from './CelebAvatar.jsx';
 // Three modes: 'home' | 'display' (TV/laptop) | 'phone' (contestant)
 // ─────────────────────────────────────────────────────────────
 
-const POLL_INTERVAL = 1500;
 const VOICE_PROFILES = [
   { rate:0.95, pitch:1.1 }, { rate:1.0, pitch:0.85 },
   { rate:1.1, pitch:1.3 },  { rate:0.9, pitch:0.7 },
@@ -33,6 +32,7 @@ const api = {
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
   submitAnswer: (code, slot, answer) => req(`/api/room/${code}/answer`, { method:'POST', body:{slot,answer} }),
   revealDone:   (code) => req(`/api/room/${code}/reveal-done`, { method:'POST' }),
+  overrideMatch:(code,index,match) => req(`/api/room/${code}/match-override`, { method:'POST', body:{index,match} }),
   introDone:     (code) => req(`/api/room/${code}/intro-done`, { method:'POST' }),
   superMatchPick: (code, celebIndices) => req(`/api/room/${code}/supermatch-pick`, { method:'POST', body:{celebIndices} }),
   superMatchRevealNext: (code) => req(`/api/room/${code}/supermatch-reveal-next`, { method:'POST' }),
@@ -377,21 +377,18 @@ export default function MatchGame() {
   const pollRef = useRef(null);
   const lastVersionRef = useRef(null);
 
-  // Poll room
+  // Real-time room stream; EventSource reconnects automatically.
+  // A slow poll remains only as a fallback for restrictive networks.
   useEffect(() => {
     if (!roomCode || mode === 'home') return;
-    const poll = async () => {
-      try {
-        const { room: r } = await api.getRoom(roomCode);
-        if (r.version !== lastVersionRef.current) {
-          lastVersionRef.current = r.version;
-          setRoom(r);
-        }
-      } catch {}
-    };
+    let closed=false;
+    const applyRoom=(r)=>{if(!r||closed)return;if(r.version!==lastVersionRef.current){lastVersionRef.current=r.version;setRoom(r);}};
+    const poll=async()=>{try{applyRoom((await api.getRoom(roomCode)).room);}catch{}};
     poll();
-    pollRef.current = setInterval(poll, POLL_INTERVAL);
-    return () => clearInterval(pollRef.current);
+    const source=new EventSource(`/api/room/${roomCode}/events`);
+    source.onmessage=(event)=>{try{applyRoom(JSON.parse(event.data)?.room);}catch{}};
+    const fallback=setInterval(poll,10000);
+    return()=>{closed=true;source.close();clearInterval(fallback);};
   }, [roomCode, mode]);
 
   useEffect(() => {
@@ -807,11 +804,15 @@ function DisplayView({ room, roomCode, setRoom }) {
       playAudience(i % 2 === 0 ? 'applause' : 'cheer');
       await delay(950);
     }
-    setIntroStage('finale');
+    setIntroStage('host');
     setIntroIndex(r.panel.length);
     await delay(250);
+    await speakTTS({ text: 'And now, here is the star of Match Game, Gene Rayburn!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+    playAudience('applause');
+    await delay(1500);
+    setIntroStage('finale');
     await speakTTS({ text: 'As we play the star-studded Big Money... Match Game!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-    await delay(2200);
+    await delay(1800);
     stopIntroMusic();
     setIntroComplete(true);
     try { await api.introDone(roomCode); } catch {}
@@ -985,6 +986,12 @@ function CelebVisual({ celeb, size = 100, className = '' }) {
 
 function DisplayIntroSpotlight({ room, introIndex, introStage }) {
   const p = room?.panel?.[introIndex];
+  if (introStage === 'host') {
+    return <div className="mg-intro-stage host-stage"><div className="mg-intro-card host">
+      <CelebVisual celeb={room?.host || {name:'Gene Rayburn',avatarType:'man_older'}} size={300} className="intro" />
+      <div className="mg-intro-name">GENE RAYBURN</div><div className="mg-intro-sign">Your host</div>
+    </div></div>;
+  }
   if (introStage === 'finale') {
     return (
       <div className="mg-intro-stage finale">
@@ -1002,6 +1009,7 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
         <div className="mg-intro-card" key={introIndex}>
           <CelebVisual celeb={p} size={260} className="intro" />
           <div className="mg-intro-name">{p.name}</div>
+          <div className="mg-intro-era">{p.era === 'match-game-1970s' ? 'MATCH GAME REGULAR' : p.era === '1970s' ? '1970s STAR' : p.era === '1980s-1990s' ? '80s / 90s STAR' : 'MODERN STAR'}</div>
           <div className="mg-intro-sign">{p.signMessage || 'Hi Mom!'}</div>
         </div>
       )}
@@ -1028,7 +1036,9 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) 
         // (opacity handled inline via introIndex prop)
         return (
           <div key={i}
-            className={`mg-panelist ${shown ? 'revealed' : ''} ${matched ? 'matched' : ''} ${prelit ? 'prelit' : ''}`}
+            className={`mg-panelist ${shown ? 'revealed' : ''} ${matched ? 'matched' : ''} ${prelit ? 'prelit' : ''} ${shown && roomCode ? 'host-judgable' : ''}`}
+            title={shown && roomCode ? 'Host: click this card to toggle MATCH / NO MATCH' : undefined}
+            onClick={shown && roomCode ? async () => { try { await api.overrideMatch(roomCode,i,!Boolean(room.matches?.[i])); } catch {} } : undefined}
             style={{
               opacity: introIndex === undefined ? 1 : (i <= introIndex ? 1 : 0),
               transform: introIndex === undefined ? 'scale(1)' : (i <= introIndex ? 'scale(1)' : 'scale(0.85)'),
