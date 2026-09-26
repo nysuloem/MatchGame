@@ -529,7 +529,7 @@ export default function MatchGame() {
                 <option value="contestant">I'd rather be a contestant</option>
                 <option value="celebrity">I'd rather be a celebrity</option>
               </select>
-              <label className="mg-label">Optional panel photo</label>
+              <label className="mg-label">Photo for your seat on the set</label>
               <div className="mg-photo-options">
                 <label className="mg-photo-pick">
                   Take selfie
@@ -542,7 +542,7 @@ export default function MatchGame() {
                     onChange={e=>handleSelfieFile(e.target.files?.[0])} />
                 </label>
               </div>
-              <p className="mg-help" style={{marginTop:6}}>Used only if you become a celebrity panelist.</p>
+              <p className="mg-help" style={{marginTop:6}}>Your photo appears on the TV whether you're a contestant or a panelist.</p>
               {selfieData && <div className="mg-selfie-preview">
                 <img src={selfieData} alt="Panel photo preview" />
                 <button className="mg-linkbtn" type="button" onClick={()=>setSelfieData('')}>Remove photo</button>
@@ -977,7 +977,7 @@ function DisplayView({ room, roomCode, setRoom }) {
         {[1,2].filter(slot => !room.soloTest || slot === 1).map(slot => {
           const photo = room.participantPhotos?.[room.playerIds?.[slot]];
           return <div key={slot} className={`mg-stage-contestant seat-${slot} ${room.activeSlot===slot?'active':''}`}>
-            {photo ? <img src={photo} alt={room.players?.[slot] || 'Contestant'} /> : <div className="mg-stage-contestant-placeholder">{room.players?.[slot]?.[0] || '?'}</div>}
+            {photo ? <img src={photo} alt={room.players?.[slot] || 'Contestant'} /> : <div className="mg-stage-contestant-placeholder" aria-label={room.players?.[slot] || 'Contestant'} />}
           </div>;
         })}
         {room.completedQuestions > 0 && [1,2].map(slot => <div key={slot}
@@ -1088,11 +1088,11 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
     const slot = Number(introIndex);
     const pid = room?.playerIds?.[slot];
     const name = room?.players?.[slot] || 'Contestant';
-    const bio = room?.participantBios?.[pid] || '';
+    const photo = room?.participantPhotos?.[pid];
     return <div className="mg-contestant-intro-stage"><div className="mg-contestant-intro-card">
+      {photo && <img className="mg-contestant-intro-photo" src={photo} alt="" />}
       <div className={`mg-contestant-score-shape ${slotClass(room,slot) || (slot===1?'tri':'cir')}`}><span className="mg-contestant-num">0</span></div>
       <div className="mg-intro-name">{name}</div>
-      <div className="mg-contestant-bio">{bio || 'Ready to play Match Game!'}</div>
     </div></div>;
   }
 
