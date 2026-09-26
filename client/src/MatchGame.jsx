@@ -826,7 +826,7 @@ function DisplayView({ room, roomCode, setRoom }) {
     for (let i = 0; i < r.panel.length; i++) {
       setIntroStage('celeb');
       setIntroIndex(i);
-      await speakTTS({ text: r.panel[i].name, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      await speakTTS({ text: r.panel[i].name.trim().split(/\s+/).at(-1), isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
       await delay(220);
     }
 
@@ -1061,8 +1061,6 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
         <CelebVisual celeb={p} size={390} className="opening-celeb" />
       </div>
     </div>
-    <div className="mg-opening-name">{p.name}</div>
-    {p.showIntroSign && p.signMessage && <div className="mg-opening-sign">{p.signMessage}</div>}
   </div>;
 }
 
@@ -1093,7 +1091,7 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) 
               transition: 'opacity 0.35s ease-out, transform 0.35s ease-out'
             }}>
             <CelebVisual celeb={p} size={100} />
-            <div className="mg-panelist-name">{p.name}</div>
+            <div className="mg-panelist-name">{p.name?.trim().split(/\s+/)[0]}</div>
             <div className={`mg-panelist-answer hand-${i % 6} ${shown ? 'blue-card' : 'blank'}`}>
               {shown ? (p.answer || (prelit ? 'Matched' : '')) : ''}
             </div>
@@ -1114,7 +1112,7 @@ function DisplayRoundActive({ room, promptVisible = true }) {
     <div className="mg-display-round-active">
       {showPrompt
         ? <div className="mg-prompt">{room.chosenPrompt}</div>
-        : <div className="mg-prompt muted">{room.chosenPrompt ? 'Listen carefully…' : 'Contestant is choosing their question…'}</div>}
+        : null}
       <DisplayPanelGrid room={room} revealIndex={-1} />
     </div>
   );
