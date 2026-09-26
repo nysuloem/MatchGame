@@ -1910,3 +1910,33 @@ body { margin: 0; }
 .mg-opening-name,.mg-opening-sign { display: none !important; }
 .mg-opening-window { width: min(56vh, 40vw); height: min(56vh, 40vw); border-radius: 12px; }
 .mg-opening-window .mg-celeb-photo { object-position: center 20% !important; }
+
+/* Keep the portrait, plate, and both lamps within the same physical seat. */
+.mg-root.stage-play .mg-panelist-name { width: 56%; min-width: 0; }
+.mg-root.stage-play .mg-symbol-row { width: auto; }
+.mg-root.stage-play .mg-symbol { flex: 0 0 18%; font-size: clamp(15px,2.3vw,38px); }
+.mg-root.stage-play .mg-panelist:nth-child(-n+3) .mg-celeb-photo,
+.mg-root.stage-play .mg-panelist:nth-child(-n+3) svg { top: 24%; }
+.mg-root.stage-play .mg-panelist:nth-child(n+4) .mg-celeb-photo,
+.mg-root.stage-play .mg-panelist:nth-child(n+4) svg { top: 25%; }
+.mg-root.stage-play .mg-display-contestant { display: none; }
+.mg-root.stage-play .mg-stage-gene { left: 42%; bottom: 1%; height: min(52vh,580px); }
+.mg-stage-contestants { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.mg-stage-contestant {
+  position: absolute; top: 43%; width: 6.8%; height: 20%;
+  overflow: hidden; border: 2px solid #edd49b; border-radius: 7px 7px 0 0;
+  background: #4c575b; box-shadow: 0 5px 10px #321b1180;
+}
+.mg-stage-contestant.seat-1 { left: 26%; }
+.mg-stage-contestant.seat-2 { left: 32.8%; }
+.mg-stage-contestant.active { border-color: #fff5ca; box-shadow: 0 0 14px #ffdb86; }
+.mg-stage-contestant img { width: 100%; height: 100%; object-fit: cover; object-position: center 22%; }
+.mg-stage-contestant-placeholder { display: grid; place-items: center; height: 100%; color: #f8dfaf; font: 900 4vw 'DM Serif Display',serif; }
+.mg-stage-score {
+  position: absolute; top: 68.3%; width: 2.9%; height: 5.4%;
+  display: grid; place-items: center; color: #fff9d4;
+  font: 900 clamp(15px,2.1vw,34px)/1 'Bowlby One',sans-serif;
+  text-shadow: 0 2px 5px #14201c;
+}
+.mg-stage-score.triangle { left: 32.6%; background: #318551; clip-path: polygon(50% 0,100% 100%,0 100%); padding-top: 1.3%; }
+.mg-stage-score.circle { left: 36.8%; border-radius: 50%; background: #b94134; }

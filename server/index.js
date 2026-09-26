@@ -28,6 +28,7 @@ console.log(`Match Game server starting. LLM: ${LLM_MODEL}, TTS: ${TTS_MODEL}`);
 
 // ─── ROOM STORE ───────────────────────────────────────────────
 const rooms = new Map();
+const pendingPanelByRoom = new WeakMap();
 const roomStreams = new Map();
 const ROOM_TTL_MS = 1000 * 60 * 60 * 4;
 
@@ -1691,12 +1692,13 @@ const maybeScheduleAiAction = (room) => {
       room.phase = 'answering';
       bump(room);
       maybeScheduleAiAction(room);
+      maybeFinishAnswerPhase(room).catch(e => console.error('prepare AI panel:', e));
     });
   }
 
-  if (room.phase === 'answering') {
+  if (room.phase === 'answering' && room.microphoneReady) {
     scheduleAi(room, 'answerPrompt', 2600, async () => {
-      if (room.phase !== 'answering' || !isAiContestantSlot(room, room.activeSlot) || room.contestantAnswer) return;
+      if (room.phase !== 'answering' || !room.microphoneReady || !isAiContestantSlot(room, room.activeSlot) || room.contestantAnswer) return;
       room.contestantAnswer = await aiContestantAnswer(room.chosenPrompt, room.chosenAnswerKey || []);
       bump(room);
       await maybeFinishAnswerPhase(room);
@@ -1884,6 +1886,9 @@ const resetRoomForPlayAgain = (room) => {
   room.contestantAnswer = null;
   room.panelAnswers = [];
   room.humanPanelAnswers = {};
+  room.panelAnswersReady = false;
+  room.microphoneReady = false;
+  room.completedQuestions = 0;
   room.matches = [];
   room.superMatchStarted = false;
   room.superMatchPrompt = null;
@@ -1914,7 +1919,7 @@ const resetRoomForPlayAgain = (room) => {
 };
 
 const maybeFinishAnswerPhase = async (room) => {
-  if (!room || room.phase !== 'answering' || !room.contestantAnswer) return;
+  if (!room || room.phase !== 'answering') return;
   const inactiveCelebIndices = room.round === 2 ? (room.round1Matches?.[room.activeSlot] || []) : [];
   const requiredHumanCelebs = (room.panel || [])
     .map((p, i) => ({ p, i }))
@@ -1922,16 +1927,33 @@ const maybeFinishAnswerPhase = async (room) => {
   const allHumanReady = requiredHumanCelebs.every(({i}) => room.humanPanelAnswers?.[i]);
   if (!allHumanReady) return;
 
-  room.phase = 'generating_answers';
-  bump(room);
+  if (!room.panelAnswersReady && !room.panelGenerationPending) {
+    room.panelGenerationPending = true;
+    room.phase = 'generating_answers'; bump(room);
+    try {
+      const answers = await generatePanelAnswers(room.panel, room.chosenPrompt, room.players[room.activeSlot], room.round, room.chosenAnswerKey || []);
+      const readyPanel = room.panel.map((p, i) => {
+        if (inactiveCelebIndices.includes(i)) return { ...p, answer: null, inactiveThisTurn: true };
+        if (p.isHuman) return { ...p, answer: room.humanPanelAnswers?.[i] || '???', inactiveThisTurn: false };
+        return { ...p, answer: answers[i] || '???', inactiveThisTurn: false };
+      });
+      pendingPanelByRoom.set(room, readyPanel);
+      room.panelAnswersReady = true;
+      room.panelGenerationPending = false;
+      room.phase = 'answering'; bump(room);
+      return;
+    } catch(e) {
+      room.panelGenerationPending = false;
+      console.error('generate answers:', e);
+      room.phase = 'error'; bump(room); return;
+    }
+  }
+  if (!room.contestantAnswer) return;
+  room.phase = 'generating_answers'; bump(room);
   try {
-    const answers = await generatePanelAnswers(room.panel, room.chosenPrompt, room.players[room.activeSlot], room.round, room.chosenAnswerKey || []);
-    room.panel = room.panel.map((p, i) => {
-      if (inactiveCelebIndices.includes(i)) return { ...p, answer: null, inactiveThisTurn: true };
-      if (p.isHuman) return { ...p, answer: room.humanPanelAnswers?.[i] || '???', inactiveThisTurn: false };
-      return { ...p, answer: answers[i] || '???', inactiveThisTurn: false };
-    });
+    room.panel = pendingPanelByRoom.get(room) || room.panel;
     room.panelAnswers = room.panel.map(p => p.answer);
+    pendingPanelByRoom.delete(room);
     const matches = (await scoreAnswerAsync(room.contestantAnswer, room.panel, room.chosenPrompt)).map((m, i) => inactiveCelebIndices.includes(i) ? false : m);
     room.matches = matches;
     const matchCount = matches.filter(Boolean).length;
@@ -1945,6 +1967,14 @@ const maybeFinishAnswerPhase = async (room) => {
     bump(room);
   }
 };
+
+app.post('/api/room/:code/microphone-ready', (req,res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room || room.phase !== 'answering' || !room.panelAnswersReady) return res.status(400).json({error:'Panel is not ready'});
+  room.microphoneReady = true; bump(room);
+  maybeScheduleAiAction(room);
+  res.json({room});
+});
 
 app.post('/api/room', async (req, res) => {
   const { playerName, playerCount, soloTest } = req.body;
@@ -2120,6 +2150,8 @@ const startNewRound = async (room, roundNum) => {
     room.panelAnswers = [];
     room.matches = [];
     room.humanPanelAnswers = {};
+    room.panelAnswersReady = false;
+    room.microphoneReady = false;
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
@@ -2211,6 +2243,7 @@ app.post('/api/room/:code/pick-prompt', async (req, res) => {
   room.phase = 'answering';
   bump(room);
   res.json({ room });
+  maybeFinishAnswerPhase(room).catch(e => console.error('prepare panel:', e));
 });
 
 // ─── API: SUBMIT ANSWER ───────────────────────────────────────
@@ -2225,6 +2258,7 @@ app.post('/api/room/:code/answer', async (req, res) => {
 
   if (role.role === 'contestant') {
     if (role.contestantSlot !== room.activeSlot) return res.status(403).json({ error: 'Not your turn' });
+    if (!room.microphoneReady) return res.status(400).json({ error: 'Wait for the host to ask for your answer' });
     room.contestantAnswer = cleanAnswer;
   } else if (role.role === 'celeb') {
     const inactiveCelebIndices = room.round === 2 ? (room.round1Matches?.[room.activeSlot] || []) : [];
@@ -2269,6 +2303,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
   if (room.pendingScoreDelta) {
     room.scores[currentActive] = (room.scores[currentActive] || 0) + room.pendingScoreDelta;
   }
+  room.completedQuestions = (room.completedQuestions || 0) + 1;
   if (room.round === 1 && Array.isArray(room.pendingMatches)) {
     room.round1Matches[currentActive] = [...room.pendingMatches];
   }
@@ -2320,11 +2355,14 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     room.chosenAnswerKey = remainingChoice === 'A' ? (room.promptAnswerKeys?.A || []) : (room.promptAnswerKeys?.B || []);
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
     room.humanPanelAnswers = {};
+    room.panelAnswersReady = false;
+    room.microphoneReady = false;
     room.contestantAnswer = null;
     room.matches = [];
     room.phase = 'answering';
     bump(room);
     maybeScheduleAiAction(room);
+    maybeFinishAnswerPhase(room).catch(e => console.error('prepare panel:', e));
     return res.json({ room });
   }
 

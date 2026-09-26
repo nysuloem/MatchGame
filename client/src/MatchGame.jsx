@@ -31,6 +31,7 @@ const api = {
   getRoom:      (code) => req(`/api/room/${code}`),
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
   submitAnswer: (code, slot, answer) => req(`/api/room/${code}/answer`, { method:'POST', body:{slot,answer} }),
+  microphoneReady: (code) => req(`/api/room/${code}/microphone-ready`, { method:'POST' }),
   revealDone:   (code) => req(`/api/room/${code}/reveal-done`, { method:'POST' }),
   overrideMatch:(code,index,match) => req(`/api/room/${code}/match-override`, { method:'POST', body:{index,match} }),
   introDone:     (code) => req(`/api/room/${code}/intro-done`, { method:'POST' }),
@@ -63,7 +64,24 @@ const getAudioCtx = () => {
     return sharedAudioCtx;
   } catch { return null; }
 };
-const playAudience = () => {};
+const playAudience = (reaction='cheer') => {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  const happy = ['cheer','applause','win'].includes(reaction);
+  // A short crowd bed with many slightly different voices; no spoken narration.
+  for (let i=0; i<18; i++) {
+    const osc=ctx.createOscillator(), gain=ctx.createGain();
+    const start=now+Math.random()*.24, duration=.65+Math.random()*.5;
+    osc.type=happy?'sawtooth':'triangle';
+    osc.frequency.setValueAtTime((happy?320:150)+Math.random()*(happy?260:90),start);
+    osc.frequency.exponentialRampToValueAtTime((happy?480:110)+Math.random()*(happy?250:70),start+duration);
+    gain.gain.setValueAtTime(.0001,start);
+    gain.gain.linearRampToValueAtTime(.012,start+.1);
+    gain.gain.exponentialRampToValueAtTime(.0001,start+duration);
+    osc.connect(gain).connect(ctx.destination); osc.start(start); osc.stop(start+duration+.02);
+  }
+};
 let thinkingMusicTimer = null;
 let thinkingMusicAudio = null;
 let introMusicAudio = null;
@@ -636,6 +654,8 @@ function DisplayView({ room, roomCode, setRoom }) {
   const revealRunRef = useRef(null);
   const pickPromptSpeechRef = useRef({ key: '', promise: Promise.resolve() });
   const finalMatchSpeechRef = useRef({ pick: '', answer: '' });
+  const contestantCueRef = useRef('');
+  const promptReadingRef = useRef({key:'',promise:Promise.resolve()});
 
   const unlockAudio = () => {
     try {
@@ -663,6 +683,8 @@ function DisplayView({ room, roomCode, setRoom }) {
       inheritedTurnAnnouncedRef.current = null;
       revealRunRef.current = null;
       pickPromptSpeechRef.current = { key: '', promise: Promise.resolve() };
+      promptReadingRef.current = { key: '', promise: Promise.resolve() };
+      contestantCueRef.current = '';
       finalMatchSpeechRef.current = { pick: '', answer: '' };
       setIntroIndex(-1);
       setIntroStage('waiting');
@@ -702,7 +724,8 @@ function DisplayView({ room, roomCode, setRoom }) {
       const turnKey = `${room.round}-${room.turnInRound}-${room.activeSlot}`;
       const answerKey = `${turnKey}-${room.chosenPrompt}`;
       if (promptReadyFor !== room.chosenPrompt) setPromptReadyFor(null);
-      (async () => {
+      if (promptReadingRef.current.key !== answerKey) {
+      const promise = (async () => {
         const pendingPickSpeech = pickPromptSpeechRef.current;
         if (prevPhase === 'pick_prompt' && pendingPickSpeech?.key === turnKey) {
           await pendingPickSpeech.promise.catch(() => {});
@@ -722,6 +745,20 @@ function DisplayView({ room, roomCode, setRoom }) {
           startThinkingMusic();
         }
       })();
+      promptReadingRef.current = {key:answerKey,promise};
+      }
+    }
+    if (phase === 'answering' && room.panelAnswersReady && !room.microphoneReady) {
+      const cueKey = `${room.round}-${room.turnInRound}-${room.activeSlot}-${room.chosenPrompt}`;
+      if (contestantCueRef.current !== cueKey) {
+        contestantCueRef.current = cueKey;
+        (async () => {
+          await promptReadingRef.current.promise.catch(() => {});
+          await delay(350);
+          await speakTTS({ text: `${room.players[room.activeSlot]?.split(' ')[0]}, how do you fill in that blank?`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+          try { await api.microphoneReady(roomCode); } catch {}
+        })();
+      }
     }
     if (phase === 'revealing') {
       const revealKey = `${room.round}-${room.turnInRound}-${room.activeSlot}-${room.contestantAnswer || ''}-${room.version}`;
@@ -826,7 +863,7 @@ function DisplayView({ room, roomCode, setRoom }) {
     for (let i = 0; i < r.panel.length; i++) {
       setIntroStage('celeb');
       setIntroIndex(i);
-      await speakTTS({ text: r.panel[i].name.trim().split(/\s+/).at(-1), isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      await speakTTS({ text: r.panel[i].name, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
       await delay(220);
     }
 
@@ -864,6 +901,9 @@ function DisplayView({ room, roomCode, setRoom }) {
   };
 
   const runReveal = async (r) => {
+    stopThinkingMusic();
+    playAudience(r.matches?.some(Boolean) ? 'cheer' : 'boo');
+    await delay(1150);
     await Promise.all((r.panel || []).map((p, i) => p.answer ? prefetchTTS({
       text: speechClean(p.answer), code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length],
     }).catch(() => null) : Promise.resolve(null)));
@@ -933,6 +973,16 @@ function DisplayView({ room, roomCode, setRoom }) {
     <div className={`mg-root display-mode ${['pick_prompt','answering','revealing','generating_answers'].includes(phase) ? 'stage-play' : ''}`}>
       {['pick_prompt','answering','revealing','generating_answers'].includes(phase) &&
         <img className="mg-stage-gene" src="/images/gene-rayburn.webp" alt="" aria-hidden="true" />}
+      {['pick_prompt','answering','revealing','generating_answers'].includes(phase) && <div className="mg-stage-contestants">
+        {[1,2].filter(slot => !room.soloTest || slot === 1).map(slot => {
+          const photo = room.participantPhotos?.[room.playerIds?.[slot]];
+          return <div key={slot} className={`mg-stage-contestant seat-${slot} ${room.activeSlot===slot?'active':''}`}>
+            {photo ? <img src={photo} alt={room.players?.[slot] || 'Contestant'} /> : <div className="mg-stage-contestant-placeholder">{room.players?.[slot]?.[0] || '?'}</div>}
+          </div>;
+        })}
+        {room.completedQuestions > 0 && [1,2].map(slot => <div key={slot}
+          className={`mg-stage-score ${slot===room.triangleSlot?'triangle':'circle'}`}>{room.scores?.[slot] || 0}</div>)}
+      </div>}
       <div className="mg-display-header">
         <div className="mg-display-contestant left" style={activeStyle(1)}>
           <div className="mg-contestant-score-block">
@@ -1580,6 +1630,8 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
 // ─────────────────────────────────────────────────────────────
 function PhoneView({ room, roomCode, playerSlot }) {
   const [myAnswer, setMyAnswer] = useState('');
+  const [micStatus, setMicStatus] = useState('');
+  const recognitionRef = useRef(null);
   const [selectedCelebs, setSelectedCelebs] = useState([]); // for super match
   const [submitted, setSubmitted] = useState(false);
   const prevPhaseRef = useRef(null);
@@ -1592,9 +1644,42 @@ function PhoneView({ room, roomCode, playerSlot }) {
       prevPhaseRef.current = key;
       setSubmitted(false);
       setMyAnswer('');
+      setMicStatus('');
       setSelectedCelebs([]);
     }
   }, [room?.phase, room?.round, room?.turnInRound, room?.activeSlot, room?.chosenPrompt, room?.superMatchPrompt, room?.finalMatchPrompt]);
+
+  const startAnswerMicrophone = () => {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) { setMicStatus('Voice recognition is unavailable here. Type your answer below.'); return; }
+    if (recognitionRef.current) return;
+    const recognition = new Recognition();
+    recognition.lang = 'en-US'; recognition.continuous = false; recognition.interimResults = true;
+    recognitionRef.current = recognition;
+    recognition.onstart = () => setMicStatus('Listening…');
+    recognition.onresult = (event) => {
+      const heard = Array.from(event.results).map(r => r[0].transcript).join(' ').trim();
+      setMyAnswer(heard);
+      if (event.results[event.results.length-1].isFinal && heard) {
+        setMicStatus(`Heard: ${heard}`);
+        setSubmitted(true);
+        api.submitAnswer(roomCode, playerSlot, heard).catch(() => {
+          setSubmitted(false); setMicStatus('Please check your answer and tap Lock It In.');
+        });
+      }
+    };
+    recognition.onerror = () => { recognitionRef.current=null; setMicStatus('Microphone unavailable. Tap to retry or type your answer.'); };
+    recognition.onend = () => { recognitionRef.current=null; setMicStatus(s => s === 'Listening…' ? 'Tap to speak again, or type your answer.' : s); };
+    try { recognition.start(); } catch { recognitionRef.current=null; setMicStatus('Tap to speak again, or type your answer.'); }
+  };
+
+  useEffect(() => {
+    const role = room?.roles?.[playerSlot];
+    if (room?.phase === 'answering' && room.microphoneReady && role?.role === 'contestant' && role.contestantSlot === room.activeSlot && !room.contestantAnswer) {
+      startAnswerMicrophone();
+    }
+    return () => { if (recognitionRef.current) { recognitionRef.current.abort(); recognitionRef.current=null; } };
+  }, [room?.microphoneReady, room?.phase, room?.round, room?.turnInRound, room?.activeSlot, playerSlot]);
 
   if (!room) return <PhoneWaiting />;
 
@@ -1756,16 +1841,15 @@ function PhoneView({ room, roomCode, playerSlot }) {
           <div className="mg-phone-body">
             {isMyTurn && !room.contestantAnswer ? (
               <>
-                <p className="mg-status" style={{fontSize:18,marginBottom:8}}>
-                  Fill in the blank:
-                </p>
+                <p className="mg-status" style={{fontSize:18,marginBottom:8}}>{room.microphoneReady ? 'Your microphone is on. Say your answer.' : 'The panel is answering. Listen for Gene to call on you.'}</p>
+                {room.microphoneReady && <><p className="mg-help">{micStatus}</p><button className="mg-btn secondary" onClick={startAnswerMicrophone}>Tap to speak</button></>}
                 <input className="mg-input" value={myAnswer}
                   onChange={e => setMyAnswer(e.target.value)}
                   placeholder="Your answer (1-2 words)" maxLength={50}
                   onKeyDown={e => { if (e.key==='Enter') handleSubmitAnswer(); }}
-                  autoFocus style={{fontSize:24,padding:'18px 16px'}} />
+                  disabled={!room.microphoneReady} style={{fontSize:24,padding:'18px 16px'}} />
                 <div className="mg-row">
-                  <button className="mg-btn" onClick={handleSubmitAnswer} disabled={!myAnswer.trim()}>
+                  <button className="mg-btn" onClick={handleSubmitAnswer} disabled={!room.microphoneReady || !myAnswer.trim() || submitted}>
                     Lock It In
                   </button>
                 </div>
