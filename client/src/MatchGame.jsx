@@ -490,10 +490,6 @@ export default function MatchGame() {
               <textarea className="mg-input mg-about-me" value={aboutMe}
                 onChange={e=>setAboutMe(e.target.value)}
                 placeholder="A short line the host can read when you're introduced…" maxLength={180} rows={3} />
-              <label className="mg-label">Tell us about yourself</label>
-              <textarea className="mg-input mg-about-me" value={aboutMe}
-                onChange={e=>setAboutMe(e.target.value)}
-                placeholder="A short line the host can read when you're introduced…" maxLength={180} rows={3} />
               <label className="mg-label">What would you prefer?</label>
               <select className="mg-input" value={rolePreference} onChange={e=>setRolePreference(e.target.value)}>
                 <option value="surprise">Surprise me</option>
@@ -561,6 +557,10 @@ export default function MatchGame() {
               <input className="mg-input" value={signMessage}
                 onChange={e=>setSignMessage(e.target.value)}
                 placeholder="e.g. Hi Mom!" maxLength={32} />
+              <label className="mg-label">Tell us about yourself</label>
+              <textarea className="mg-input mg-about-me" value={aboutMe}
+                onChange={e=>setAboutMe(e.target.value)}
+                placeholder="A short line the host can read when you're introduced…" maxLength={180} rows={3} />
               <label className="mg-label">What would you prefer?</label>
               <select className="mg-input" value={rolePreference} onChange={e=>setRolePreference(e.target.value)}>
                 <option value="surprise">Surprise me</option>
