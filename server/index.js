@@ -330,6 +330,37 @@ const enrichPanelWithWikipediaImages = async (panel = []) => {
   return enriched;
 };
 
+const requireRealCelebrityImages = async (panel = []) => {
+  const poolsFor = (era) => {
+    if (era === 'match-game-1970s') return shuffle(CLASSIC_MATCH_GAMERS.map(name => makeClassicPanelist(name)));
+    if (era === '1970s') return shuffle(SEVENTIES_GUEST_BACKUPS.map(p => ({ ...p, era:'1970s' })));
+    if (era === '1980s-1990s') return shuffle(EIGHTIES_NINETIES_BACKUPS.map(p => ({ ...p, era:'1980s-1990s' })));
+    return shuffle(MODERN_ERA_BACKUPS.map(p => ({ ...p, era:'modern' })));
+  };
+  const used = new Set((panel || []).filter(Boolean).map(p => String(p.name || '').toLowerCase()));
+  const result = [];
+  for (const original of panel || []) {
+    if (!original || original.isHuman || original.imageUrl) {
+      result.push(original);
+      continue;
+    }
+    let replacement = null;
+    for (const candidate of poolsFor(original.era)) {
+      const key = String(candidate.name || '').toLowerCase();
+      if (!key || used.has(key)) continue;
+      const img = await fetchWikipediaHeadshot(candidate.name);
+      if (!img?.imageUrl) continue;
+      used.delete(String(original.name || '').toLowerCase());
+      used.add(key);
+      replacement = { ...original, ...candidate, ...img, answer:null };
+      break;
+    }
+    if (!replacement) throw new Error(`Could not find a real celebrity photo for the ${original.era || 'guest'} seat`);
+    result.push(replacement);
+  }
+  return result;
+};
+
 
 // ─── LLM HELPERS ──────────────────────────────────────────────
 const callLLM = async (prompt, maxTokens = 1200, jsonMode = false) => {
@@ -877,7 +908,7 @@ Return JSON exactly: {"panel":[...]}`, 1500, true);
     answerStyle:['obvious','literal','punny','wildcard','deadpan','chaotic'].includes(p.answerStyle)?p.answerStyle:'obvious',
     matchBias:Number.isFinite(Number(p.matchBias))?Math.max(.65,Math.min(.98,Number(p.matchBias))):.86, answer:null
   }));
-  return await enrichPanelWithWikipediaImages(normalized);
+  return await requireRealCelebrityImages(await enrichPanelWithWikipediaImages(normalized));
 };
 const generateHostProfile = async () => {
   const [host]=await enrichPanelWithWikipediaImages([{name:'Gene Rayburn',era:'host-1970s',tag:'host of Match Game',avatarType:'man_older',voice:'verse',voiceInstructions:'Bright, playful, quick classic game-show host delivery.',answerStyle:'obvious',matchBias:1,signMessage:''}]);
