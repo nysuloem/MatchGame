@@ -1889,6 +1889,7 @@ const resetRoomForPlayAgain = (room) => {
   room.microphoneReady = false;
   room.promptRead = false;
   room.completedQuestions = 0;
+  room.completedQuestionsBySlot = {1:0,2:0};
   room.matches = [];
   room.superMatchStarted = false;
   room.superMatchPrompt = null;
@@ -2025,6 +2026,7 @@ app.post('/api/room', async (req, res) => {
       panelAnswers: [],
       humanPanelAnswers: {},
       matches: [],
+      completedQuestionsBySlot: {1:0,2:0},
       superMatchStarted: false,
       superMatchPrompt: null,
       superMatchTopAnswers: null,
@@ -2316,6 +2318,8 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     room.scores[currentActive] = (room.scores[currentActive] || 0) + room.pendingScoreDelta;
   }
   room.completedQuestions = (room.completedQuestions || 0) + 1;
+  room.completedQuestionsBySlot ||= {1:0,2:0};
+  room.completedQuestionsBySlot[currentActive] = (room.completedQuestionsBySlot[currentActive] || 0) + 1;
   if (room.round === 1 && Array.isArray(room.pendingMatches)) {
     room.round1Matches[currentActive] = [...room.pendingMatches];
   }

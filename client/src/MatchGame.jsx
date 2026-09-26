@@ -970,8 +970,8 @@ function DisplayView({ room, roomCode, setRoom }) {
   }
 
   return (
-    <div className={`mg-root display-mode ${['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) ? 'stage-play' : ''} ${phase.startsWith('superMatch') ? 'super-stage' : ''}`}>
-      {['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) &&
+    <div className={`mg-root display-mode ${(['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) || phase.startsWith('superMatch') || (phase==='intro' && ['stage','host','contestant','finale'].includes(introStage))) ? 'stage-play' : ''} ${phase.startsWith('superMatch') ? 'super-stage' : ''} ${phase==='lobby' ? 'lobby-stage' : ''}`}>
+      {(['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) || phase.startsWith('superMatch')) &&
         <img className="mg-stage-gene" src="/images/gene-rayburn.webp" alt="" aria-hidden="true" />}
       {['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) && <div className="mg-stage-contestants">
         {[1,2].filter(slot => !room.soloTest || slot === 1).map(slot => {
@@ -980,8 +980,14 @@ function DisplayView({ room, roomCode, setRoom }) {
             {photo ? <img src={photo} alt={room.players?.[slot] || 'Contestant'} /> : <div className="mg-stage-contestant-placeholder" aria-label={room.players?.[slot] || 'Contestant'} />}
           </div>;
         })}
-        {room.completedQuestions > 0 && [1,2].map(slot => <div key={slot}
-          className={`mg-stage-score seat-${slot} ${slot===room.triangleSlot?'triangle':'circle'}`}>{room.scores?.[slot] || 0}</div>)}
+        {[1,2].filter(slot => !room.soloTest || slot === 1).map(slot => <div key={slot}
+          className={`mg-stage-score seat-${slot} ${slot===room.triangleSlot?'triangle':'circle'}`}>{room.completedQuestionsBySlot?.[slot] ? (room.scores?.[slot] || 0) : ''}</div>)}
+      </div>}
+      {phase.startsWith('superMatch') && <div className="mg-super-board" aria-label="Super Match board">
+        <img src="/images/super-match-board.png" alt="" />
+        <div className={`mg-super-board-blank ${room.superMatchPromptReady || superPromptReady ? 'revealed' : ''}`}>
+          <span>{room.superMatchPrompt}</span><div className="mg-super-board-cover" />
+        </div>
       </div>}
       <div className="mg-display-header">
         <div className="mg-display-contestant left" style={activeStyle(1)}>
@@ -1098,6 +1104,8 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
             </div>;
           })}
         </div>
+        {[1,2].filter(slot => !room?.soloTest || slot === 1).map(slot => <div key={slot}
+          className={`mg-stage-score seat-${slot} ${slot===room?.triangleSlot?'triangle':'circle'}`} />)}
         <img className="mg-opening-gene" src="/images/gene-rayburn.webp" alt="" />
       </div>
       <div className="mg-opening-marquee"><img src="/images/match-game-logo.png" alt="Match Game" /></div>
@@ -1181,7 +1189,6 @@ function DisplayReveal({ room, revealIndex, roomCode }) {
 function DisplaySuperMatchPickCelebs({ room, promptVisible = true }) {
   return (
     <div className="mg-super-stage-content">
-      <div className={`mg-super-board-blank ${promptVisible ? 'revealed' : ''}`}><span>{room.superMatchPrompt}</span><div className="mg-super-board-cover" /></div>
       <DisplayPanelGrid room={room} revealIndex={-1} />
     </div>
   );
@@ -1219,7 +1226,6 @@ function DisplaySuperMatchReveal({ room, roomCode, setRevealIndex = () => {} }) 
   };
 
   return <div className="mg-super-stage-content">
-    <div className="mg-super-board-blank revealed"><span>{room.superMatchPrompt}</span></div>
     <DisplayPanelGrid room={room} revealIndex={-1} />
   </div>;
 
