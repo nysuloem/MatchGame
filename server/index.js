@@ -296,7 +296,7 @@ const fetchJsonWithTimeout = async (url, timeoutMs = 5000) => {
 const fetchWikipediaHeadshot = async (name) => {
   const key = celebImageKey(name);
   if (!key) return null;
-  if (key in CELEB_IMAGE_CACHE) return CELEB_IMAGE_CACHE[key] || null;
+  if (CELEB_IMAGE_CACHE[key]?.imageUrl) return CELEB_IMAGE_CACHE[key];
   let record = null;
   try {
     const search = await fetchJsonWithTimeout(`https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(name)}&limit=1&namespace=0&format=json`);
@@ -330,12 +330,26 @@ const enrichPanelWithWikipediaImages = async (panel = []) => {
   return enriched;
 };
 
+const EXTRA_REAL_PHOTO_CANDIDATES = {
+  '1970s': ['Alan Alda','Henry Winkler','Mary Tyler Moore','Dick Van Dyke','Goldie Hawn','Burt Reynolds','Diana Ross','Elton John','John Travolta','Sally Field'],
+  '1980s-1990s': ['Robin Williams','Tom Hanks','Geena Davis','Jamie Lee Curtis','Danny DeVito','Eddie Murphy','Steve Carell','Tina Fey','Mike Myers','Sandra Bullock','Wayne Brady','Rosie O’Donnell'],
+  modern: ['Tiffany Haddish','John Mulaney','Maya Rudolph','Kenan Thompson','Awkwafina','Keegan-Michael Key','Kristen Bell','Leslie Jones','Hasan Minhaj','Ali Wong','Donald Glover','Melissa McCarthy']
+};
+
 const requireRealCelebrityImages = async (panel = []) => {
   const poolsFor = (era) => {
     if (era === 'match-game-1970s') return shuffle(CLASSIC_MATCH_GAMERS.map(name => makeClassicPanelist(name)));
-    if (era === '1970s') return shuffle(SEVENTIES_GUEST_BACKUPS.map(p => ({ ...p, era:'1970s' })));
-    if (era === '1980s-1990s') return shuffle(EIGHTIES_NINETIES_BACKUPS.map(p => ({ ...p, era:'1980s-1990s' })));
-    return shuffle(MODERN_ERA_BACKUPS.map(p => ({ ...p, era:'modern' })));
+    const base = era === '1970s' ? SEVENTIES_GUEST_BACKUPS
+      : era === '1980s-1990s' ? EIGHTIES_NINETIES_BACKUPS
+      : MODERN_ERA_BACKUPS;
+    const extras = (EXTRA_REAL_PHOTO_CANDIDATES[era] || []).map((name, i) => ({
+      name, era, tag: era === 'modern' ? 'modern guest star' : `${era} guest star`,
+      avatarType: i % 2 ? 'woman_middle' : 'man_middle',
+      voice: TTS_VOICES[i % TTS_VOICES.length],
+      voiceInstructions:'Warm, playful game-show delivery.',
+      answerStyle:'obvious', matchBias:0.87, signMessage:randomSign()
+    }));
+    return shuffle([...base.map(p => ({ ...p, era })), ...extras]);
   };
   const used = new Set((panel || []).filter(Boolean).map(p => String(p.name || '').toLowerCase()));
   const result = [];
@@ -355,7 +369,16 @@ const requireRealCelebrityImages = async (panel = []) => {
       replacement = { ...original, ...candidate, ...img, answer:null };
       break;
     }
-    if (!replacement) throw new Error(`Could not find a real celebrity photo for the ${original.era || 'guest'} seat`);
+    if (!replacement) {
+      console.warn(`No real photo resolved for ${original.era || 'guest'} seat; retrying original once`);
+      const retry = await fetchWikipediaHeadshot(original.name);
+      if (retry?.imageUrl) replacement = { ...original, ...retry, answer:null };
+    }
+    if (!replacement) {
+      const err = new Error(`PHOTO_LOOKUP_RETRY:${original.era || 'guest'}`);
+      err.retryablePhotoLookup = true;
+      throw err;
+    }
     result.push(replacement);
   }
   return result;
@@ -1777,7 +1800,17 @@ const assignRolesAndStart = async (room) => {
     ...shuffle(remaining.filter(id => !prefs[id] || prefs[id] === 'surprise')),
     ...shuffle(remaining.filter(id => prefs[id] === 'contestant')),
   ].slice(0, 6);
-  const basePanel = await generatePanel();
+  let basePanel = null;
+  let panelError = null;
+  for (let attempt = 0; attempt < 3 && !basePanel; attempt++) {
+    try { basePanel = await generatePanel(); }
+    catch (e) {
+      panelError = e;
+      if (!e?.retryablePhotoLookup) throw e;
+      console.warn(`Celebrity photo panel retry ${attempt + 1}/3: ${e.message}`);
+    }
+  }
+  if (!basePanel) throw panelError || new Error('Could not build celebrity panel');
   room.host = await generateHostProfile().catch(() => ({ name:'Gene Rayburn', tag:'host of Match Game', avatarType:'man_older' }));
   let panel = [...basePanel];
   for (let i = 0; i < humanCelebIds.length && i < 6; i++) {
