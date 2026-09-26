@@ -32,6 +32,7 @@ const api = {
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
   submitAnswer: (code, slot, answer) => req(`/api/room/${code}/answer`, { method:'POST', body:{slot,answer} }),
   microphoneReady: (code) => req(`/api/room/${code}/microphone-ready`, { method:'POST' }),
+  promptRead: (code) => req(`/api/room/${code}/prompt-read`, { method:'POST' }),
   revealDone:   (code) => req(`/api/room/${code}/reveal-done`, { method:'POST' }),
   overrideMatch:(code,index,match) => req(`/api/room/${code}/match-override`, { method:'POST', body:{index,match} }),
   introDone:     (code) => req(`/api/room/${code}/intro-done`, { method:'POST' }),
@@ -743,6 +744,7 @@ function DisplayView({ room, roomCode, setRoom }) {
           await readGamePrompt(room.chosenPrompt, roomCode);
           setPromptReadyFor(room.chosenPrompt);
           startThinkingMusic();
+          try { await api.promptRead(roomCode); } catch {}
         }
       })();
       promptReadingRef.current = {key:answerKey,promise};
@@ -754,8 +756,9 @@ function DisplayView({ room, roomCode, setRoom }) {
         contestantCueRef.current = cueKey;
         (async () => {
           await promptReadingRef.current.promise.catch(() => {});
-          await delay(350);
-          await speakTTS({ text: `${room.players[room.activeSlot]?.split(' ')[0]}, how do you fill in that blank?`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+          await delay(15000);
+          stopThinkingMusic();
+          await speakTTS({ text: `I think all the stars are ready. ${room.players[room.activeSlot]?.split(' ')[0]}, how do you fill in that blank?`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
           try { await api.microphoneReady(roomCode); } catch {}
         })();
       }
@@ -770,8 +773,8 @@ function DisplayView({ room, roomCode, setRoom }) {
     // Regular-round thinking music should begin only after the host has finished reading
     // the question. It continues while answers are being collected/generated and stops
     // before reveals.
-    if (['generating_answers','superMatch_generating','finalMatch_generating_celeb'].includes(phase)) startThinkingMusic();
-    else if (phase !== 'answering') stopThinkingMusic();
+    if (['superMatch_generating','finalMatch_generating_celeb'].includes(phase)) startThinkingMusic();
+    else if (!['answering','generating_answers'].includes(phase)) stopThinkingMusic();
     if (phase === 'tiebreaker' && prevPhase !== 'tiebreaker') {
       speakTTS({ text: "It's a tie! Scores reset — tiebreaker round!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     }
@@ -908,12 +911,6 @@ function DisplayView({ room, roomCode, setRoom }) {
       text: speechClean(p.answer), code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length],
     }).catch(() => null) : Promise.resolve(null)));
     await delay(350);
-    await speakTTS({
-      text: `${r.players[r.activeSlot]} said, ${r.contestantAnswer}.`,
-      isAnnouncer: true,
-      fallbackProfile: ANNOUNCER_PROFILE,
-    });
-    await delay(350);
     for (let i = 0; i < r.panel.length; i++) {
       setRevealIndex(i);
       if (r.panel[i].answer) {
@@ -970,10 +967,10 @@ function DisplayView({ room, roomCode, setRoom }) {
   }
 
   return (
-    <div className={`mg-root display-mode ${['pick_prompt','answering','revealing','generating_answers'].includes(phase) ? 'stage-play' : ''}`}>
-      {['pick_prompt','answering','revealing','generating_answers'].includes(phase) &&
+    <div className={`mg-root display-mode ${['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) ? 'stage-play' : ''}`}>
+      {['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) &&
         <img className="mg-stage-gene" src="/images/gene-rayburn.webp" alt="" aria-hidden="true" />}
-      {['pick_prompt','answering','revealing','generating_answers'].includes(phase) && <div className="mg-stage-contestants">
+      {['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) && <div className="mg-stage-contestants">
         {[1,2].filter(slot => !room.soloTest || slot === 1).map(slot => {
           const photo = room.participantPhotos?.[room.playerIds?.[slot]];
           return <div key={slot} className={`mg-stage-contestant seat-${slot} ${room.activeSlot===slot?'active':''}`}>
@@ -1035,7 +1032,7 @@ function DisplayView({ room, roomCode, setRoom }) {
             {!coinFlipping&&coinResult&&<p className="mg-status" style={{fontSize:24}}><strong>{room.players[coinResult]}</strong> wins the toss and plays first!</p>}
           </div>
         )}
-        {['generating','generating_answers','round_end','superMatch_generating','finalMatch_generating','finalMatch_generating_celeb','tiebreaker'].includes(phase) && (
+        {['generating','generating_answers','superMatch_generating','finalMatch_generating','finalMatch_generating_celeb','tiebreaker'].includes(phase) && (
           <div className="mg-display-center-msg">
             <div className="mg-loading">
               {phase==='generating'&&'Preparing questions'}
@@ -1052,6 +1049,7 @@ function DisplayView({ room, roomCode, setRoom }) {
         )}
         {['pick_prompt','answering'].includes(phase) && <DisplayRoundActive room={room} promptVisible={promptReadyFor === room.chosenPrompt}/>}
         {phase==='revealing' && <DisplayReveal room={room} revealIndex={revealIndex} roomCode={roomCode}/>}
+        {phase==='round_end' && <DisplayReveal room={room} revealIndex={(room.panel?.length || 6)-1} />}
         {phase==='superMatch_pickCelebs' && <DisplaySuperMatchPickCelebs room={room} promptVisible={superPromptReady}/>}
         {phase==='superMatch_revealing' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
         {phase==='superMatch_answering' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
@@ -1172,12 +1170,6 @@ function DisplayReveal({ room, revealIndex, roomCode }) {
   return (
     <div className="mg-display-round-active">
       <div className="mg-prompt">{room.chosenPrompt}</div>
-      <div className="mg-contestant-answer-display">
-        <span style={{fontFamily:'Bowlby One,sans-serif',opacity:0.7}}>
-          {room.players[room.activeSlot]} said:
-        </span>
-        {' '}<strong style={{fontSize:28}}>{room.contestantAnswer}</strong>
-      </div>
       <DisplayPanelGrid room={room} revealIndex={revealIndex} roomCode={roomCode} matches={room.matches} />
     </div>
   );
@@ -1661,11 +1653,8 @@ function PhoneView({ room, roomCode, playerSlot }) {
       const heard = Array.from(event.results).map(r => r[0].transcript).join(' ').trim();
       setMyAnswer(heard);
       if (event.results[event.results.length-1].isFinal && heard) {
-        setMicStatus(`Heard: ${heard}`);
-        setSubmitted(true);
-        api.submitAnswer(roomCode, playerSlot, heard).catch(() => {
-          setSubmitted(false); setMicStatus('Please check your answer and tap Lock It In.');
-        });
+        setMicStatus(`Heard: ${heard}. Check it, then tap Submit Answer.`);
+        recognition.stop();
       }
     };
     recognition.onerror = () => { recognitionRef.current=null; setMicStatus('Microphone unavailable. Tap to retry or type your answer.'); };
@@ -1850,7 +1839,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
                   disabled={!room.microphoneReady} style={{fontSize:24,padding:'18px 16px'}} />
                 <div className="mg-row">
                   <button className="mg-btn" onClick={handleSubmitAnswer} disabled={!room.microphoneReady || !myAnswer.trim() || submitted}>
-                    Lock It In
+                    Submit Answer
                   </button>
                 </div>
                 <p className="mg-help" style={{marginTop:12}}>Listen to the TV for the question!</p>

@@ -1692,7 +1692,6 @@ const maybeScheduleAiAction = (room) => {
       room.phase = 'answering';
       bump(room);
       maybeScheduleAiAction(room);
-      maybeFinishAnswerPhase(room).catch(e => console.error('prepare AI panel:', e));
     });
   }
 
@@ -1888,6 +1887,7 @@ const resetRoomForPlayAgain = (room) => {
   room.humanPanelAnswers = {};
   room.panelAnswersReady = false;
   room.microphoneReady = false;
+  room.promptRead = false;
   room.completedQuestions = 0;
   room.matches = [];
   room.superMatchStarted = false;
@@ -1919,7 +1919,7 @@ const resetRoomForPlayAgain = (room) => {
 };
 
 const maybeFinishAnswerPhase = async (room) => {
-  if (!room || room.phase !== 'answering') return;
+  if (!room || room.phase !== 'answering' || !room.promptRead) return;
   const inactiveCelebIndices = room.round === 2 ? (room.round1Matches?.[room.activeSlot] || []) : [];
   const requiredHumanCelebs = (room.panel || [])
     .map((p, i) => ({ p, i }))
@@ -2152,6 +2152,7 @@ const startNewRound = async (room, roundNum) => {
     room.humanPanelAnswers = {};
     room.panelAnswersReady = false;
     room.microphoneReady = false;
+    room.promptRead = false;
     room.pendingScoreDelta = 0;
     room.pendingMatches = [];
     room.panel = room.panel.map(p => ({ ...p, answer: null, inactiveThisTurn: false }));
@@ -2243,7 +2244,16 @@ app.post('/api/room/:code/pick-prompt', async (req, res) => {
   room.phase = 'answering';
   bump(room);
   res.json({ room });
-  maybeFinishAnswerPhase(room).catch(e => console.error('prepare panel:', e));
+});
+
+app.post('/api/room/:code/prompt-read', (req,res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room || room.phase !== 'answering') return res.status(400).json({error:'No active question'});
+  if (!room.promptRead) {
+    room.promptRead = true; bump(room);
+    maybeFinishAnswerPhase(room).catch(e => console.error('prepare panel:', e));
+  }
+  res.json({room});
 });
 
 // ─── API: SUBMIT ANSWER ───────────────────────────────────────
@@ -2357,12 +2367,12 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     room.humanPanelAnswers = {};
     room.panelAnswersReady = false;
     room.microphoneReady = false;
+    room.promptRead = false;
     room.contestantAnswer = null;
     room.matches = [];
     room.phase = 'answering';
     bump(room);
     maybeScheduleAiAction(room);
-    maybeFinishAnswerPhase(room).catch(e => console.error('prepare panel:', e));
     return res.json({ room });
   }
 
