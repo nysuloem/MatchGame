@@ -2060,3 +2060,17 @@ body { margin: 0; }
 .mg-root.super-stage .mg-super-board-answer.revealed { opacity:1; transform:translateX(0); }
 .mg-root.super-stage .mg-panelist.super-speaking .mg-celeb-photo { box-shadow:0 0 0 5px #fff7be,0 0 24px 12px #ffdb50; filter:brightness(1.35); }
 .mg-root.super-stage .mg-panelist.super-speaking .mg-panelist-name { background:#ffe48b; }
+
+/* The Final Match prize is a blue neon amount in the central black set sign. */
+.mg-root.final-stage .mg-display-header { display:none; }
+.mg-root.final-stage .mg-display-main { position:absolute; inset:0; width:100%; height:100%; padding:0; background:transparent; }
+.mg-root.final-stage .mg-display-center-msg { position:absolute; inset:0; width:100%; height:100%; max-width:none; margin:0; padding:0; background:transparent !important; border:0; box-shadow:none; }
+.mg-root.final-stage .mg-loading { display:none; }
+.mg-final-prize { position:absolute; z-index:6; left:40.5%; top:19%; width:18%; height:17%; display:grid; place-items:center; background:#05080d; border:5px solid #15130e; border-radius:9px; color:#49bafa; font:200 clamp(37px,4vw,82px)/1 'Arial Narrow','Helvetica Neue',sans-serif; letter-spacing:-.08em; white-space:nowrap; text-shadow:0 0 4px #65c9ff,0 0 13px #268de1,0 0 24px #1373b9; box-shadow:inset 0 0 18px #0f2c45,0 0 0 3px #9a5f2d; }
+.mg-final-prize.blinking { animation:mgFinalPrizeBlink .5s steps(2,end) infinite; }
+@keyframes mgFinalPrizeBlink { 50% { color:#15222b; text-shadow:none; } }
+.mg-final-stage-content { position:absolute; inset:0; width:100%; height:100%; }
+.mg-final-stage-content .mg-final-prompt { position:absolute; z-index:5; left:3%; top:13%; width:34%; max-height:22%; overflow:hidden; padding:12px 18px; background:#f4e3b9; border:3px solid #ac844e; border-radius:5px; color:#27190f; font:900 clamp(18px,2vw,32px)/1.15 'DM Serif Display',serif; text-align:center; }
+.mg-final-stage-content .mg-final-answers { position:absolute; z-index:5; left:4%; bottom:18%; width:33%; display:grid; gap:8px; }
+.mg-final-stage-content .mg-final-answers div { background:#95dce4; border:3px solid #4d8c9a; color:#173039; padding:8px 12px; font:900 clamp(16px,1.7vw,28px)/1.1 'DM Serif Display',serif; }
+.mg-root.final-stage .mg-panelist.final-selected .mg-celeb-photo { box-shadow:0 0 0 5px #fff5b4,0 0 20px 8px #ffdd6f; }

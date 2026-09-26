@@ -66,24 +66,6 @@ const getAudioCtx = () => {
     return sharedAudioCtx;
   } catch { return null; }
 };
-const playAudience = (reaction='cheer') => {
-  const ctx = getAudioCtx();
-  if (!ctx) return;
-  const now = ctx.currentTime;
-  const happy = ['cheer','applause','win'].includes(reaction);
-  // A short crowd bed with many slightly different voices; no spoken narration.
-  for (let i=0; i<18; i++) {
-    const osc=ctx.createOscillator(), gain=ctx.createGain();
-    const start=now+Math.random()*.24, duration=.65+Math.random()*.5;
-    osc.type=happy?'sawtooth':'triangle';
-    osc.frequency.setValueAtTime((happy?320:150)+Math.random()*(happy?260:90),start);
-    osc.frequency.exponentialRampToValueAtTime((happy?480:110)+Math.random()*(happy?250:70),start+duration);
-    gain.gain.setValueAtTime(.0001,start);
-    gain.gain.linearRampToValueAtTime(.012,start+.1);
-    gain.gain.exponentialRampToValueAtTime(.0001,start+duration);
-    osc.connect(gain).connect(ctx.destination); osc.start(start); osc.stop(start+duration+.02);
-  }
-};
 let thinkingMusicTimer = null;
 let thinkingMusicAudio = null;
 let introMusicAudio = null;
@@ -648,6 +630,7 @@ function DisplayView({ room, roomCode, setRoom }) {
   const [promptReadyFor, setPromptReadyFor] = useState(null);
   const [superPromptReady, setSuperPromptReady] = useState(false);
   const [superBoardRevealCount, setSuperBoardRevealCount] = useState(0);
+  const [finalPrizeBlink, setFinalPrizeBlink] = useState(false);
   const introRunRef = useRef(false);
   const turnPromptAnnouncedRef = useRef(null);
   const inheritedTurnAnnouncedRef = useRef(null);
@@ -812,6 +795,7 @@ function DisplayView({ room, roomCode, setRoom }) {
       })();
     }
     if (phase === 'finalMatch_pickCeleb' && prevPhase !== 'finalMatch_pickCeleb') {
+      setFinalPrizeBlink(false);
       const key = `${room.activeSlot}-${room.superMatchWinnings}`;
       if (finalMatchSpeechRef.current.pick !== key) {
         finalMatchSpeechRef.current.pick = key;
@@ -912,7 +896,6 @@ function DisplayView({ room, roomCode, setRoom }) {
 
   const runReveal = async (r) => {
     stopThinkingMusic();
-    playAudience(r.matches?.some(Boolean) ? 'cheer' : 'boo');
     await delay(1150);
     await Promise.all((r.panel || []).map((p, i) => p.answer ? prefetchTTS({
       text: speechClean(p.answer), code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length],
@@ -922,8 +905,6 @@ function DisplayView({ room, roomCode, setRoom }) {
       setRevealIndex(i);
       if (r.panel[i].answer) {
         await speakTTS({ text: speechClean(r.panel[i].answer), code: roomCode, slot: i, fallbackProfile: VOICE_PROFILES[i % VOICE_PROFILES.length] });
-        if (r.matches?.[i]) playAudience('cheer');
-        else playAudience(i % 2 === 0 ? 'chuckle' : 'groan');
         await delay(r.matches?.[i] ? 700 : 420);
       } else {
         await delay(150);
@@ -974,8 +955,8 @@ function DisplayView({ room, roomCode, setRoom }) {
   }
 
   return (
-    <div className={`mg-root display-mode ${(['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) || phase.startsWith('superMatch') || (phase==='intro' && ['stage','host','contestant','finale'].includes(introStage))) ? 'stage-play' : ''} ${phase.startsWith('superMatch') ? 'super-stage' : ''} ${phase==='lobby' ? 'lobby-stage' : ''}`}>
-      {(['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) || phase.startsWith('superMatch')) &&
+    <div className={`mg-root display-mode ${(['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) || phase.startsWith('superMatch') || phase.startsWith('finalMatch') || (phase==='intro' && ['stage','host','contestant','finale'].includes(introStage))) ? 'stage-play' : ''} ${phase.startsWith('superMatch') ? 'super-stage' : ''} ${phase.startsWith('finalMatch') ? 'final-stage' : ''} ${phase==='lobby' ? 'lobby-stage' : ''}`}>
+      {(['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) || phase.startsWith('superMatch') || phase.startsWith('finalMatch')) &&
         <img className="mg-stage-gene" src="/images/gene-rayburn.webp" alt="" aria-hidden="true" />}
       {['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) && <div className="mg-stage-contestants">
         {[1,2].filter(slot => !room.soloTest || slot === 1).map(slot => {
@@ -997,6 +978,7 @@ function DisplayView({ room, roomCode, setRoom }) {
           return <div key={value} className={`mg-super-board-answer row-${row+1} ${revealed ? 'revealed' : ''}`}>{revealed?.answer || ''}</div>;
         })}
       </div>}
+      {phase.startsWith('finalMatch') && <div className={`mg-final-prize ${finalPrizeBlink ? 'blinking' : ''}`}>{fmt$(Number(room.superMatchWinnings || 0) * 10)}</div>}
       <div className="mg-display-header">
         <div className="mg-display-contestant left" style={activeStyle(1)}>
           <div className="mg-contestant-score-block">
@@ -1040,7 +1022,7 @@ function DisplayView({ room, roomCode, setRoom }) {
               </>
             )}
             {phase === 'intro' && !introComplete && <DisplayIntroSpotlight room={room} introIndex={introIndex} introStage={introStage} />}
-            
+
           </div>
         )}
         {phase==='cointoss' && (
@@ -1072,7 +1054,7 @@ function DisplayView({ room, roomCode, setRoom }) {
         {phase==='superMatch_answering' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
         {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room} roomCode={roomCode} onReveal={setSuperBoardRevealCount}/>}
         {['finalMatch_pickCeleb','finalMatch_answering','finalMatch_human_celeb_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
-        {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room} roomCode={roomCode}/>}
+        {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room} roomCode={roomCode} onWin={() => setFinalPrizeBlink(true)}/>}
         {phase==='gameOver' && <DisplayGameOver room={room} roomCode={roomCode} setRoom={setRoom} />}
       </div>
     </div>
@@ -1151,7 +1133,7 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex, su
         // (opacity handled inline via introIndex prop)
         return (
           <div key={i}
-            className={`mg-panelist ${shown ? 'revealed' : ''} ${matched ? 'matched' : ''} ${prelit ? 'prelit' : ''} ${shown && roomCode ? 'host-judgable' : ''} ${room?.phase?.startsWith('superMatch') && superSelected.includes(i) ? 'super-selected' : ''} ${superSelected[superSpeakingIndex]===i ? 'super-speaking' : ''}`}
+            className={`mg-panelist ${shown ? 'revealed' : ''} ${matched ? 'matched' : ''} ${prelit ? 'prelit' : ''} ${shown && roomCode ? 'host-judgable' : ''} ${room?.phase?.startsWith('superMatch') && superSelected.includes(i) ? 'super-selected' : ''} ${superSelected[superSpeakingIndex]===i ? 'super-speaking' : ''} ${room?.phase?.startsWith('finalMatch') && room.finalMatchCelebIndex===i ? 'final-selected' : ''}`}
             title={shown && roomCode ? 'Host: click this card to toggle MATCH / NO MATCH' : undefined}
             onClick={shown && roomCode ? async () => { try { await api.overrideMatch(roomCode,i,!Boolean(room.matches?.[i])); } catch {} } : undefined}
             style={{
@@ -1230,7 +1212,6 @@ function DisplaySuperMatchReveal({ room, roomCode, setRevealIndex = () => {} }) 
         code: roomCode, slot: panelIdx,
         fallbackProfile: VOICE_PROFILES[panelIdx % VOICE_PROFILES.length],
       });
-      playAudience(i % 2 === 0 ? 'applause' : 'chuckle');
       // Advance server-side reveal index so phone knows this celeb is done
       try { await api.superMatchRevealNext(roomCode); } catch {}
       await delay(600);
@@ -1288,7 +1269,6 @@ function DisplaySuperMatchResult({ room, roomCode, onReveal }) {
       for (let i = 0; i < topAnswers.length; i++) {
         if (cancelled) return;
         const ta = topAnswers[i];
-        playAudience('drumroll');
         await delay(450);
         await speakTTS({ text: `For ${fmt$(ta.value)}. ${speechClean(ta.answer)}`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         setVisibleCount(i + 1);
@@ -1297,7 +1277,6 @@ function DisplaySuperMatchResult({ room, roomCode, onReveal }) {
         if (isMatch) {
           foundMatch = true;
           setMatchedValue(ta.value);
-          playAudience('win');
           setCelebrated(true);
           await speakTTS({ text: `It's a match! ${room.players[room.activeSlot]} wins ${fmt$(winnings)}!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
           if (i < topAnswers.length - 1) {
@@ -1305,7 +1284,6 @@ function DisplaySuperMatchResult({ room, roomCode, onReveal }) {
             await speakTTS({ text: `But let's see the rest of the board!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
           }
         } else {
-          playAudience(i === topAnswers.length - 1 ? 'groan' : 'applause');
         }
         await delay(750);
       }
@@ -1447,27 +1425,14 @@ function DisplayGameOver({ room, roomCode, setRoom }) {
 }
 
 function DisplayFinalMatchActive({ room }) {
-  return (
-    <div className="mg-display-center-msg">
-      <div className="mg-display-round final" style={{fontSize:28,marginBottom:12}}>★★ Final Match ★★</div>
-      {room.phase !== 'finalMatch_pickCeleb' && room.finalMatchPrompt && <div className="mg-prompt">{room.finalMatchPrompt}</div>}
-      {room.finalMatchCelebIndex != null && (
-        <div className="mg-super-celeb-card revealed" style={{margin:'16px auto',maxWidth:240}}>
-          <div className="mg-panelist-name">{room.panel[room.finalMatchCelebIndex]?.name}</div>
-          <div className="mg-panelist-tag">{room.panel[room.finalMatchCelebIndex]?.tag}</div>
-          <div className="mg-panelist-answer" style={{fontSize:22}}>thinking…</div>
-        </div>
-      )}
-      <p className="mg-status">
-        {room.phase === 'finalMatch_pickCeleb'
-          ? (room.finalMatchPickReady ? `${room.players[room.activeSlot]} is choosing a celebrity…` : 'The host is introducing the Final Match…')
-          : `${room.players[room.activeSlot]} is writing their answer…`}
-      </p>
-    </div>
-  );
+  return <div className="mg-final-stage-content">
+    <DisplayPanelGrid room={room} revealIndex={-1} />
+    {room.phase !== 'finalMatch_pickCeleb' && room.finalMatchPromptReady && room.finalMatchPrompt &&
+      <div className="mg-final-prompt">{room.finalMatchPrompt}</div>}
+  </div>;
 }
 
-function DisplayFinalMatchReveal({ room, roomCode }) {
+function DisplayFinalMatchReveal({ room, roomCode, onWin }) {
   const won = room.finalMatchResult === 'win';
   const celeb = room.panel[room.finalMatchCelebIndex];
   const [stage, setStage] = useState('thinking'); // thinking | reveal | result
@@ -1479,7 +1444,6 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
     let cancelled = false;
     (async () => {
       await delay(500);
-      playAudience('applause');
       await speakTTS({
         text: `Now, let's see if ${celeb?.name || 'our star'} can match ${room.players[room.activeSlot]}.`,
         isAnnouncer: true,
@@ -1500,7 +1464,6 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
         fallbackProfile: ANNOUNCER_PROFILE,
       });
       if (cancelled) return;
-      playAudience('drumroll');
       await delay(650);
       setStage('reveal');
       await speakTTS({
@@ -1513,7 +1476,7 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
       await delay(250);
       setStage('result');
       if (won) {
-        playAudience('win');
+        onWin?.();
         await speakTTS({
           text: `It's a match! ${room.players[room.activeSlot]} wins ${fmt$(room.finalMatchWinnings)}!`,
           isAnnouncer: true,
@@ -1522,7 +1485,6 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
         await delay(1800);
         if (!cancelled) { try { await api.finalMatchDone(roomCode); } catch {} }
       } else {
-        playAudience('aww');
         await speakTTS({
           text: `Well, ${room.players[room.activeSlot]}, you didn't win the Final Match, but you're still going home with ${fmt$(room.superMatchWinnings || 0)}.`,
           isAnnouncer: true,
@@ -1535,39 +1497,15 @@ function DisplayFinalMatchReveal({ room, roomCode }) {
     return () => { cancelled = true; };
   }, []);
 
-  return (
-    <div className="mg-display-center-msg">
-      {stage === 'result' && won && <Confetti />}
-      <div className="mg-display-round final" style={{fontSize:28,marginBottom:12}}>★★ Final Match ★★</div>
-      <div className="mg-prompt">{room.finalMatchPrompt}</div>
-      <p className="mg-status" style={{fontSize:22,marginTop:16}}>
-        {room.players[room.activeSlot]} said: <strong>"{room.finalMatchContestantAnswer}"</strong>
-      </p>
-
-      <div className={`mg-final-celeb-focus ${stage === 'thinking' ? 'stressed' : ''} ${stage !== 'thinking' ? 'revealed' : ''}`}>
-        <div style={{width:150,height:150,margin:'0 auto 10px'}}>
-          <CelebVisual celeb={celeb} size={150} />
-        </div>
-        <div className="mg-panelist-name" style={{fontSize:30}}>{celeb?.name}</div>
-        <div className="mg-panelist-tag">{stage === 'thinking' ? 'looks nervous…' : 'reveals:'}</div>
-        <div className="mg-panelist-answer" style={{fontSize: stage === 'thinking' ? 34 : 48, minHeight:64}}>
-          {stage === 'thinking' ? '???' : room.finalMatchCelebAnswer}
-        </div>
-      </div>
-
-      {stage === 'result' ? (won
-        ? <div style={{textAlign:'center'}}>
-            <div className="mg-bigsymbol" style={{fontSize:60,color:'var(--tri-green)',textShadow:'0 0 20px currentColor'}}>✓ MATCH!</div>
-            <div style={{fontFamily:'Bowlby One,sans-serif',fontSize:48,color:'var(--orange-deep)'}}>
-              {fmt$(room.finalMatchWinnings)}!!!
-            </div>
-          </div>
-        : <div style={{textAlign:'center',fontFamily:'Bowlby One,sans-serif',fontSize:32,color:'var(--cir-red)'}}>
-            No Final Match — credits coming up!
-          </div>)
-        : <p className="mg-status" style={{fontSize:20}}>The star looks nervous...</p>}
+  return <div className="mg-final-stage-content">
+    <DisplayPanelGrid room={room} revealIndex={-1} />
+    <div className="mg-final-prompt">{room.finalMatchPrompt}</div>
+    <div className="mg-final-answers">
+      <div>{room.players[room.activeSlot]}: {room.finalMatchContestantAnswer}</div>
+      {stage !== 'thinking' && <div>{celeb?.name}: {room.finalMatchCelebAnswer}</div>}
     </div>
-  );
+  </div>;
+
 }
 
 // ─────────────────────────────────────────────────────────────
