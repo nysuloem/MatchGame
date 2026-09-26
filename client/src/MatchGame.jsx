@@ -647,6 +647,7 @@ function DisplayView({ room, roomCode, setRoom }) {
   const [introComplete, setIntroComplete] = useState(false);
   const [promptReadyFor, setPromptReadyFor] = useState(null);
   const [superPromptReady, setSuperPromptReady] = useState(false);
+  const [superBoardRevealCount, setSuperBoardRevealCount] = useState(0);
   const introRunRef = useRef(false);
   const turnPromptAnnouncedRef = useRef(null);
   const inheritedTurnAnnouncedRef = useRef(null);
@@ -796,11 +797,13 @@ function DisplayView({ room, roomCode, setRoom }) {
     }
     if (phase === 'superMatch_pickCelebs' && prevPhase !== 'superMatch_pickCelebs') {
       setSuperPromptReady(false);
+      setSuperBoardRevealCount(0);
       (async () => {
         await speakTTS({ text: `${room.players[room.activeSlot]}, you're moving on to the Super Match!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         await delay(250);
         await speakTTS({ text: `Time for the Super Match. We polled a recent studio audience and got their best responses to this.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         await delay(250);
+        setSuperPromptReady(true);
         await readGamePrompt(room.superMatchPrompt, roomCode);
         await delay(250);
         await speakTTS({ text: `${room.players[room.activeSlot]}, you get to ask three celebrities for their advice. Which ones do you choose?`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
@@ -850,7 +853,7 @@ function DisplayView({ room, roomCode, setRoom }) {
 
   const runIntro = async (r) => {
     setIntroComplete(false);
-    setIntroStage('logo');
+    setIntroStage('prelude');
     setIntroIndex(-1);
     await delay(300);
 
@@ -870,7 +873,7 @@ function DisplayView({ room, roomCode, setRoom }) {
     // introduction. The marquee lifts, the set lights up, then Gene enters.
     setIntroStage('logo');
     setIntroIndex(-1);
-    const archival = playIntroClip(OPENING_CALL, { volume: .55, start: 18 });
+    const archival = playIntroClip(OPENING_CALL, { volume: .55, start: 16.5 });
     await delay(3700);
     setIntroStage('logo-lift');
     await delay(1800);
@@ -882,8 +885,9 @@ function DisplayView({ room, roomCode, setRoom }) {
     // The short cue comes after the recorded Gene introduction, before the
     // contestants introduce themselves on the set.
     const cue = playIntroClip(OPENING_CONTESTANT_CUE, { volume: .52 });
-    await waitForIntroEnd(cue, 5600);
-    stopIntroMusic();
+    await delay(4300);
+    cue.pause();
+    introMusicAudio = null;
 
     const contestantSlots = r.soloTest ? [1] : [1,2];
     for (const slot of contestantSlots) {
@@ -988,6 +992,10 @@ function DisplayView({ room, roomCode, setRoom }) {
         <div className={`mg-super-board-blank ${room.superMatchPromptReady || superPromptReady ? 'revealed' : ''}`}>
           <span>{room.superMatchPrompt}</span><div className="mg-super-board-cover" />
         </div>
+        {[500,250,100].map((value, row) => {
+          const revealed = [...(room.superMatchTopAnswers || [])].sort((a,b)=>(a.value||0)-(b.value||0)).slice(0,superBoardRevealCount).find(a => Number(a.value)===value);
+          return <div key={value} className={`mg-super-board-answer row-${row+1} ${revealed ? 'revealed' : ''}`}>{revealed?.answer || ''}</div>;
+        })}
       </div>}
       <div className="mg-display-header">
         <div className="mg-display-contestant left" style={activeStyle(1)}>
@@ -1062,7 +1070,7 @@ function DisplayView({ room, roomCode, setRoom }) {
         {phase==='superMatch_pickCelebs' && <DisplaySuperMatchPickCelebs room={room} promptVisible={superPromptReady}/>}
         {phase==='superMatch_revealing' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
         {phase==='superMatch_answering' && <DisplaySuperMatchReveal room={room} roomCode={roomCode} setRevealIndex={setRevealIndex}/>}
-        {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room} roomCode={roomCode}/>}
+        {['superMatch_won','superMatch_lost'].includes(phase) && <DisplaySuperMatchResult room={room} roomCode={roomCode} onReveal={setSuperBoardRevealCount}/>}
         {['finalMatch_pickCeleb','finalMatch_answering','finalMatch_human_celeb_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
         {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room} roomCode={roomCode}/>}
         {phase==='gameOver' && <DisplayGameOver room={room} roomCode={roomCode} setRoom={setRoom} />}
@@ -1090,6 +1098,8 @@ function CelebVisual({ celeb, size = 100, className = '' }) {
 
 function DisplayIntroSpotlight({ room, introIndex, introStage }) {
   const p = room?.panel?.[introIndex];
+
+  if (introStage === 'prelude') return <div className="mg-classic-opening"><div className="mg-opening-bulbs" /></div>;
 
   if (['logo', 'logo-lift', 'stage', 'host', 'contestant', 'finale', 'waiting'].includes(introStage) || !p) {
     return <div className={`mg-classic-opening mg-opening-${introStage}`}>
@@ -1123,7 +1133,7 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
 }
 
 
-function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) {
+function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex, superSpeakingIndex = -1 }) {
   const activeIsTriangle = room?.activeSlot === room?.triangleSlot;
   const round1MatchedByActive = room?.round >= 2
     ? (room?.round1Matches?.[room?.activeSlot] || [])
@@ -1141,7 +1151,7 @@ function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) 
         // (opacity handled inline via introIndex prop)
         return (
           <div key={i}
-            className={`mg-panelist ${shown ? 'revealed' : ''} ${matched ? 'matched' : ''} ${prelit ? 'prelit' : ''} ${shown && roomCode ? 'host-judgable' : ''} ${room?.phase?.startsWith('superMatch') && superSelected.includes(i) ? 'super-selected' : ''}`}
+            className={`mg-panelist ${shown ? 'revealed' : ''} ${matched ? 'matched' : ''} ${prelit ? 'prelit' : ''} ${shown && roomCode ? 'host-judgable' : ''} ${room?.phase?.startsWith('superMatch') && superSelected.includes(i) ? 'super-selected' : ''} ${superSelected[superSpeakingIndex]===i ? 'super-speaking' : ''}`}
             title={shown && roomCode ? 'Host: click this card to toggle MATCH / NO MATCH' : undefined}
             onClick={shown && roomCode ? async () => { try { await api.overrideMatch(roomCode,i,!Boolean(room.matches?.[i])); } catch {} } : undefined}
             style={{
@@ -1212,6 +1222,8 @@ function DisplaySuperMatchReveal({ room, roomCode, setRevealIndex = () => {} }) 
     for (let i = 0; i < indices.length; i++) {
       setRevealIndex(i);
       const panelIdx = indices[i];
+      await speakTTS({ text: `${room.panel[panelIdx]?.name?.split(' ')[0] || 'Star'}?`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      await delay(150);
       // Then their answer in their own voice
       await speakTTS({
         text: room.panel[panelIdx]?.answer || '',
@@ -1226,7 +1238,7 @@ function DisplaySuperMatchReveal({ room, roomCode, setRevealIndex = () => {} }) 
   };
 
   return <div className="mg-super-stage-content">
-    <DisplayPanelGrid room={room} revealIndex={-1} />
+    <DisplayPanelGrid room={room} revealIndex={-1} superSpeakingIndex={room.phase === 'superMatch_revealing' ? (room.superMatchRevealIndex ?? -1) + 1 : -1} />
   </div>;
 
 }
@@ -1241,7 +1253,7 @@ function Confetti() {
   );
 }
 
-function DisplaySuperMatchResult({ room, roomCode }) {
+function DisplaySuperMatchResult({ room, roomCode, onReveal }) {
   const topAnswers = [...(room.superMatchTopAnswers || [])].sort((a,b) => (a.value || 0) - (b.value || 0));
   const contestantAnswer = room.superMatchContestantAnswer;
   const winnings = room.superMatchWinnings;
@@ -1280,6 +1292,7 @@ function DisplaySuperMatchResult({ room, roomCode }) {
         await delay(450);
         await speakTTS({ text: `For ${fmt$(ta.value)}. ${speechClean(ta.answer)}`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         setVisibleCount(i + 1);
+        onReveal?.(i + 1);
         const isMatch = winnings > 0 && ta.value === winnings;
         if (isMatch) {
           foundMatch = true;
@@ -1323,35 +1336,11 @@ function DisplaySuperMatchResult({ room, roomCode }) {
     return () => { cancelled = true; };
   }, []);
 
-  return (
-    <div className="mg-display-center-msg">
-      {celebrated && <Confetti />}
-      <div className="mg-prompt">{room.superMatchPrompt}</div>
-      <p className="mg-status">{room.players[room.activeSlot]} chose: <strong>"{contestantAnswer}"</strong></p>
-      <div className="mg-top-answers">
-        {topAnswers.slice(0, visibleCount).map((ta, i) => {
-          const isMatch = winnings > 0 && ta.value === winnings;
-          return (
-            <div key={i} className={`mg-top-answer ${isMatch ? 'matched' : ''}`}>
-              <span className="mg-top-answer-value">{fmt$(ta.value)}</span>
-              <span className="mg-top-answer-text">{ta.answer}</span>
-            </div>
-          );
-        })}
-      </div>
-      {winnings > 0 && celebrated
-        ? <div className="mg-super-win">
-            <div className="mg-bigsymbol" style={{fontSize:72,color:'var(--tri-green)',textShadow:'0 0 24px currentColor'}}>MATCH!</div>
-            <div>{fmt$(winnings)}!!!</div>
-            {visibleCount < topAnswers.length
-              ? <p className="mg-status" style={{fontSize:20,marginTop:12}}>Let's see the rest of the board...</p>
-              : <p className="mg-status" style={{fontSize:20,marginTop:12}}>Moving on to the Final Match...</p>}
-          </div>
-        : visibleCount >= topAnswers.length && winnings <= 0
-          ? <p className="mg-status" style={{fontSize:20}}>No match this time.</p>
-          : <p className="mg-status" style={{fontSize:20}}>Survey says...</p>}
-    </div>
-  );
+  return <div className="mg-super-stage-content">
+    {celebrated && <Confetti />}
+    <DisplayPanelGrid room={room} revealIndex={-1} />
+  </div>;
+
 }
 
 function DisplayGameOver({ room, roomCode, setRoom }) {

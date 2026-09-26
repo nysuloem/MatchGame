@@ -294,23 +294,55 @@ const fetchJsonWithTimeout = async (url, timeoutMs = 5000) => {
   }
 };
 
+const validateCelebrityPortrait = async (imageUrl) => {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 7000);
+    let res;
+    try { res = await fetch(imageUrl, { signal: controller.signal }); }
+    finally { clearTimeout(timer); }
+    if (!res.ok) return false;
+    const mime = (res.headers.get('content-type') || '').split(';')[0];
+    if (!['image/jpeg','image/png','image/webp'].includes(mime)) return false;
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length > 5_000_000 || bytes.length < 8_000) return false;
+    const checked = await openai.chat.completions.create({
+      model: LLM_MODEL,
+      response_format: { type:'json_object' },
+      max_tokens: 100,
+      messages: [{ role:'user', content: [
+        { type:'text', text:'Examine this celebrity portrait for a game-show photo square. Return JSON only with booleans {"color":true,"faceClose":true,"personVisible":true}. color must be false for monochrome, sepia, or largely desaturated photos. faceClose must be true only if one recognizable human face is prominent and fills roughly a third or more of the image height (head or head-and-shoulders); reject full-body, distant, crowd, logo, and illustration images. personVisible must be false for missing or obscured faces.' },
+        { type:'image_url', image_url:{ url:`data:${mime};base64,${bytes.toString('base64')}`, detail:'low' } }
+      ] }]
+    });
+    const verdict = JSON.parse(checked.choices?.[0]?.message?.content || '{}');
+    return verdict.color === true && verdict.faceClose === true && verdict.personVisible === true;
+  } catch (err) {
+    console.warn('Celebrity portrait validation failed:', err.message);
+    return false;
+  }
+};
+
 const fetchWikipediaHeadshot = async (name) => {
   const key = celebImageKey(name);
   if (!key) return null;
-  if (CELEB_IMAGE_CACHE[key]?.imageUrl) return CELEB_IMAGE_CACHE[key];
+  const cached = CELEB_IMAGE_CACHE[key];
+  if (cached?.imageUrl && cached.approvedPortrait === true) return cached;
+  if (cached && !cached.imageUrl) return null;
   let record = null;
   try {
     const search = await fetchJsonWithTimeout(`https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(name)}&limit=1&namespace=0&format=json`);
     const title = search?.[1]?.[0] || name;
     const summary = await fetchJsonWithTimeout(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
-    const imageUrl = summary?.originalimage?.source || summary?.thumbnail?.source || null;
-    if (imageUrl) {
+    const imageUrl = summary?.thumbnail?.source || summary?.originalimage?.source || null;
+    if (imageUrl && await validateCelebrityPortrait(imageUrl)) {
       record = {
         imageUrl,
         imageTitle: summary?.title || title,
         imagePageUrl: summary?.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(String(title).replace(/ /g, '_'))}`,
         imageSource: 'Wikipedia / Wikimedia Commons',
         imageAttribution: 'Photo via Wikipedia / Wikimedia Commons',
+        approvedPortrait: true,
         fetchedAt: new Date().toISOString(),
       };
     }
