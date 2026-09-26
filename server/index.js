@@ -531,10 +531,10 @@ const CLASSIC_MATCH_GAMERS = [
 ];
 
 const WACKY_SIGNS = [
-  'Hi Mom!', 'Lakers Forever!', 'I brake for blanks!', 'Send snacks!', 'Team Triangle!',
-  'I regret nothing!', 'Call me maybe!', 'I came to match!', 'Blank me gently!',
-  'Save me a seat!', 'Is this thing on?', 'No refunds!', 'Vote for Betty!', 'Ask me after dessert!'
+  'Hi Mom!', 'Hello Toronto!', 'Love Ya!', 'Be Nice!', 'Hi Kids!',
+  'Send Snacks!', 'Wish Me Luck!', 'Hello Friends!', 'Call Me!', 'No Refunds!'
 ];
+const shortSign = (value='') => String(value || '').trim().split(/\s+/).filter(Boolean).slice(0,4).join(' ');
 const randomSign = () => WACKY_SIGNS[Math.floor(Math.random() * WACKY_SIGNS.length)];
 
 
@@ -924,7 +924,7 @@ Return JSON exactly: {"panel":[...]}`, 1500, true);
   const panel=[makeClassicPanelist(classic),...take('1970s',1,SEVENTIES_GUEST_BACKUPS),...take('1980s-1990s',2,EIGHTIES_NINETIES_BACKUPS),...take('modern',2,MODERN_ERA_BACKUPS)];
   const valid=['man_young','man_middle','man_older','woman_young','woman_middle','woman_older','person_athletic','person_glamorous'];
   const normalized=panel.slice(0,6).map((p,i)=>({
-    name:clean(p.name), era:p.era||'modern', tag:p.tag||'guest star', signMessage:String(p.signMessage||randomSign()).slice(0,32),
+    name:clean(p.name), era:p.era||'modern', tag:p.tag||'guest star', signMessage:shortSign(p.signMessage||randomSign()),
     avatarType:valid.includes(p.avatarType)?p.avatarType:(i%2?'woman_middle':'man_middle'),
     voice:TTS_VOICES.includes(p.voice)?p.voice:TTS_VOICES[i%TTS_VOICES.length],
     voiceInstructions:p.voiceInstructions||'Speak clearly, energetically, and playfully like a game-show panelist.',
@@ -1841,6 +1841,8 @@ const assignRolesAndStart = async (room) => {
     if (!panel[i]) panel[i] = MODERN_PANEL_BACKUPS[i % MODERN_PANEL_BACKUPS.length];
   }
   room.panel = panel.slice(0, 6);
+  const signSeats = new Set(shuffle([0,1,2,3,4,5]).slice(0,3));
+  room.panel = room.panel.map((p,i) => ({ ...p, showIntroSign: signSeats.has(i), signMessage: shortSign(p.signMessage || randomSign()) }));
   room.triangleSlot = Math.random() < 0.5 ? 1 : 2;
   room.cointossWinner = room.triangleSlot;
   room.phase = 'intro';
@@ -2034,7 +2036,7 @@ app.post('/api/room/:code/join', async (req, res) => {
   const slot = room.nextParticipantId++;
   room.participants[slot] = playerName.trim().slice(0, 20);
   room.participantMessages = room.participantMessages || {};
-  room.participantMessages[slot] = String(signMessage || '').trim().slice(0, 32) || randomSign();
+  room.participantMessages[slot] = shortSign(signMessage || randomSign());
   room.participantBios = room.participantBios || {};
   room.participantBios[slot] = String(aboutMe || '').trim().replace(/\s+/g, ' ').slice(0, 180);
   room.participantPreferences = room.participantPreferences || {};

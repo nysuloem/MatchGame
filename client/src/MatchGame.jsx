@@ -814,52 +814,34 @@ function DisplayView({ room, roomCode, setRoom }) {
     setIntroComplete(false);
     setIntroStage('waiting');
     setIntroIndex(-1);
-    await delay(350);
+    await delay(300);
 
-    // Use the original 1970s opening as the spine of the sequence.
-    // We preserve Johnny Olson wherever the wording is still correct, and duck
-    // the archival audio only where it says the old celebrities / "75".
+    // The archival Match Game opening is authoritative. Johnny Olson, Gene's
+    // introduction, the applause and the studio banter all remain intact.
+    // We duck only the old celebrity-name section so our current stars can be named.
     startIntroMusic();
-
-    // Original announcer: "Get ready to match the stars!"
     await waitForIntroTime(2.8);
 
-    // Old celebrity names live in this section. Silence that speech and put our
-    // current six names in the same place. The archival track keeps running so
-    // we return to the authentic timing afterward.
-    setIntroTrackVolume(0.015);
+    setIntroTrackVolume(0.008);
     for (let i = 0; i < r.panel.length; i++) {
       setIntroStage('celeb');
       setIntroIndex(i);
       await speakTTS({ text: r.panel[i].name, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-      playAudience(i % 2 === 0 ? 'applause' : 'cheer');
-      await delay(260);
+      await delay(220);
     }
 
-    // Hold the mute until the original six-name block has cleared.
+    // Return entirely to the archival recording: Big Money Match Game line,
+    // Gene introduction, applause and Gene/Johnny banter.
     await waitForIntroTime(18.0);
+    setIntroStage('archival');
+    setIntroIndex(-1);
+    setIntroTrackVolume(0.42);
 
-    // Original announcer: "As we play the star-studded Big Money Match Game..."
-    setIntroTrackVolume(0.24);
-    await waitForIntroTime(24.0);
-
-    // The archival line now says "75", and the following host intro says it
-    // again. Duck that section and supply the timeless host line dynamically.
-    setIntroTrackVolume(0.015);
-    setIntroStage('host');
-    setIntroIndex(r.panel.length);
-    await delay(650);
-    await speakTTS({ text: 'And now, here is the star of Match Game, Gene Rayburn!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-    playAudience('applause');
-
-    // Bring back the original applause/theme tail once the archival "75" host
-    // line has passed, then stop before Gene's studio banter and contestant intro.
-    await waitForIntroTime(31.5);
-    setIntroTrackVolume(0.24);
-    await waitForIntroTime(37.0);
+    // The source recording starts welcoming the original contestants near the end.
+    // Cut away immediately before that and introduce the actual players ourselves.
+    await waitForIntroTime(54.2);
     stopIntroMusic();
 
-    // Contestants are introduced cleanly, with no background music.
     const contestantSlots = r.soloTest ? [1] : [1,2];
     for (const slot of contestantSlots) {
       const name = r.players?.[slot];
@@ -872,11 +854,11 @@ function DisplayView({ room, roomCode, setRoom }) {
       await delay(180);
       if (bio) await speakTTS({ text: bio, isAnnouncer: false, fallbackProfile: { rate:1.0, pitch:1.0 } });
       else await speakTTS({ text: `I'm ${name}, and I'm ready to play Match Game!`, isAnnouncer: false, fallbackProfile: { rate:1.0, pitch:1.0 } });
-      await delay(500);
+      await delay(450);
     }
 
     setIntroStage('finale');
-    await delay(500);
+    await delay(350);
     setIntroComplete(true);
     try { await api.introDone(roomCode); } catch {}
   };
@@ -1049,48 +1031,38 @@ function CelebVisual({ celeb, size = 100, className = '' }) {
 
 function DisplayIntroSpotlight({ room, introIndex, introStage }) {
   const p = room?.panel?.[introIndex];
-  if (introStage === 'host') {
-    return <div className="mg-intro-stage host-stage"><div className="mg-intro-card host">
-      <CelebVisual celeb={room?.host || {name:'Gene Rayburn',avatarType:'man_older'}} size={300} className="intro" />
-      <div className="mg-intro-name">GENE RAYBURN</div><div className="mg-intro-sign">Your host</div>
-    </div></div>;
-  }
+
   if (introStage === 'contestant') {
     const slot = Number(introIndex);
     const pid = room?.playerIds?.[slot];
     const name = room?.players?.[slot] || 'Contestant';
     const bio = room?.participantBios?.[pid] || '';
-    return <div className="mg-intro-stage contestant-stage"><div className="mg-contestant-intro-card">
+    return <div className="mg-contestant-intro-stage"><div className="mg-contestant-intro-card">
       <div className={`mg-contestant-score-shape ${slotClass(room,slot) || (slot===1?'tri':'cir')}`}><span className="mg-contestant-num">0</span></div>
       <div className="mg-intro-name">{name}</div>
       <div className="mg-contestant-bio">{bio || 'Ready to play Match Game!'}</div>
     </div></div>;
   }
-  if (introStage === 'finale') {
-    return (
-      <div className="mg-intro-stage finale">
-        <div className="mg-big-money-logo-wrap">
-          <img className="mg-big-money-logo" src="/images/match-game-logo.png" alt="Match Game" />
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="mg-intro-stage">
-      {!p ? (
-        <div className="mg-intro-waiting-dark" aria-label="Opening music" />
-      ) : (
-        <div className="mg-intro-card" key={introIndex}>
-          <CelebVisual celeb={p} size={260} className="intro" />
-          <div className="mg-intro-name">{p.name}</div>
-          <div className="mg-intro-era">{p.era === 'match-game-1970s' ? 'MATCH GAME REGULAR' : p.era === '1970s' ? '1970s STAR' : p.era === '1980s-1990s' ? '80s / 90s STAR' : 'MODERN STAR'}</div>
-          <div className="mg-intro-sign">{p.signMessage || 'Hi Mom!'}</div>
-        </div>
-      )}
-    </div>
-  );
-}
 
+  if (introStage === 'archival' || introStage === 'finale' || !p) {
+    return <div className="mg-classic-opening">
+      <div className="mg-opening-bulbs" />
+      <div className="mg-opening-window closed"><div className="mg-opening-shutter" /></div>
+      <div className="mg-opening-logo">MATCH<br/>GAME</div>
+    </div>;
+  }
+
+  return <div className="mg-classic-opening">
+    <div className="mg-opening-bulbs" />
+    <div className="mg-opening-window" key={introIndex}>
+      <div className="mg-opening-rotor">
+        <CelebVisual celeb={p} size={390} className="opening-celeb" />
+      </div>
+    </div>
+    <div className="mg-opening-name">{p.name}</div>
+    {p.showIntroSign && p.signMessage && <div className="mg-opening-sign">{p.signMessage}</div>}
+  </div>;
+}
 
 
 function DisplayPanelGrid({ room, revealIndex, roomCode, matches, introIndex }) {

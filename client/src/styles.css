@@ -1535,3 +1535,206 @@ body { margin: 0; }
   font-family:'DM Serif Display',serif;font-size:clamp(20px,2.2vw,30px);
   line-height:1.25;margin-top:18px;color:#342315
 }
+
+
+/* v29 — authentic 1970s Match Game opening + full-stage set recreation */
+
+/* Main game stage: inspired by the uploaded full studio photograph, not a pasted backdrop. */
+.mg-root.display-mode{
+  background:
+    linear-gradient(to bottom, transparent 0 78%, #e95b11 78% 86%, #2d2a27 86% 100%),
+    linear-gradient(90deg,#d73314 0 12%,#f04f13 12% 88%,#d73314 88%) !important;
+  overflow:hidden;
+}
+.mg-root.display-mode::before{
+  display:block!important;
+  content:'';
+  position:fixed;
+  inset:2.5vh 3vw 13vh;
+  z-index:0;
+  pointer-events:none;
+  border:clamp(16px,2.3vw,38px) solid #efe8cf;
+  border-radius:46px;
+  box-shadow:
+    inset 0 0 0 7px #3656a7,
+    inset 0 0 0 13px #f4ebcc,
+    0 0 0 7px rgba(67,48,31,.18);
+  background:
+    linear-gradient(90deg,transparent 0 27%,#f1ead5 27% 34%,transparent 34% 66%,#f1ead5 66% 73%,transparent 73%),
+    #e74613;
+}
+.mg-root.display-mode::after{
+  display:block!important;
+  content:'';
+  position:fixed;
+  left:8vw; right:8vw; bottom:7vh; height:9vh;
+  z-index:0; pointer-events:none;
+  border-radius:50% 50% 0 0 / 28% 28% 0 0;
+  background:#f36717;
+  border-top:5px solid #d54711;
+}
+.mg-display-header{z-index:6}
+.mg-display-main{z-index:3}
+.mg-panel-grid.display{
+  background:#eee5cc!important;
+  border:8px solid #e8dfc6!important;
+  outline:4px solid #a99870;
+  box-shadow:0 14px 25px rgba(39,20,8,.35)!important;
+}
+.mg-panelist,.mg-panelist.revealed,.mg-panelist.matched,.mg-panelist.prelit{
+  background:
+    linear-gradient(to bottom,#f3ecd7 0 57%,#483b90 57% 78%,#eadfc2 78% 100%)!important;
+}
+.mg-panel-grid.display::before{
+  content:'';
+  position:absolute;
+  inset:47% 2.5% auto;
+  height:22%;
+  border-radius:10px;
+  background:#574699;
+  opacity:.92;
+  pointer-events:none;
+}
+.mg-contestant-score-block{
+  background:#f0e6ca!important;
+  border-color:#dfd3b3!important;
+}
+.mg-contestant-score-shape{background:#3a347f!important}
+
+/* Opening: orange field, incandescent perimeter and rotating reveal aperture. */
+.mg-display-center-msg:has(.mg-classic-opening){
+  position:fixed;
+  inset:0;
+  z-index:30;
+  background:#dd711d;
+  margin:0!important;
+  padding:0!important;
+  max-width:none!important;
+  width:100vw!important;
+  height:100vh!important;
+  overflow:hidden;
+}
+.mg-classic-opening{
+  position:fixed;
+  inset:0;
+  z-index:31;
+  display:grid;
+  place-items:center;
+  background:
+    radial-gradient(circle at 20% 15%,rgba(255,225,145,.28) 0 2px,transparent 3px),
+    radial-gradient(circle at 72% 30%,rgba(255,225,145,.2) 0 2px,transparent 3px),
+    #d97922;
+  background-size:42px 42px,55px 55px,auto;
+  overflow:hidden;
+}
+.mg-opening-bulbs{
+  position:absolute;
+  inset:5vh 8vw;
+  border:9px solid #d49645;
+  border-radius:70px;
+  box-shadow:
+    0 0 0 6px rgba(255,212,128,.28),
+    inset 0 0 32px rgba(104,49,10,.28);
+}
+.mg-opening-bulbs::before{
+  content:'';
+  position:absolute;
+  inset:-10px;
+  border-radius:72px;
+  background:
+    radial-gradient(circle,#fffbd3 0 4px,#ffd56a 5px 7px,transparent 8px) top left/34px 16px repeat-x,
+    radial-gradient(circle,#fffbd3 0 4px,#ffd56a 5px 7px,transparent 8px) bottom left/34px 16px repeat-x,
+    radial-gradient(circle,#fffbd3 0 4px,#ffd56a 5px 7px,transparent 8px) top left/16px 34px repeat-y,
+    radial-gradient(circle,#fffbd3 0 4px,#ffd56a 5px 7px,transparent 8px) top right/16px 34px repeat-y;
+  animation:mgBulbPulse .55s steps(2,end) infinite;
+}
+@keyframes mgBulbPulse{50%{filter:brightness(.63)}}
+
+.mg-opening-window{
+  position:relative;
+  width:min(61vw,940px);
+  height:min(61vh,660px);
+  border-radius:70px;
+  overflow:hidden;
+  background:#182049;
+  border:12px solid #e1a34c;
+  box-shadow:0 0 0 5px #f5d391,0 10px 28px rgba(70,31,5,.35);
+  perspective:1000px;
+  animation:mgWindowOpen .55s cubic-bezier(.18,.8,.22,1) both;
+}
+@keyframes mgWindowOpen{
+  0%{transform:scaleX(.08) rotateY(78deg)}
+  55%{transform:scaleX(.42) rotateY(42deg)}
+  100%{transform:scaleX(1) rotateY(0)}
+}
+.mg-opening-window.closed{animation:mgWindowClose 1.25s ease-in-out infinite alternate}
+@keyframes mgWindowClose{from{transform:scaleX(.07)}to{transform:scaleX(.18)}}
+.mg-opening-rotor{
+  width:100%;height:100%;display:grid;place-items:center;
+  animation:mgRotor .5s ease-out both;
+}
+@keyframes mgRotor{from{transform:rotateY(-90deg);opacity:.2}to{transform:rotateY(0);opacity:1}}
+.mg-opening-celeb{
+  width:100%!important;height:100%!important;max-width:none!important;
+  object-fit:cover!important;object-position:50% 24%!important;
+  border-radius:0!important;filter:saturate(.88) contrast(.98)!important;
+}
+.mg-opening-name{
+  position:absolute;
+  bottom:5.8vh;
+  left:50%;transform:translateX(-50%);
+  font-family:'Bowlby One',sans-serif;
+  font-size:clamp(24px,4.2vw,62px);
+  color:#fff0c0;
+  text-shadow:3px 3px 0 #6d3511;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  white-space:nowrap;
+}
+.mg-opening-sign{
+  position:absolute;
+  right:12vw;
+  bottom:14vh;
+  min-width:220px;
+  max-width:360px;
+  padding:14px 24px;
+  background:#a9e6e4;
+  border:5px solid #edf7ed;
+  outline:3px solid #417a79;
+  color:#25302f;
+  font-family:'DM Serif Display',serif;
+  font-style:italic;
+  font-size:clamp(22px,3vw,40px);
+  line-height:1;
+  text-align:center;
+  transform:rotate(-2deg);
+  box-shadow:5px 7px 0 rgba(78,48,18,.28);
+  text-transform:none;
+}
+.mg-opening-logo{
+  position:absolute;
+  font-family:'Bowlby One',sans-serif;
+  font-size:clamp(66px,11vw,170px);
+  line-height:.75;
+  color:#f2e7c6;
+  -webkit-text-stroke:4px #39539a;
+  text-shadow:5px 5px 0 #e84e17;
+  text-align:center;
+  letter-spacing:-.04em;
+}
+.mg-opening-shutter{position:absolute;inset:0;background:#d97922}
+
+/* Contestant introductions deliberately lose the opening music/set imagery. */
+.mg-contestant-intro-stage{
+  position:fixed;inset:0;z-index:31;display:grid;place-items:center;
+  background:#d97922;
+}
+.mg-contestant-intro-card{
+  min-width:min(650px,82vw);max-width:760px;padding:30px 42px;
+  background:#efe1bb;border:7px solid #b99b60;border-radius:16px;
+  box-shadow:0 14px 30px rgba(0,0,0,.32),inset 0 0 0 3px #fff1c8;text-align:center;
+}
+.mg-contestant-bio{font-family:'DM Serif Display',serif;font-size:clamp(20px,2.2vw,30px);line-height:1.25;margin-top:18px;color:#342315}
+
+/* Intro signs are simple blue rectangles, never oversized cards. */
+.mg-intro-sign{border-radius:0!important;max-width:320px!important;padding:8px 18px!important;font-size:clamp(18px,2.5vw,32px)!important}
