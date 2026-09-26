@@ -69,6 +69,7 @@ let thinkingMusicAudio = null;
 let introMusicAudio = null;
 let creditsMusicAudio = null;
 const THEME_TRACK = '/audio/match-game-73.mp3';
+const INTRO_TRACK = '/audio/match-game-intro-clean.mp3';
 const REGULAR_TRACK = '/audio/regular-music.mp3';
 const safePlayAudio = (audio) => audio.play().catch(() => {});
 const fadeAndStop = (audio, ms = 450) => {
@@ -105,9 +106,9 @@ const playRetroSting = () => {
 const startIntroMusic = () => {
   if (introMusicAudio) return;
   try {
-    introMusicAudio = new Audio(THEME_TRACK);
+    introMusicAudio = new Audio(INTRO_TRACK);
     introMusicAudio.loop = true;
-    introMusicAudio.volume = 0.14;
+    introMusicAudio.volume = 0.18;
     safePlayAudio(introMusicAudio);
   } catch { playRetroSting(); }
 };
