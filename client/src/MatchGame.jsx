@@ -88,9 +88,9 @@ let thinkingMusicAudio = null;
 let introMusicAudio = null;
 let creditsMusicAudio = null;
 const THEME_TRACK = '/audio/match-game-73.mp3';
-const OPENING_CALL = '/audio/opening-get-ready.mp3';
+const OPENING_CALL = '/audio/opening-archival.mp3';
 const OPENING_BED = '/audio/opening-music-bed.mp3';
-const OPENING_ARCHIVAL = '/audio/opening-archival.mp3';
+const OPENING_CONTESTANT_CUE = '/audio/opening-get-ready.mp3';
 const REGULAR_TRACK = '/audio/regular-music.mp3';
 const safePlayAudio = (audio) => audio.play().catch(() => {});
 const fadeAndStop = (audio, ms = 450) => {
@@ -853,10 +853,10 @@ function DisplayView({ room, roomCode, setRoom }) {
     setIntroIndex(-1);
     await delay(300);
 
-    // The short opening call plays intact. A vocal-reduced bed from the supplied
-    // recording carries the new celebrity roll call without the old names.
-    const call = playIntroClip(OPENING_CALL, { volume: .55 });
-    await waitForIntroEnd(call, 5600);
+    // The long recording starts with 'Get ready to match the stars'. Its
+    // vocal-reduced mix carries the replacement celebrity roll call.
+    playIntroClip(OPENING_CALL, { volume: .55 });
+    await delay(4800);
     playIntroClip(OPENING_BED, { volume: .46, loop: true, start: 4.5 });
     for (let i = 0; i < r.panel.length; i++) {
       setIntroStage('celeb');
@@ -865,16 +865,16 @@ function DisplayView({ room, roomCode, setRoom }) {
       await delay(220);
     }
 
-    // Rejoin the original announcer at the show/host introduction. The logo
-    // lifts into the stage reveal as the recorded host entrance begins.
+    // The separate short clip is the transition immediately before the
+    // contestant introductions. Lift the marquee as Gene enters.
     setIntroStage('logo');
     setIntroIndex(-1);
-    const archival = playIntroClip(OPENING_ARCHIVAL, { volume: .52, start: 18 });
-    await delay(4000);
+    const cue = playIntroClip(OPENING_CONTESTANT_CUE, { volume: .52 });
+    await delay(1100);
     setIntroStage('logo-lift');
     await delay(1800);
     setIntroStage('host');
-    await waitForIntroEnd(archival, 24500);
+    await waitForIntroEnd(cue, 2500);
     stopIntroMusic();
 
     const contestantSlots = r.soloTest ? [1] : [1,2];
