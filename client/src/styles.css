@@ -1499,33 +1499,3 @@ body { margin: 0; }
 .mg-top-answers{width:min(720px,86vw);max-width:720px;gap:7px;padding:18px;background:#d8c38e;border:7px solid #a78b52;border-radius:18px;box-shadow:inset 0 0 0 3px #f5e8c0,0 8px 0 rgba(91,65,31,.55)}.mg-top-answer{min-height:72px;border:4px solid #2c2821;background:#79d8db;box-shadow:inset 0 0 12px rgba(255,255,255,.35);padding:8px 18px}.mg-top-answer-value{order:2;margin-left:auto;color:#1f1d19;background:#e6d5a5;border:3px solid #aa9057;padding:8px 13px;min-width:94px;text-align:center}.mg-top-answer-text{order:1;flex:1;text-transform:uppercase;font-family:'Bowlby One',sans-serif;font-style:normal;font-size:clamp(20px,2.3vw,32px);color:#25211d}
 .mg-panelist.host-judgable{cursor:pointer}.mg-panelist.host-judgable:hover{box-shadow:inset 0 0 0 4px rgba(255,245,180,.7)}.mg-panelist.host-judgable:hover::after{content:'HOST: CLICK TO TOGGLE';position:absolute;top:4px;right:4px;z-index:12;background:rgba(26,20,14,.78);color:#fff3c5;font:700 9px/1 'DM Mono',monospace;padding:5px 6px;letter-spacing:.06em}
 @media(max-height:720px){.mg-root.display-mode .mg-celeb-photo,.mg-root.display-mode .mg-panelist svg{height:105px!important}.mg-panelist-answer.blue-card{min-height:58px;font-size:20px}.mg-display-header{height:72px}}
-
-
-/* v28 — real photographic Match Game set plate */
-.mg-root.display-mode{
-  background:
-    linear-gradient(rgba(47,24,7,.20),rgba(47,24,7,.20)),
-    url("https://media.vanityfair.com/photos/576c444044d93e6e4482bb1f/16:9/w_1280,c_limit/match-game-1970.jpg") center center / cover fixed no-repeat !important;
-}
-.mg-root.display-mode::before,.mg-root.display-mode::after{display:none!important}
-.mg-display-main::before{
-  content:'';position:absolute;inset:0;pointer-events:none;z-index:-1;
-  background:linear-gradient(to bottom,rgba(36,15,3,.08),rgba(36,15,3,.16));
-}
-.mg-panel-grid.display{
-  background:rgba(239,222,178,.76)!important;
-  backdrop-filter:blur(1.5px);
-  box-shadow:0 12px 28px rgba(30,15,4,.45),inset 0 0 0 3px rgba(255,245,207,.76)!important;
-}
-.mg-panelist,.mg-panelist.revealed,.mg-panelist.matched,.mg-panelist.prelit{
-  background:linear-gradient(to bottom,rgba(247,234,198,.86) 0 57%,rgba(18,100,94,.92) 57% 82%,rgba(232,215,172,.92) 82%)!important;
-}
-.mg-about-me{resize:vertical;min-height:82px;line-height:1.35}
-.contestant-stage{display:grid;place-items:center}
-.mg-contestant-intro-card{
-  min-width:min(650px,82vw);max-width:760px;padding:30px 42px;
-  background:rgba(239,220,174,.94);border:7px solid #b89c61;border-radius:18px;
-  box-shadow:0 14px 30px rgba(0,0,0,.35),inset 0 0 0 3px #fff0c7;text-align:center;
-}
-.mg-contestant-intro-card .mg-contestant-score-shape{margin:0 auto 18px;width:110px;height:76px;display:grid;place-items:center}
-.mg-contestant-bio{font-family:'DM Serif Display',serif;font-size:clamp(20px,2.2vw,30px);line-height:1.25;margin-top:18px;color:#342315}

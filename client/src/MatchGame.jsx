@@ -27,7 +27,7 @@ const req = async (path, opts = {}) => {
 
 const api = {
   createRoom:   (playerName, playerCount=2, soloTest=false) => req('/api/room', { method:'POST', body:{playerName, playerCount, soloTest} }),
-  joinRoom:     (code, playerName, signMessage='', aboutMe='', rolePreference='surprise', selfieData='') => req(`/api/room/${code}/join`, { method:'POST', body:{playerName, signMessage, aboutMe, rolePreference, selfieData} }),
+  joinRoom:     (code, playerName, signMessage='', rolePreference='surprise', selfieData='') => req(`/api/room/${code}/join`, { method:'POST', body:{playerName, signMessage, rolePreference, selfieData} }),
   getRoom:      (code) => req(`/api/room/${code}`),
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
   submitAnswer: (code, slot, answer) => req(`/api/room/${code}/answer`, { method:'POST', body:{slot,answer} }),
@@ -365,7 +365,6 @@ export default function MatchGame() {
   const [roomCode, setRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
   const [signMessage, setSignMessage] = useState('');
-  const [aboutMe, setAboutMe] = useState('');
   const [rolePreference, setRolePreference] = useState('surprise');
   const [selfieData, setSelfieData] = useState('');
   const [playerSlot, setPlayerSlot] = useState(null);
@@ -453,7 +452,7 @@ export default function MatchGame() {
     try {
       const code = roomCode.toUpperCase();
       // Slot 1 is reserved for display — join as slot 2 or 3
-      const { room: r, slot } = await api.joinRoom(code, playerName.trim(), signMessage.trim(), aboutMe.trim(), rolePreference, selfieData);
+      const { room: r, slot } = await api.joinRoom(code, playerName.trim(), signMessage.trim(), rolePreference, selfieData);
       setRoom(r); setPlayerSlot(slot);
       lastVersionRef.current = r.version;
       setRoomCode(code);
@@ -486,10 +485,6 @@ export default function MatchGame() {
               <input className="mg-input" value={signMessage}
                 onChange={e=>setSignMessage(e.target.value)}
                 placeholder="e.g. Hi Mom!" maxLength={32} />
-              <label className="mg-label">Tell us about yourself</label>
-              <textarea className="mg-input mg-about-me" value={aboutMe}
-                onChange={e=>setAboutMe(e.target.value)}
-                placeholder="A short line the host can read when you're introduced…" maxLength={180} rows={3} />
               <label className="mg-label">What would you prefer?</label>
               <select className="mg-input" value={rolePreference} onChange={e=>setRolePreference(e.target.value)}>
                 <option value="surprise">Surprise me</option>
@@ -557,10 +552,6 @@ export default function MatchGame() {
               <input className="mg-input" value={signMessage}
                 onChange={e=>setSignMessage(e.target.value)}
                 placeholder="e.g. Hi Mom!" maxLength={32} />
-              <label className="mg-label">Tell us about yourself</label>
-              <textarea className="mg-input mg-about-me" value={aboutMe}
-                onChange={e=>setAboutMe(e.target.value)}
-                placeholder="A short line the host can read when you're introduced…" maxLength={180} rows={3} />
               <label className="mg-label">What would you prefer?</label>
               <select className="mg-input" value={rolePreference} onChange={e=>setRolePreference(e.target.value)}>
                 <option value="surprise">Surprise me</option>
@@ -819,23 +810,9 @@ function DisplayView({ room, roomCode, setRoom }) {
     await speakTTS({ text: 'And now, here is the star of Match Game, Gene Rayburn!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     playAudience('applause');
     await delay(1500);
-    const contestantSlots = r.soloTest ? [1] : [1,2];
-    for (const slot of contestantSlots) {
-      const name = r.players?.[slot];
-      if (!name) continue;
-      const pid = r.playerIds?.[slot];
-      const bio = String(r.participantBios?.[pid] || '').trim();
-      setIntroStage('contestant');
-      setIntroIndex(slot);
-      await speakTTS({ text: `Welcome, ${name}. Tell us about yourself, ${name.split(' ')[0]}.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-      await delay(180);
-      if (bio) await speakTTS({ text: bio, isAnnouncer: false, fallbackProfile: { rate:1.0, pitch:1.0 } });
-      else await speakTTS({ text: `I'm ${name}, and I'm ready to play Match Game!`, isAnnouncer: false, fallbackProfile: { rate:1.0, pitch:1.0 } });
-      await delay(500);
-    }
     setIntroStage('finale');
-    await speakTTS({ text: 'Let's play Match Game!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-    await delay(1200);
+    await speakTTS({ text: 'As we play the star-studded Big Money... Match Game!', isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+    await delay(1800);
     stopIntroMusic();
     setIntroComplete(true);
     try { await api.introDone(roomCode); } catch {}
@@ -1013,17 +990,6 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
     return <div className="mg-intro-stage host-stage"><div className="mg-intro-card host">
       <CelebVisual celeb={room?.host || {name:'Gene Rayburn',avatarType:'man_older'}} size={300} className="intro" />
       <div className="mg-intro-name">GENE RAYBURN</div><div className="mg-intro-sign">Your host</div>
-    </div></div>;
-  }
-  if (introStage === 'contestant') {
-    const slot = Number(introIndex);
-    const pid = room?.playerIds?.[slot];
-    const name = room?.players?.[slot] || 'Contestant';
-    const bio = room?.participantBios?.[pid] || '';
-    return <div className="mg-intro-stage contestant-stage"><div className="mg-contestant-intro-card">
-      <div className={`mg-contestant-score-shape ${slotClass(room,slot) || (slot===1?'tri':'cir')}`}><span className="mg-contestant-num">0</span></div>
-      <div className="mg-intro-name">{name}</div>
-      <div className="mg-contestant-bio">{bio || 'Ready to play Match Game!'}</div>
     </div></div>;
   }
   if (introStage === 'finale') {

@@ -95,7 +95,6 @@ const promptClueRootWords = (prompt = '') => {
 // In-memory no-repeat database for the current server process. Each room also tracks
 // its own used prompts so a family play-through never sees an exact repeat.
 const GLOBAL_USED_ROUND_PROMPTS = new Set();
-const ROUND_PROMPT_KIND = 'round-v2'; // fresh question era; old regular-question history is intentionally not reused
 
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -328,35 +327,6 @@ const enrichPanelWithWikipediaImages = async (panel = []) => {
     return img ? { ...p, ...img } : p;
   }));
   return enriched;
-};
-
-const requireRealCelebrityImages = async (panel = []) => {
-  const poolsFor = (era) => {
-    if (era === 'match-game-1970s') return shuffle(CLASSIC_MATCH_GAMERS.map(name => makeClassicPanelist(name)));
-    if (era === '1970s') return shuffle(SEVENTIES_GUEST_BACKUPS.map(p => ({...p, era:'1970s'})));
-    if (era === '1980s-1990s') return shuffle(EIGHTIES_NINETIES_BACKUPS.map(p => ({...p, era:'1980s-1990s'})));
-    return shuffle(MODERN_ERA_BACKUPS.map(p => ({...p, era:'modern'})));
-  };
-  const used = new Set(panel.filter(Boolean).map(p => String(p.name||'').toLowerCase()));
-  const result = [];
-  for (const original of panel) {
-    if (!original || original.isHuman || original.imageUrl) { result.push(original); continue; }
-    let replacement = null;
-    for (const candidate of poolsFor(original.era)) {
-      const key = String(candidate.name||'').toLowerCase();
-      if (!key || used.has(key)) continue;
-      const img = await fetchWikipediaHeadshot(candidate.name);
-      if (img?.imageUrl) {
-        used.delete(String(original.name||'').toLowerCase());
-        used.add(key);
-        replacement = { ...original, ...candidate, ...img, answer:null };
-        break;
-      }
-    }
-    if (!replacement) throw new Error(`Could not find a real photo for the ${original.era || 'celebrity'} panel seat`);
-    result.push(replacement);
-  }
-  return result;
 };
 
 
@@ -764,23 +734,142 @@ const PROMPT_CATEGORIES = [
 ];
 
 const FALLBACK_ROUND_PROMPTS = [
-  { prompt: "Kate said, \"My husband thinks he's a dog and I'm beginning to believe him. Last night he brought home a __________\"", answers: ['bone','stick','cat'], category:'marriage' },
-  { prompt: "Gertrude asked the waiter, \"Is this chicken fresh?\" The waiter said, \"Lady, if it were any fresher, it would __________\"", answers: ['cluck','walk','lay eggs'], category:'restaurant' },
-  { prompt: "The beachcomber said, \"This bottle must have come from a doctor. There was a __________ in the bottle\"", answers: ['prescription','pill','thermometer'], category:'doctor' },
-  { prompt: "Ellen said, \"I'm thrilled to be Queen of the Supermarket, but do I have to wear a crown made out of __________\"", answers: ['coupons','lettuce','cans'], category:'supermarket' },
-  { prompt: "The whale said, \"I never want to see Jonah again. Whatever he was doing inside me made me __________\"", answers: ['sick','burp','itch'], category:'story' },
-  { prompt: "Dumb Dora is so dumb, she went all the way to Paris to get a French __________", answers: ['kiss','fry','poodle'], category:'dumb dora' },
-  { prompt: "At the wedding, as soon as the bride's family saw what the groom looked like, they threw __________ out the window", answers: ['him','the bride','rice'], category:'wedding' },
-  { prompt: "The absent-minded photographer put his camera in the coffee, then tried to take a picture with a __________", answers: ['cup','spoon','donut'], category:'photographer' },
-  { prompt: "Myrna said, \"My date was so cheap, when the waiter brought the check he suddenly became __________\"", answers: ['blind','asleep','invisible'], category:'dating' },
-  { prompt: "The nervous undertaker said, \"This job is killing me. Last night I dreamed I was sleeping in a __________\"", answers: ['coffin','casket','grave'], category:'undertaker' },
-  { prompt: "The farmer said, \"That rooster is so lazy, every morning the hens have to __________ him\"", answers: ['wake','carry','crow for'], category:'farm' },
-  { prompt: "The doctor said, \"Your husband is in perfect health, except every time I tap his knee he __________\"", answers: ['kicks me','barks','giggles'], category:'doctor' },
-  { prompt: "The new bride said, \"Our honeymoon hotel was so cheap, instead of a waterbed they gave us a __________\"", answers: ['puddle','bathtub','hose'], category:'honeymoon' },
-  { prompt: "The magician said, \"My assistant quit after I accidentally pulled a __________ out of her hat\"", answers: ['rabbit','snake','bra'], category:'magic' },
-  { prompt: "Old Man Perry said, \"My hearing aid is so powerful, yesterday I heard my neighbor __________\"", answers: ['snore','burp','thinking'], category:'neighbor' },
-  { prompt: "The zookeeper said, \"The gorilla has been watching too much television. Yesterday he tried to __________ the banana\"", answers: ['change channels with','remote-control','answer'], category:'zoo' }
-]
+  { prompt: "Kate said, \"My husband thinks he's a dog and I'm beginning to believe him. Last night he brought home a __________\"", answers: ['bone','stick','cat'], category: 'marriage' },
+  { prompt: "Gertrude asked the waiter, \"Is this chicken fresh?\" The waiter said, \"Lady, if it were any fresher, it would __________\"", answers: ['cluck','walk','lay eggs'], category: 'restaurant' },
+  { prompt: "The beachcomber said, \"This bottle must have come from a doctor. There was a __________ in the bottle\"", answers: ['prescription','pill','thermometer'], category: 'doctor' },
+  { prompt: "Ellen said, \"I'm thrilled to be Queen of the Supermarket, but do I have to wear a crown made out of __________\"", answers: ['coupons','lettuce','cans'], category: 'supermarket' },
+  { prompt: "The whale said, \"I never want to see Jonah again. Whatever he was doing inside me made me __________\"", answers: ['sick','burp','itch'], category: 'bible comedy' },
+  { prompt: "Dumb Dora is so dumb, she went all the way to Paris to get a French __________", answers: ['kiss','fry','poodle'], category: 'dumb dora' },
+  { prompt: "At the wedding, as soon as the bride's family saw what the groom looked like, they threw __________ out the window", answers: ['him','the bride','rice'], category: 'wedding' },
+  { prompt: "The absent-minded photographer put his camera in the coffee, then tried to take a picture with a __________", answers: ['cup','spoon','donut'], category: 'photographer' },
+
+  // These are deliberately "definitive" Match Game prompts: one likely answer,
+  // a couple of plausible alternates, and room for one funny/innuendo panel answer.
+  { prompt: "Grandma Ethel's dating profile said she was looking for a man with a big ___.", answers: ['wallet','heart','truck'], category: 'dating' },
+  { prompt: "Rookie Randy got nervous at the gym and dropped a ___ on his foot.", answers: ['weight','dumbbell','barbell'], category: 'gym' },
+  { prompt: "Tiny Tina's phone autocorrected 'love you' to 'send ___.", answers: ['money','cash','pizza'], category: 'phones' },
+  { prompt: "Chef Rodriguez's secret ingredient turned out to be ___.", answers: ['garlic','beer','ketchup'], category: 'food' },
+  { prompt: "Professor Bumbleworth's Zoom background accidentally showed his ___.", answers: ['underwear','bed','cat'], category: 'work' },
+  { prompt: "Cowboy Pete tried to impress his date by riding a ___.", answers: ['horse','bull','scooter'], category: 'dating' },
+  { prompt: "Nurse Nancy said the patient needed less stress and more ___.", answers: ['sleep','wine','vacation'], category: 'health' },
+  { prompt: "Tourist Tim packed sunscreen, a swimsuit, and one giant ___.", answers: ['hat','towel','camera'], category: 'vacation' },
+  { prompt: "Librarian Louise shushed everyone, then loudly dropped her ___.", answers: ['phone','book','purse'], category: 'work' },
+  { prompt: "Millionaire Mortimer surprised everyone by arriving at the wedding in a ___.", answers: ['limo','helicopter','taxi'], category: 'wedding' },
+  { prompt: "Yoga Instructor Yasmine said the secret to inner peace is a good ___.", answers: ['nap','stretch','snack'], category: 'gym' },
+  { prompt: "Plumber Phil said the bathroom smelled like ___.", answers: ['toilet','fish','garbage'], category: 'home' },
+  { prompt: "Detective Drake knew the suspect was guilty when he found the missing ___.", answers: ['phone','wallet','shoe'], category: 'mystery' },
+  { prompt: "Astronaut Al's space suit was fine until he sat on a ___.", answers: ['button','rock','taco'], category: 'work' },
+  { prompt: "At the family reunion, Uncle Bob hid the good ___ in his jacket.", answers: ['wine','beer','cheese'], category: 'family' },
+  { prompt: "Martha's smart fridge refused to open until she said please and bought more ___.", answers: ['milk','beer','cheese'], category: 'home' },
+  { prompt: "The gym teacher said the new uniform was just shorts and a giant ___.", answers: ['whistle','shirt','sock'], category: 'school' },
+  { prompt: "Dumb Dora thought a dating app swipe meant she had to clean the ___.", answers: ['screen','floor','phone'], category: 'dating apps' },
+
+  { prompt: "Dumb Dora is so dumb, she thought a Hoover was a __________.", answers: ['vacuum','president','dam'], category: 'dumb dora' },
+  { prompt: "Dumb Dora is so dumb, she thought Bluetooth was a __________.", answers: ['toothbrush','dentist','phone'], category: 'dumb dora' },
+  { prompt: "Dumb Dora is so dumb, she thought a hot spot was a __________.", answers: ['rash','burn','stove'], category: 'dumb dora' },
+  { prompt: "Dumb Dora is so dumb, she thought a password was a __________.", answers: ['word','key','door'], category: 'dumb dora' },
+  { prompt: "Dumb Dora is so dumb, she thought a streaming service was a __________.", answers: ['plumber','river','shower'], category: 'dumb dora' },
+  { prompt: "Dumb Dora is so dumb, she thought an influencer was a __________.", answers: ['doctor','fan','virus'], category: 'dumb dora' },
+  { prompt: "The influencer's beach photo was ruined when a seagull stole her ___.", answers: ['sandwich','phone','bikini'], category: 'social media' },
+  { prompt: "At the office party, Steve accidentally photocopied his ___.", answers: ['butt','face','hand'], category: 'work' },
+  { prompt: "The hotel said breakfast was included, but it was only a single ___.", answers: ['muffin','egg','banana'], category: 'travel' },
+  { prompt: "The dog groomer gave Mr. Jenkins' poodle a haircut that looked like a ___.", answers: ['mop','lion','rat'], category: 'pets' },
+  { prompt: "The new car came with heated seats and a talking ___.", answers: ['dashboard','steering wheel','cupholder'], category: 'cars' },
+  { prompt: "At karaoke night, Kevin got booed after singing into a ___.", answers: ['banana','remote','brush'], category: 'parties' },
+  { prompt: "Brett said her new boyfriend was cheap because he proposed with a ___.", answers: ['coupon','ring pop','cheque'], category: 'dating' },
+  { prompt: "The dentist told Marvin to open wide, then found a ___ in there.", answers: ['toothbrush','cavity','sandwich'], category: 'health' },
+  { prompt: "Dumb Derek brought flowers to his date, but they were actually ___.", answers: ['weeds','plastic','broccoli'], category: 'dating' },
+  { prompt: "The lifeguard blew his whistle when he saw Grandma doing ___ in the pool.", answers: ['cannonballs','yoga','laundry'], category: 'vacation' },
+  { prompt: "At the buffet, Uncle Lou filled his pockets with ___.", answers: ['shrimp','bread','cheese'], category: 'family' },
+  { prompt: "The bride was late because her dress got stuck in the ___.", answers: ['door','car','elevator'], category: 'wedding' },
+  { prompt: "The influencer said her secret to beauty was sleep, water, and a little ___.", answers: ['makeup','wine','filter'], category: 'social media' },
+  { prompt: "The substitute teacher lost control when the class hid his ___.", answers: ['glasses','phone','pants'], category: 'school' },
+  { prompt: "At the dog park, Helen was embarrassed when her dog stole a man's ___.", answers: ['hotdog','hat','shorts'], category: 'pets' },
+  { prompt: "The mechanic said the car's problem was too much ___ in the engine.", answers: ['oil','water','cheese'], category: 'cars' },
+  { prompt: "The magician's trick went wrong when he pulled a ___ out of his pants.", answers: ['rabbit','phone','sock'], category: 'parties' },
+  { prompt: "Grandpa's smartwatch said his heart rate jumped when he saw ___.", answers: ['Grandma','beer','Betty'], category: 'family' },
+  { prompt: "The waiter dropped the tray when the customer asked for extra ___.", answers: ['cheese','sauce','napkins'], category: 'restaurants' },
+  { prompt: "At the gym, Pamela said she only came to exercise her ___.", answers: ['mouth','thumbs','eyes'], category: 'gym' },
+  { prompt: "The office printer jammed because someone tried to print a ___.", answers: ['sandwich','cheque','photo'], category: 'work' },
+  { prompt: "On movie night, Dad cried when someone ate the last ___.", answers: ['popcorn','chip','cookie'], category: 'family' },
+  { prompt: "The yoga class got awkward when Steve's pose revealed his ___.", answers: ['butt','underwear','belly'], category: 'gym' },
+  { prompt: "The teenager said the family vacation was ruined because there was no ___.", answers: ['wifi','signal','phone'], category: 'vacation' },
+  { prompt: "The bachelor party ended early when the groom lost his ___.", answers: ['pants','ring','wallet'], category: 'wedding' },
+  { prompt: 'Dumb Donald thought a selfie stick was something you used to stir ___.', answers: ['coffee', 'soup', 'paint'], category: 'phones' },
+  { prompt: 'At the casino, Aunt Linda bet her entire paycheck on ___.', answers: ['black', 'red', 'horses'], category: 'money' },
+  { prompt: 'The dentist told me to floss more, so I tried flossing with ___.', answers: ['string', 'spaghetti', 'hair'], category: 'health' },
+  { prompt: 'The dating app said Brenda matched with someone who loved long walks and short ___.', answers: ['pants', 'texts', 'relationships'], category: 'dating' },
+  { prompt: 'The food delivery driver got confused and brought us a bag full of ___.', answers: ['fries', 'napkins', 'socks'], category: 'food delivery' },
+  { prompt: 'The teenager said the worst punishment was losing access to ___.', answers: ['wifi', 'phone', 'TikTok'], category: 'family' },
+  { prompt: 'At Thanksgiving, Grandpa carved the turkey with a ___.', answers: ['chainsaw', 'knife', 'fork'], category: 'family' },
+  { prompt: 'The new smart toilet refused to flush until it heard a ___.', answers: ['compliment', 'password', 'song'], category: 'home' },
+  { prompt: 'The bride threw her bouquet and knocked over the ___.', answers: ['cake', 'grandma', 'photographer'], category: 'wedding' },
+  { prompt: 'The lifeguard said no running, no diving, and absolutely no ___.', answers: ['peeing', 'screaming', 'dancing'], category: 'pool' },
+  { prompt: 'At the office meeting, Karen accidentally shared her screen and everyone saw her ___.', answers: ['emails', 'shopping cart', 'calendar'], category: 'work' },
+  { prompt: 'The hotel room was romantic until we found a ___ in the bed.', answers: ['sock', 'bug', 'sandwich'], category: 'travel' },
+  { prompt: 'The yoga instructor told everyone to breathe deeply, but Bob smelled like ___.', answers: ['garlic', 'cheese', 'feet'], category: 'gym' },
+  { prompt: 'At the school dance, the DJ only played songs about ___.', answers: ['love', 'breakups', 'ducks'], category: 'school' },
+  { prompt: 'The mechanic said my car was making that noise because it needed a new ___.', answers: ['belt', 'muffler', 'attitude'], category: 'cars' },
+  { prompt: 'The dog looked guilty because he had eaten the ___.', answers: ['homework', 'steak', 'shoe'], category: 'pets' },
+  { prompt: 'At karaoke, Grandma brought the house down singing into a ___.', answers: ['microphone', 'hairbrush', 'banana'], category: 'parties' },
+  { prompt: 'The doctor told me I was allergic to ___.', answers: ['cats', 'work', 'exercise'], category: 'health' },
+  { prompt: 'At the fancy restaurant, Dad embarrassed us by asking for extra ___.', answers: ['ketchup', 'gravy', 'cheese'], category: 'restaurants' },
+  { prompt: "The bachelor party got quiet when the stripper turned out to be the groom's ___.", answers: ['mother', 'teacher', 'boss'], category: 'wedding' },
+  { prompt: 'The new gym opened with treadmills, weights, and a juice bar full of ___.', answers: ['protein', 'smoothies', 'regret'], category: 'gym' },
+  { prompt: 'The substitute teacher knew it was going to be a bad day when a student brought a ___.', answers: ['snake', 'drum', 'megaphone'], category: 'school' },
+  { prompt: 'My phone died right before I could send a text that said ___.', answers: ['sorry', 'help', 'yes'], category: 'phones' },
+  { prompt: 'The influencer said her breakfast routine starts with coffee and ends with ___.', answers: ['crying', 'selfies', 'eggs'], category: 'social media' },
+  { prompt: 'The camping trip was ruined when Dad forgot the ___.', answers: ['tent', 'matches', 'beer'], category: 'vacation' },
+  { prompt: 'The family dog joined the Zoom call and showed everyone his ___.', answers: ['tail', 'butt', 'toy'], category: 'pets' },
+  { prompt: 'The mall Santa got fired after asking every kid for a ___.', answers: ['tip', 'beer', 'hug'], category: 'holiday' },
+  { prompt: 'The real estate agent said the house had charm, character, and a family of ___.', answers: ['mice', 'ghosts', 'raccoons'], category: 'home' },
+  { prompt: 'The magician asked for a volunteer and accidentally sawed the ___ in half.', answers: ['table', 'assistant', 'sandwich'], category: 'parties' },
+  { prompt: 'The wedding DJ announced the first dance, then played the theme from ___.', answers: ['Jaws', 'Rocky', 'Jeopardy'], category: 'wedding' },
+  { prompt: 'The teenager cleaned his room only after we threatened to cancel his ___.', answers: ['wifi', 'data', 'allowance'], category: 'family' },
+  { prompt: 'The restaurant called it a seafood platter, but it was mostly ___.', answers: ['shrimp', 'fish', 'ice'], category: 'restaurants' },
+  { prompt: 'The office Christmas party ended when someone photocopied the ___.', answers: ['boss', 'ham', 'mistletoe'], category: 'work' },
+  { prompt: 'The school principal banned phones, hats, and anything shaped like a ___.', answers: ['banana', 'weapon', 'duck'], category: 'school' },
+  { prompt: 'On the first date, she knew he was cheap when he split the ___.', answers: ['bill', 'fries', 'coupon'], category: 'dating' },
+  { prompt: 'The GPS said turn left, but Uncle Frank drove into a ___.', answers: ['ditch', 'lake', 'driveway'], category: 'cars' },
+  { prompt: 'The baby shower got awkward when everyone brought the same ___.', answers: ['diapers', 'blanket', 'cake'], category: 'family' },
+  { prompt: 'The hot tub party ended when someone dropped in a ___.', answers: ['phone', 'sandwich', 'dog'], category: 'parties' },
+  { prompt: 'The new restaurant serves fusion food: sushi, tacos, and ___.', answers: ['pizza', 'poutine', 'regret'], category: 'restaurants' },
+  { prompt: 'The fitness tracker congratulated Dad for walking to the ___.', answers: ['fridge', 'bathroom', 'couch'], category: 'gym' },
+  { prompt: "The cruise director said tonight's entertainment is karaoke and competitive ___.", answers: ['dancing', 'bingo', 'napping'], category: 'vacation' },
+  { prompt: 'The barber asked what I wanted, and I said anything except a ___.', answers: ['mullet', 'buzzcut', 'perm'], category: 'hair' },
+  { prompt: 'The dog trainer said the problem was not the dog, it was the ___.', answers: ['owner', 'leash', 'treats'], category: 'pets' },
+  { prompt: 'The dentist said I needed a crown, but I thought he meant a ___.', answers: ['king', 'hat', 'tiara'], category: 'health' },
+  { prompt: 'The new dating show is called Love Is Blind, Deaf, and ___.', answers: ['confused', 'hungry', 'broke'], category: 'dating' },
+  { prompt: 'The fortune teller looked at my palm and said I would soon lose my ___.', answers: ['money', 'hair', 'patience'], category: 'weird' },
+  { prompt: 'The chef cried when the critic compared his soup to ___.', answers: ['dishwater', 'gravy', 'mud'], category: 'food' },
+  { prompt: 'The babysitter quit after the children taught the parrot to say ___.', answers: ['no', 'help', 'bad words'], category: 'family' },
+  { prompt: 'At the picnic, ants ignored the watermelon and went straight for the ___.', answers: ['cake', 'beer', 'chips'], category: 'food' },
+  { prompt: 'The gym posted a sign: please wipe down equipment and do not flirt with the ___.', answers: ['mirror', 'trainer', 'weights'], category: 'gym' },
+  { prompt: 'My online order said discreet packaging, but the box was shaped like a giant ___.', answers: ['heart', 'banana', 'toilet'], category: 'shopping' },
+  { prompt: 'The boss tried to boost morale by replacing bonuses with ___.', answers: ['pizza', 'coupons', 'hugs'], category: 'work' },
+  { prompt: 'The party was BYOB, but Ted thought that meant bring your own ___.', answers: ['blanket', 'banana', 'boss'], category: 'parties' },
+  { prompt: 'The airport security guard opened my suitcase and found twelve ___.', answers: ['socks', 'bananas', 'cheeses'], category: 'travel' },
+  { prompt: 'The doctor said my blood pressure was high because I watch too much ___.', answers: ['news', 'sports', 'reality TV'], category: 'health' },
+  { prompt: 'The family game night ended when Grandma accused everyone of cheating at ___.', answers: ['cards', 'Monopoly', 'bingo'], category: 'family' },
+  { prompt: 'The romantic picnic was ruined when it started raining ___.', answers: ['bugs', 'frogs', 'hotdogs'], category: 'dating' },
+  { prompt: 'The teacher said my essay was original because no one else wrote about ___.', answers: ['pizza', 'aliens', 'laundry'], category: 'school' },
+  { prompt: "The influencer's apology video was sponsored by ___.", answers: ['makeup', 'pizza', 'therapy'], category: 'social media' },
+  { prompt: 'The new luxury car has leather seats and a built-in ___.', answers: ['espresso machine', 'massage', 'toaster'], category: 'cars' },
+  { prompt: 'The plumber said he found the problem: someone flushed a ___.', answers: ['toy', 'phone', 'sandwich'], category: 'home' },
+  { prompt: 'The groom said his vows from the heart, but read them off his ___.', answers: ['phone', 'hand', 'napkin'], category: 'wedding' },
+  { prompt: 'The waitress said the soup of the day was ___.', answers: ['chicken', 'tomato', 'mystery'], category: 'restaurants' },
+  { prompt: 'The teenager said he was doing homework, but his laptop was open to ___.', answers: ['games', 'YouTube', 'Netflix'], category: 'school' },
+  { prompt: 'The camping guide said to scare bears away by waving your ___.', answers: ['arms', 'flashlight', 'sandwich'], category: 'vacation' },
+  { prompt: 'The family group chat exploded when Mom sent a picture of her ___.', answers: ['cat', 'dinner', 'feet'], category: 'phones' },
+  { prompt: 'The haunted house was scary until the ghost asked for my ___.', answers: ['password', 'number', 'WiFi'], category: 'weird' },
+  { prompt: 'The personal trainer said my core was weak, especially my ___.', answers: ['abs', 'back', 'willpower'], category: 'gym' },
+  { prompt: 'The bride wanted something blue, so Uncle Lou painted the ___.', answers: ['cake', 'dog', 'car'], category: 'wedding' },
+  { prompt: 'The waiter said the special comes with fries and a side of ___.', answers: ['salad', 'sauce', 'judgment'], category: 'restaurants' },
+  { prompt: 'The new app helps you find parking, romance, and lost ___.', answers: ['keys', 'dogs', 'dignity'], category: 'phones' },
+  { prompt: 'The nurse said the thermometer was broken because it read ___.', answers: ['hot', 'dead', 'pizza'], category: 'health' },
+  { prompt: 'The reality show was cancelled when all the contestants fell in love with the ___.', answers: ['host', 'producer', 'camera man'], category: 'tv' },
+  { prompt: 'The family vacation photo was perfect until Dad lost his ___.', answers: ['pants', 'hat', 'glasses'], category: 'vacation' }
+];
 
 const FALLBACK_SUPER_PROMPTS = [
   { prompt:'Television ___', topAnswers:[{rank:1,answer:'Show',value:500},{rank:2,answer:'Set',value:250},{rank:3,answer:'Remote',value:100}] },
@@ -906,7 +995,7 @@ Return JSON exactly: {"panel":[...]}`, 1500, true);
     answerStyle:['obvious','literal','punny','wildcard','deadpan','chaotic'].includes(p.answerStyle)?p.answerStyle:'obvious',
     matchBias:Number.isFinite(Number(p.matchBias))?Math.max(.65,Math.min(.98,Number(p.matchBias))):.86, answer:null
   }));
-  return await requireRealCelebrityImages(await enrichPanelWithWikipediaImages(normalized));
+  return await enrichPanelWithWikipediaImages(normalized);
 };
 const generateHostProfile = async () => {
   const [host]=await enrichPanelWithWikipediaImages([{name:'Gene Rayburn',era:'host-1970s',tag:'host of Match Game',avatarType:'man_older',voice:'verse',voiceInstructions:'Bright, playful, quick classic game-show host delivery.',answerStyle:'obvious',matchBias:1,signMessage:''}]);
@@ -946,7 +1035,7 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], us
   const localUsed = [
     ...(usedRoundPrompts || []),
     ...(usedCategories || []).filter(x => String(x).startsWith('PROMPT:')).map(x => String(x).slice(7)),
-    ...usedPromptSamples(ROUND_PROMPT_KIND, 120)
+    ...usedPromptSamples('round', 120)
   ];
   const avoidList = localUsed.slice(-80).map(p => `- ${p}`).join('\n');
   const categories = shuffle(PROMPT_CATEGORIES.filter(c => allowDumbDora || !/dumb/i.test(c))).slice(0, 6).join(', ');
@@ -1005,7 +1094,7 @@ Return JSON exactly:
         const isDumb = isCallbackPrompt(pr.prompt);
         if (isDumb && !allowDumbDora) continue;
         if (isDumb && callbackCountInPair >= 1) continue;
-        if (promptAlreadyUsedOrSimilar(ROUND_PROMPT_KIND, pr.prompt, [...localUsed, ...fresh.map(f => f.prompt)])) continue;
+        if (promptAlreadyUsedOrSimilar('round', pr.prompt, [...localUsed, ...fresh.map(f => f.prompt)])) continue;
         fresh.push(pr);
         if (isDumb) callbackCountInPair += 1;
       }
@@ -1014,8 +1103,8 @@ Return JSON exactly:
         GLOBAL_USED_ROUND_PROMPTS.add(normalizePromptKey(a.prompt));
         GLOBAL_USED_ROUND_PROMPTS.add(normalizePromptKey(b.prompt));
         if (normalizePromptKey(a.prompt) === normalizePromptKey(b.prompt)) console.warn('[prompt-db] duplicate generated A/B blocked but still equal; forcing fallback next time');
-        markPromptUsed(ROUND_PROMPT_KIND, a.prompt);
-        markPromptUsed(ROUND_PROMPT_KIND, b.prompt);
+        markPromptUsed('round', a.prompt);
+        markPromptUsed('round', b.prompt);
         return {
           promptA: a.prompt, promptB: b.prompt,
           answersA: a.answers.slice(0,3).map(ans => stripAnswerToBlank(a.prompt, ans)), answersB: b.answers.slice(0,3).map(ans => stripAnswerToBlank(b.prompt, ans)),
@@ -1031,15 +1120,15 @@ Return JSON exactly:
   // Fallback only: curated bank still exists so the game never crashes if API generation fails.
   let unused = FALLBACK_ROUND_PROMPTS
     .filter(p => allowDumbDora || !isCallbackPrompt(p.prompt))
-    .filter(p => !promptAlreadyUsedOrSimilar(ROUND_PROMPT_KIND, p.prompt, localUsed));
+    .filter(p => !promptAlreadyUsedOrSimilar('round', p.prompt, localUsed));
   if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS
     .filter(p => allowDumbDora || !isCallbackPrompt(p.prompt))
     .filter(p => !localUsed.some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
   if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => allowDumbDora || !isCallbackPrompt(p.prompt));
   const [a, b] = pickDistinctRoundPromptPair(unused.length ? unused : FALLBACK_ROUND_PROMPTS, allowDumbDora);
   console.log(`[prompt-db] fallback pair A=${a.prompt} | B=${b.prompt}`);
-  markPromptUsed(ROUND_PROMPT_KIND, a.prompt);
-  markPromptUsed(ROUND_PROMPT_KIND, b.prompt);
+  markPromptUsed('round', a.prompt);
+  markPromptUsed('round', b.prompt);
   return {
     promptA: a.prompt, promptB: b.prompt,
     answersA: a.answers.map(ans => stripAnswerToBlank(a.prompt, ans)), answersB: b.answers.map(ans => stripAnswerToBlank(b.prompt, ans)),
@@ -1924,7 +2013,6 @@ app.post('/api/room', async (req, res) => {
       soloTest: isSoloTest,
       participants: {},
       participantMessages: {},
-      participantBios: {},
       participantPreferences: {},
       participantPhotos: {},
       nextParticipantId: 1,
@@ -1992,7 +2080,7 @@ app.post('/api/room', async (req, res) => {
 app.post('/api/room/:code/join', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'No room with that code' });
-  const { playerName, signMessage, aboutMe, rolePreference, selfieData } = req.body;
+  const { playerName, signMessage, rolePreference, selfieData } = req.body;
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
   if (room.rolesAssigned) return res.status(409).json({ error: 'Game already started' });
   if (Object.keys(room.participants || {}).length >= room.maxPlayers) return res.status(409).json({ error: 'Room is full' });
@@ -2000,8 +2088,6 @@ app.post('/api/room/:code/join', async (req, res) => {
   room.participants[slot] = playerName.trim().slice(0, 20);
   room.participantMessages = room.participantMessages || {};
   room.participantMessages[slot] = String(signMessage || '').trim().slice(0, 32) || randomSign();
-  room.participantBios = room.participantBios || {};
-  room.participantBios[slot] = String(aboutMe || '').trim().replace(/\s+/g,' ').slice(0, 180);
   room.participantPreferences = room.participantPreferences || {};
   room.participantPreferences[slot] = ['contestant','celebrity','surprise'].includes(rolePreference) ? rolePreference : 'surprise';
   room.participantPhotos = room.participantPhotos || {};
