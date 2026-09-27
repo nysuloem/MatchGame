@@ -567,7 +567,7 @@ const WACKY_SIGNS = [
   'Hi Mom!', 'Hello Toronto!', 'Love Ya!', 'Be Nice!', 'Hi Kids!',
   'Send Snacks!', 'Wish Me Luck!', 'Hello Friends!', 'Call Me!', 'No Refunds!'
 ];
-const shortSign = (value='') => String(value || '').trim().split(/\s+/).filter(Boolean).slice(0,4).join(' ');
+const shortSign = (value='') => String(value || '').trim().replace(/^['\"“”‘’]+|['\"“”‘’]+$/g, '').replace(/[\"“”‘’]/g, '').split(/\s+/).filter(Boolean).slice(0,4).join(' ');
 const randomSign = () => WACKY_SIGNS[Math.floor(Math.random() * WACKY_SIGNS.length)];
 
 
@@ -657,17 +657,26 @@ const randomAiContestantName = (taken = []) => {
   return pool[Math.floor(Math.random() * pool.length)];
 };
 
+// Everyday product types drawn from the mid-1970s Sears catalogue era,
+// kept as plausible gifts instead of invented novelty prizes.
+// Reference: https://christmas.musetechnical.com/ShowCatalog/1975-Sears-Christmas-Book
 const PARTING_GIFTS = [
-  'a year supply of Rice-A-Roni, the San Francisco treat',
-  'a toaster that only works on Wednesdays',
-  'a deluxe set of blue index cards and one suspicious marker',
-  'a home version of our game, provided someone remembers to build it',
-  'a slightly used fondue set and a warm handshake',
-  'a gift certificate for one imaginary steak dinner',
-  'a fashionable 1970s leisure suit in a colour no one requested',
-  'a lifetime supply of absolutely nothing, delivered monthly',
-  'a handsome clock radio for your bedside table',
-  'a mystery box from the prop department'
+  'an electric skillet',
+  'a countertop blender',
+  'a fondue set',
+  'a waffle iron',
+  'a portable AM/FM radio',
+  'a clock radio',
+  'a set of bath towels',
+  'an electric coffee percolator',
+  'a set of kitchen canisters',
+  'an electric carving knife',
+  'a portable cassette recorder',
+  'a set of stainless steel cookware',
+  'an electric blanket',
+  'a tabletop hair dryer',
+  'a set of luggage',
+  'a home sewing machine'
 ];
 const randomPartingGift = () => {
   const unused = PARTING_GIFTS.filter(g => !hasGiftBeenUsed(g));
@@ -746,29 +755,9 @@ No ellipses, no dot-dot-dot, no sentence fragments. Keep each one 3-7 words. Ret
 };
 
 const generatePartingGift = async () => {
-  const avoid = recentGifts(25).map(g => `- ${g}`).join('\n');
-  try {
-    const text = await callLLM(
-      `Invent ONE funny 1970s game-show parting gift for a losing Match Game contestant.
-Make it silly, concrete, family-friendly, and short enough for an announcer to read in one breath.
-Do NOT repeat or closely resemble these recent gifts:
-${avoid || '(none)'}
-
-Examples of the vibe: a suspicious fondue set, a deluxe set of blue index cards, a toaster that only works on Wednesdays.
-Return only the prize phrase, no quotation marks.`,
-      70, false
-    );
-    const clean = String(text || '').replace(/[\r\n]+/g, ' ').replace(/^['"“”‘’]+|['"“”‘’.,!]+$/g, '').trim();
-    if (clean && clean.length <= 140 && !hasGiftBeenUsed(clean)) {
-      markGiftUsed(clean);
-      return clean;
-    }
-  } catch (e) {
-    console.warn('parting gift generation failed:', e.message);
-  }
-  const fallback = randomPartingGift();
-  markGiftUsed(fallback);
-  return fallback;
+  const gift = randomPartingGift();
+  markGiftUsed(gift);
+  return gift;
 };
 
 const prepareElimination = async (room, loserSlot) => {
@@ -1279,6 +1268,10 @@ const cleanLooseAnswerText = (answer = '') => String(answer || '')
 const cleanSurveyAnswer = (prompt, answer) => stripAnswerToBlank(prompt, cleanLooseAnswerText(answer)).split(/\s+/).slice(0, 2).join(' ').trim();
 
 const surveyBoardLooksBad = (prompt, answers = []) => {
+  // "Chick ___" cannot be answered with chicken nugget/tender/wing.
+  // Do not silently let a different root word supply the audience survey.
+  if (/\bchick\s+_{3,}/i.test(prompt) &&
+      answers.some(a => /^(nugget|tender|wing|breast|drumstick|sandwich|soup)s?$/i.test(String(a?.answer || a).trim()))) return true;
   const cleaned = answers.map(a => cleanSurveyAnswer(prompt, a.answer || a)).filter(Boolean);
   if (cleaned.length < 3) return true;
   if (new Set(cleaned.map(a => canonPhrase(a))).size < 3) return true;
@@ -1302,7 +1295,7 @@ Clue: "${prompt}"
 Proposed ranked answers: ${cleaned.map((a,i)=>`${i+1}. ${a}`).join('; ')}
 
 Evaluate these as predictions of what 100 ordinary North American adults would say FIRST, under time pressure.
-- Every answer must form a familiar, natural phrase with the clue.
+- Every answer must form a familiar, natural phrase with the EXACT printed clue. Do not expand or alter any printed word (for example, Chick ___ is NOT Chicken ___; Chick nugget is invalid).
 - #1 must be the dominant obvious response.
 - #2 and #3 must each be responses several unrelated real people would independently give.
 - Reject clever wordplay, niche references, strained associations, category errors, and an answer included merely to make three.
@@ -1874,8 +1867,8 @@ const assignRolesAndStart = async (room) => {
   room.panel = panel.slice(0, 6);
   const signSeats = new Set(shuffle([0,1,2,3,4,5]).slice(0,3));
   room.panel = room.panel.map((p,i) => ({ ...p, showIntroSign: signSeats.has(i), signMessage: shortSign(p.signMessage || randomSign()) }));
-  room.triangleSlot = Math.random() < 0.5 ? 1 : 2;
-  room.cointossWinner = room.triangleSlot;
+  room.triangleSlot = 1;
+  room.cointossWinner = Math.random() < 0.5 ? 1 : 2;
   room.phase = 'intro';
   room.introStartedAt = Date.now();
   room.introCompleted = false;

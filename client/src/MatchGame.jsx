@@ -774,7 +774,7 @@ function DisplayView({ room, roomCode, setRoom }) {
     // Regular-round thinking music should begin only after the host has finished reading
     // the question. It continues while answers are being collected/generated and stops
     // before reveals.
-    if (['superMatch_generating','finalMatch_generating_celeb'].includes(phase)) startThinkingMusic();
+    if (phase === 'finalMatch_generating_celeb') startThinkingMusic();
     else if (!['answering','generating_answers'].includes(phase)) stopThinkingMusic();
     if (phase === 'tiebreaker' && prevPhase !== 'tiebreaker') {
       speakTTS({ text: "It's a tie! Scores reset — tiebreaker round!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
@@ -1133,7 +1133,7 @@ function DisplayIntroSpotlight({ room, introIndex, introStage }) {
       <div className="mg-opening-rotor">
         <CelebVisual celeb={p} size={390} className="opening-celeb" />
       </div>
-      {p.showIntroSign && p.signMessage && <div className="mg-opening-blue-card">{p.signMessage}</div>}
+      {p.showIntroSign && p.signMessage && <div className="mg-opening-blue-card">{p.signMessage.replace(/^['\"“”‘’]+|['\"“”‘’]+$/g, '').replace(/[\"“”‘’]/g, '')}</div>}
     </div>
   </div>;
 }
