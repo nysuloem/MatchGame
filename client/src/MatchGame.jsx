@@ -72,7 +72,8 @@ let introMusicAudio = null;
 let creditsMusicAudio = null;
 const THEME_TRACK = '/audio/match-game-73.mp3';
 const OPENING_CALL = '/audio/opening-archival.mp3';
-const OPENING_CONTESTANT_CUE = '/audio/opening-get-ready.mp3';
+const OPENING_PRELUDE = '/audio/opening-get-ready-call.mp3';
+const OPENING_CONTESTANT_CUE = '/audio/opening-contestant-cue-trim.mp3';
 const REGULAR_TRACK = '/audio/regular-music.mp3';
 const safePlayAudio = (audio) => audio.play().catch(() => {});
 const fadeAndStop = (audio, ms = 450) => {
@@ -852,9 +853,9 @@ function DisplayView({ room, roomCode, setRoom }) {
 
     // The long recording starts with 'Get ready to match the stars'. The
     // theme carries the replacement celebrity roll call.
-    playIntroClip(OPENING_CALL, { volume: .55 });
-    await delay(4400);
-    playIntroClip(THEME_TRACK, { volume: .24, loop: true, fadeMs: 400 });
+    playIntroClip(OPENING_PRELUDE, { volume: .55 });
+    await delay(3500);
+    playIntroClip(THEME_TRACK, { volume: .24, loop: true, fadeMs: 350 });
     for (let i = 0; i < r.panel.length; i++) {
       setIntroStage('celeb');
       setIntroIndex(i);
@@ -878,7 +879,7 @@ function DisplayView({ room, roomCode, setRoom }) {
     // The short cue comes after the recorded Gene introduction, before the
     // contestants introduce themselves on the set.
     const cue = playIntroClip(OPENING_CONTESTANT_CUE, { volume: .52 });
-    await delay(3800);
+    await waitForIntroEnd(cue, 4000);
     cue.pause();
     introMusicAudio = null;
 
