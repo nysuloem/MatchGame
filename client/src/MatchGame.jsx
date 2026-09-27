@@ -46,6 +46,7 @@ const api = {
   finalMatchPick:  (code, celebIndex) => req(`/api/room/${code}/finalmatch-pick`, { method:'POST', body:{celebIndex} }),
   finalMatchAnswer:(code, answer) => req(`/api/room/${code}/finalmatch-answer`, { method:'POST', body:{answer} }),
   finalMatchPromptRead:(code) => req(`/api/room/${code}/finalmatch-prompt-read`, { method:'POST' }),
+  finalMatchClueRead:(code) => req(`/api/room/${code}/finalmatch-clue-read`, { method:'POST' }),
   finalMatchPickReady:(code) => req(`/api/room/${code}/finalmatch-pick-ready`, { method:'POST' }),
   finalMatchCelebAnswer:(code, slot, answer) => req(`/api/room/${code}/finalmatch-celeb-answer`, { method:'POST', body:{slot,answer} }),
   finalMatchDone:  (code) => req(`/api/room/${code}/finalmatch-done`, { method:'POST' }),
@@ -806,11 +807,27 @@ function DisplayView({ room, roomCode, setRoom }) {
         finalMatchSpeechRef.current.answer = key;
         (async () => {
           const chosen = room.panel?.[room.finalMatchCelebIndex]?.name || 'our celebrity';
-          // One narration request avoids three network waits before the phone can listen.
+          const first = room.players[room.activeSlot]?.split(' ')[0] || 'Contestant';
+          const chosenFirst = chosen.split(' ')[0];
           await speakTTS({
-            text: `${room.players[room.activeSlot]} has chosen ${chosen}. ${promptForSpeech(room.finalMatchPrompt)}. ${room.players[room.activeSlot]?.split(' ')[0]}, how do you fill in that blank?`,
+            text: `${room.players[room.activeSlot]} has chosen ${chosen}. OK. Good luck, ${first}. Here's the clue:`,
             isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE,
           });
+          await delay(450);
+          await speakTTS({ text: promptForSpeech(room.finalMatchPrompt), isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+          try { await api.finalMatchClueRead(roomCode); } catch {}
+          await delay(5000);
+          // The cue is given only after the selected star has an answer ready.
+          while (true) {
+            let current;
+            try { current = (await api.getRoom(roomCode)).room; }
+            catch { await delay(500); continue; }
+            if (current?.phase !== 'finalMatch_answering') return;
+            if (current?.finalMatchCelebAnswer || current?.finalMatchHumanAnswers?.[current.finalMatchCelebIndex]) break;
+            await delay(500);
+          }
+          playSuperMatchDing(false);
+          await speakTTS({ text: `${chosenFirst} is ready. ${first}, how do you fill in that blank?`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
           try { await api.finalMatchPromptRead(roomCode); } catch {}
         })();
       }
@@ -1051,6 +1068,7 @@ function DisplayView({ room, roomCode, setRoom }) {
         {['finalMatch_pickCeleb','finalMatch_answering','finalMatch_human_celeb_answering'].includes(phase) && <DisplayFinalMatchActive room={room}/>}
         {phase==='finalMatch_reveal' && <DisplayFinalMatchReveal room={room} roomCode={roomCode} onWin={() => setFinalPrizeBlink(true)}/>}
         {phase==='gameOver' && <DisplayGameOver room={room} roomCode={roomCode} setRoom={setRoom} />}
+        {phase==='error' && <div className="mg-display-center-msg"><div className="mg-loading">{room.errorMessage || 'The game could not start.'}</div><button className="mg-btn" onClick={() => api.playAgain(roomCode).catch(console.error)}>Try Again</button></div>}
       </div>
     </div>
   );
@@ -1267,11 +1285,13 @@ function DisplaySuperMatchResult({ room, roomCode, onReveal }) {
         if (cancelled) return;
         const ta = topAnswers[i];
         await delay(450);
-        await speakTTS({ text: `For ${fmt$(ta.value)}. ${speechClean(ta.answer)}`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+        await speakTTS({ text: `For ${fmt$(ta.value)}.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         setVisibleCount(i + 1);
         onReveal?.(i + 1);
         const isMatch = winnings > 0 && ta.value === winnings;
-        playSuperMatchDing(isMatch);
+        requestAnimationFrame(() => playSuperMatchDing(isMatch));
+        await delay(550);
+        await speakTTS({ text: speechClean(ta.answer), isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         if (isMatch) {
           foundMatch = true;
           setMatchedValue(ta.value);
@@ -1282,6 +1302,12 @@ function DisplaySuperMatchResult({ room, roomCode, onReveal }) {
             await speakTTS({ text: `But let's see the rest of the board!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
           }
         } else {
+          const answerKey = String(ta.answer || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const suggested = (room.superMatchCelebIndices || [])
+            .map(index => room.panel?.[index])
+            .filter(star => star?.answer && String(star.answer).toLowerCase().replace(/[^a-z0-9]/g, '') === answerKey)
+            .map(star => star.name.split(' ')[0]);
+          if (suggested.length) await speakTTS({ text: `That was ${suggested.join(' and ')}'s answer.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
         }
         await delay(750);
       }
@@ -1446,7 +1472,7 @@ function DisplayFinalMatchReveal({ room, roomCode, onWin }) {
     (async () => {
       await delay(500);
       await speakTTS({
-        text: `Now, let's see if ${celeb?.name || 'our star'} can match ${room.players[room.activeSlot]}.`,
+        text: `${celeb?.name?.split(' ')[0] || 'Our star'} looks nervous. Let's see if ${celeb?.name || 'our star'} can match ${room.players[room.activeSlot]}.`,
         isAnnouncer: true,
         fallbackProfile: ANNOUNCER_PROFILE,
       });
@@ -1919,7 +1945,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
         {['finalMatch_answering','finalMatch_human_celeb_answering'].includes(phase) && isHumanCeleb && celebIndex === room.finalMatchCelebIndex && !room.finalMatchHumanAnswers?.[celebIndex] && !submitted && (
           <div className="mg-phone-body">
             <div className="mg-display-round final">★★ Final Match ★★</div>
-            {!room.finalMatchPromptReady ? (
+            {!room.finalMatchClueRead ? (
               <p className="mg-status">Watch the TV — the host is reading the Final Match question.</p>
             ) : (
               <>
@@ -1971,7 +1997,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
 
         {['error'].includes(phase) && (
           <div className="mg-phone-body">
-            <div className="mg-error">Something went wrong. Refresh and rejoin.</div>
+            <div className="mg-error">{room.errorMessage || 'Something went wrong. Ask the host to try again.'}</div>
           </div>
         )}
 

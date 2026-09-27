@@ -332,9 +332,15 @@ const fetchWikipediaHeadshot = async (name) => {
   if (Date.now() < celebrityPhotoRetryAfter) return null;
   let record = null;
   try {
-    const search = await fetchJsonWithTimeout(`https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(name)}&limit=1&namespace=0&format=json`);
-    const title = search?.[1]?.[0] || name;
-    const summary = await fetchJsonWithTimeout(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+    // Try the canonical title first: the search API is often rate limited independently.
+    let title = name;
+    let summary;
+    try { summary = await fetchJsonWithTimeout(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`); }
+    catch (directError) {
+      const search = await fetchJsonWithTimeout(`https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(name)}&limit=1&namespace=0&format=json`);
+      title = search?.[1]?.[0] || name;
+      summary = await fetchJsonWithTimeout(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+    }
     const imageUrl = summary?.thumbnail?.source || summary?.originalimage?.source || null;
     if (imageUrl && await validateCelebrityPortrait(imageUrl)) {
       record = {
@@ -350,7 +356,7 @@ const fetchWikipediaHeadshot = async (name) => {
   } catch (err) {
     if (/HTTP 429/.test(err.message)) {
       celebrityPhotoRetryAfter = Date.now() + 5 * 60 * 1000;
-      console.warn('Wikipedia portrait lookup is rate limited; using avatar placeholders for this game.');
+      console.warn('Wikipedia portrait lookup is rate limited; waiting for approved celebrity photos.');
     } else {
       console.warn(`Could not fetch Wikipedia image for ${name}:`, err.message);
     }
@@ -396,16 +402,23 @@ const requireRealCelebrityImages = async (panel = []) => {
   const used = new Set((panel || []).filter(Boolean).map(p => String(p.name || '').toLowerCase()));
   const result = [];
   for (const original of panel || []) {
-    if (!original || original.isHuman || original.imageUrl) {
+    if (!original || original.isHuman || (original.imageUrl && original.approvedPortrait === true)) {
       result.push(original);
       continue;
     }
     let replacement = null;
-    if (Date.now() < celebrityPhotoRetryAfter) {
-      result.push(original);
-      continue;
+    const cachedAlternatives = Object.entries(CELEB_IMAGE_CACHE)
+      .filter(([key, photo]) => photo?.approvedPortrait === true && photo.imageUrl && !used.has(key))
+      .map(([key, photo]) => ({ key, photo }));
+    for (const { key, photo } of shuffle(cachedAlternatives)) {
+      const candidate = poolsFor(original.era).find(p => celebImageKey(p.name) === key);
+      if (!candidate) continue;
+      used.delete(celebImageKey(original.name));
+      used.add(celebImageKey(candidate.name));
+      replacement = { ...original, ...candidate, ...photo, answer:null };
+      break;
     }
-    for (const candidate of poolsFor(original.era)) {
+    for (const candidate of replacement ? [] : poolsFor(original.era)) {
       const key = String(candidate.name || '').toLowerCase();
       if (!key || used.has(key)) continue;
       const img = await fetchWikipediaHeadshot(candidate.name);
@@ -420,10 +433,9 @@ const requireRealCelebrityImages = async (panel = []) => {
       if (retry?.imageUrl) replacement = { ...original, ...retry, answer:null };
     }
     if (!replacement) {
-      // Portraits are presentation assets, not a reason to abort a live game.
-      // Keep the chosen celebrity and render the existing avatar until lookup recovers.
-      result.push(original);
-      continue;
+      const error = new Error('Celebrity photos are temporarily unavailable. Please try starting the game again shortly.');
+      error.retryablePhotoLookup = true;
+      throw error;
     }
     result.push(replacement);
   }
@@ -1792,11 +1804,12 @@ const maybeScheduleAiAction = (room) => {
       room.finalMatchHumanAnswers = {};
       room.phase = 'finalMatch_answering';
       bump(room);
+      prepareFinalMatchCelebrity(room);
       maybeScheduleAiAction(room);
     });
   }
 
-  if (room.phase === 'finalMatch_answering' && !room.finalMatchContestantAnswer) {
+  if (room.phase === 'finalMatch_answering' && room.finalMatchPromptReady && !room.finalMatchContestantAnswer) {
     scheduleAi(room, 'finalAnswer', 1800, async () => {
       if (room.phase !== 'finalMatch_answering' || !isAiContestantSlot(room, room.activeSlot) || room.finalMatchContestantAnswer) return;
       room.finalMatchContestantAnswer = await aiContestantAnswer(room.finalMatchPrompt, room.finalMatchAnswerKey || []);
@@ -1868,6 +1881,11 @@ const assignRolesAndStart = async (room) => {
     }
   }
   if (!basePanel) throw panelError || new Error('Could not build celebrity panel');
+  if (basePanel.some(p => !p?.imageUrl || p.approvedPortrait !== true)) {
+    const error = new Error('Six approved color celebrity portraits are required before the game can start. Please try again shortly.');
+    error.retryablePhotoLookup = true;
+    throw error;
+  }
   room.host = await generateHostProfile().catch(() => ({ name:'Gene Rayburn', tag:'host of Match Game', avatarType:'man_older' }));
   let panel = [...basePanel];
   for (let i = 0; i < humanCelebIds.length && i < 6; i++) {
@@ -2157,7 +2175,7 @@ app.post('/api/room/:code/join', async (req, res) => {
   bump(room);
   res.json({ room, slot });
   if (Object.keys(room.participants).length >= room.maxPlayers) {
-    setTimeout(() => assignRolesAndStart(room).catch(e => { console.error('assign roles:', e); room.phase = 'error'; bump(room); }), 1000);
+    setTimeout(() => assignRolesAndStart(room).catch(e => { console.error('assign roles:', e); room.errorMessage = e.message; room.phase = 'error'; bump(room); }), 1000);
   }
 });
 
@@ -2659,7 +2677,15 @@ app.post('/api/room/:code/finalmatch-prompt-read', (req, res) => {
   if (room.phase === 'finalMatch_answering' || room.phase === 'finalMatch_human_celeb_answering') {
     room.finalMatchPromptReady = true;
     bump(room);
+    maybeScheduleAiAction(room);
   }
+  res.json({ room });
+});
+
+app.post('/api/room/:code/finalmatch-clue-read', (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.phase === 'finalMatch_answering') { room.finalMatchClueRead = true; bump(room); }
   res.json({ room });
 });
 
@@ -2675,7 +2701,7 @@ app.post('/api/room/:code/finalmatch-pick-ready', (req, res) => {
 
 const completeFinalMatchReveal = async (room) => {
   const celeb = room.panel[room.finalMatchCelebIndex];
-  let celebAnswer = null;
+  let celebAnswer = room.finalMatchCelebAnswer;
   if (celeb?.isHuman) celebAnswer = room.finalMatchHumanAnswers?.[room.finalMatchCelebIndex];
   if (!celebAnswer) {
     celebAnswer = await generateFinalMatchCelebAnswer(
@@ -2688,6 +2714,24 @@ const completeFinalMatchReveal = async (room) => {
   room.finalMatchWinnings = matched ? room.superMatchWinnings * 10 : 0;
   room.phase = 'finalMatch_reveal';
   bump(room);
+};
+
+const prepareFinalMatchCelebrity = async (room) => {
+  const chosenIndex = room.finalMatchCelebIndex;
+  const celeb = room.panel[chosenIndex];
+  if (celeb?.isHuman) return;
+  try {
+    const answer = await generateFinalMatchCelebAnswer(room.finalMatchPrompt, celeb, room.players[room.activeSlot], room.finalMatchAnswerKey || []);
+    if (room.finalMatchCelebIndex !== chosenIndex || !room.phase?.startsWith('finalMatch')) return;
+    room.finalMatchCelebAnswer = String(answer || '').trim().slice(0, 50) || (room.finalMatchAnswerKey?.[0] || 'answer');
+    bump(room);
+  } catch (e) {
+    console.error('finalmatch celebrity preparation:', e);
+    if (room.finalMatchCelebIndex === chosenIndex && room.phase === 'finalMatch_answering') {
+      room.finalMatchCelebAnswer = room.finalMatchAnswerKey?.[0] || 'answer';
+      bump(room);
+    }
+  }
 };
 
 // ─── API: FINAL MATCH ─────────────────────────────────────────
@@ -2704,6 +2748,7 @@ const startFinalMatch = async (room) => {
     room.finalMatchCelebAnswer = null;
     room.finalMatchHumanAnswers = {};
     room.finalMatchPromptReady = false;
+    room.finalMatchClueRead = false;
     room.finalMatchPickReady = false;
     room.phase = 'finalMatch_pickCeleb';
     bump(room);
@@ -2735,8 +2780,10 @@ app.post('/api/room/:code/finalmatch-pick', async (req, res) => {
   room.finalMatchCelebIndex = Number(celebIndex);
   room.finalMatchHumanAnswers = {};
   room.finalMatchPromptReady = false;
+  room.finalMatchClueRead = false;
   room.phase = 'finalMatch_answering';
   bump(room);
+  prepareFinalMatchCelebrity(room);
   maybeScheduleAiAction(room);
   res.json({ room });
 });
@@ -2831,7 +2878,7 @@ app.post('/api/room/:code/play-again', async (req, res) => {
     resetRoomForPlayAgain(room);
     bump(room);
     res.json({ room });
-    setTimeout(() => assignRolesAndStart(room).catch(e => { console.error('play again:', e); room.phase = 'error'; bump(room); }), 900);
+    setTimeout(() => assignRolesAndStart(room).catch(e => { console.error('play again:', e); room.errorMessage = e.message; room.phase = 'error'; bump(room); }), 900);
   } catch (e) {
     console.error('play again:', e);
     room.phase = 'error'; bump(room);
