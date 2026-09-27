@@ -701,7 +701,7 @@ function DisplayView({ room, roomCode, setRoom }) {
       }, 2500);
     }
     if (phase === 'pick_prompt') {
-      setPromptReadyFor(null);
+      if (prevPhase !== 'pick_prompt') setPromptReadyFor(null);
       const turnKey = `${room.round}-${room.turnInRound}-${room.activeSlot}`;
       if (turnPromptAnnouncedRef.current !== `${turnKey}-pick`) {
         turnPromptAnnouncedRef.current = `${turnKey}-pick`;
@@ -717,30 +717,28 @@ function DisplayView({ room, roomCode, setRoom }) {
     if (phase === 'answering' && room.chosenPrompt) {
       const turnKey = `${room.round}-${room.turnInRound}-${room.activeSlot}`;
       const answerKey = `${turnKey}-${room.chosenPrompt}`;
-      if (promptReadyFor !== room.chosenPrompt) setPromptReadyFor(null);
       if (promptReadingRef.current.key !== answerKey) {
-      const promise = (async () => {
-        const pendingPickSpeech = pickPromptSpeechRef.current;
-        if (prevPhase === 'pick_prompt' && pendingPickSpeech?.key === turnKey) {
-          await pendingPickSpeech.promise.catch(() => {});
-          await delay(250);
-        } else {
-          await delay(350);
-        }
-        // If the player inherited the remaining question, announce their turn once here.
-        if (prevPhase !== 'pick_prompt' && inheritedTurnAnnouncedRef.current !== answerKey) {
-          inheritedTurnAnnouncedRef.current = answerKey;
-          await speakTTS({ text: `${room.players[room.activeSlot]}, it's your turn.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
-          await delay(250);
-        }
-        if (promptReadyFor !== room.chosenPrompt) {
+        setPromptReadyFor(null);
+        const promise = (async () => {
+          const pendingPickSpeech = pickPromptSpeechRef.current;
+          if (prevPhase === 'pick_prompt' && pendingPickSpeech?.key === turnKey) {
+            await pendingPickSpeech.promise.catch(() => {});
+            await delay(250);
+          } else {
+            await delay(350);
+          }
+          // If the player inherited the remaining question, announce their turn once here.
+          if (prevPhase !== 'pick_prompt' && inheritedTurnAnnouncedRef.current !== answerKey) {
+            inheritedTurnAnnouncedRef.current = answerKey;
+            await speakTTS({ text: `${room.players[room.activeSlot]}, it's your turn.`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+            await delay(250);
+          }
           await readGamePrompt(room.chosenPrompt, roomCode);
-          setPromptReadyFor(room.chosenPrompt);
+          setPromptReadyFor(answerKey);
           startThinkingMusic();
           try { await api.promptRead(roomCode); } catch {}
-        }
-      })();
-      promptReadingRef.current = {key:answerKey,promise};
+        })();
+        promptReadingRef.current = {key:answerKey,promise};
       }
     }
     if (phase === 'answering' && room.panelAnswersReady && !room.microphoneReady) {
@@ -1061,7 +1059,7 @@ function DisplayView({ room, roomCode, setRoom }) {
             <DisplayPanelGrid room={room} revealIndex={-1}/>
           </div>
         )}
-        {['pick_prompt','answering'].includes(phase) && <DisplayRoundActive room={room} promptVisible={promptReadyFor === room.chosenPrompt}/>}
+        {['pick_prompt','answering'].includes(phase) && <DisplayRoundActive room={room} promptVisible={room.promptRead || promptReadyFor === `${room.round}-${room.turnInRound}-${room.activeSlot}-${room.chosenPrompt}`}/>}
         {phase==='revealing' && <DisplayReveal room={room} revealIndex={revealIndex} roomCode={roomCode}/>}
         {phase==='round_end' && <DisplayReveal room={room} revealIndex={(room.panel?.length || 6)-1} />}
         {phase==='superMatch_pickCelebs' && <DisplaySuperMatchPickCelebs room={room} promptVisible={superPromptReady}/>}
@@ -1141,7 +1139,8 @@ function DisplayPanelGrid({ room, revealIndex, revealOnlyIndex, finalRevealAnswe
   return (
     <div className="mg-panel-grid display">
       {(room?.panel || []).map((p, i) => {
-        const shown = revealOnlyIndex === undefined ? (revealIndex != null && i <= revealIndex) : i === revealOnlyIndex;
+        const hasAnswer = Boolean(p.answer || (i === revealOnlyIndex && finalRevealAnswer));
+        const shown = hasAnswer && (revealOnlyIndex === undefined ? (revealIndex != null && i <= revealIndex) : i === revealOnlyIndex);
         const matched = matches && shown && matches[i];
         const prelit = round1MatchedByActive.includes(i);
         const litAsTriangle = (matched && activeIsTriangle) || (prelit && room?.triangleSlot === room?.activeSlot);
@@ -1160,7 +1159,7 @@ function DisplayPanelGrid({ room, revealIndex, revealOnlyIndex, finalRevealAnswe
             <CelebVisual celeb={p} size={100} />
             <div className="mg-panelist-name">{p.name?.trim().split(/\s+/)[0]}</div>
             <div className={`mg-panelist-answer hand-${i % 6} ${shown ? 'blue-card' : 'blank'}`}>
-              {shown ? (i === revealOnlyIndex && finalRevealAnswer ? finalRevealAnswer : p.answer || (prelit ? 'Matched' : '')) : ''}
+              {shown ? (i === revealOnlyIndex && finalRevealAnswer ? finalRevealAnswer : p.answer) : ''}
             </div>
             <div className="mg-symbol-row">
               <span className={`mg-symbol tri ${litAsTriangle ? 'lit' : ''}`}>▲</span>
