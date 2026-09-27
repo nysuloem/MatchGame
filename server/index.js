@@ -329,7 +329,7 @@ const fetchWikipediaHeadshot = async (name) => {
   if (!key) return null;
   const cached = CELEB_IMAGE_CACHE[key];
   if (cached?.imageUrl && cached.approvedPortrait === true) return cached;
-  if (Date.now() < celebrityPhotoRetryAfter) return null;
+  // The Wikipedia cooldown must not block the independent Wikidata fallback.
   let record = null;
   try {
     // Try the canonical title first: the search API is often rate limited independently.
@@ -354,6 +354,27 @@ const fetchWikipediaHeadshot = async (name) => {
       };
     }
   } catch (err) {
+    // Wikidata's portrait claim is an independent route when Wikipedia throttles
+    // its page API. It still must pass the same color, face-close validation.
+    try {
+      const found = await fetchJsonWithTimeout(`https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(name)}&language=en&format=json&limit=1`);
+      const entity = found?.search?.[0];
+      if (entity?.id && celebImageKey(entity.display?.label?.value || '') === key) {
+        const data = await fetchJsonWithTimeout(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(entity.id)}&props=claims&format=json`);
+        const filename = data?.entities?.[entity.id]?.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
+        if (filename) {
+          const imageUrl = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(filename)}?width=400`;
+          if (await validateCelebrityPortrait(imageUrl)) {
+            record = { imageUrl, imageTitle:name, imagePageUrl:`https://www.wikidata.org/wiki/${entity.id}`,
+              imageSource:'Wikimedia Commons', imageAttribution:'Photo via Wikimedia Commons',
+              approvedPortrait:true, fetchedAt:new Date().toISOString() };
+            CELEB_IMAGE_CACHE[key] = record;
+            saveCelebImageCache();
+            return record;
+          }
+        }
+      }
+    } catch (fallbackError) { console.warn(`Wikidata portrait lookup failed for ${name}:`, fallbackError.message); }
     if (/HTTP 429/.test(err.message)) {
       celebrityPhotoRetryAfter = Date.now() + 5 * 60 * 1000;
       console.warn('Wikipedia portrait lookup is rate limited; waiting for approved celebrity photos.');
@@ -418,7 +439,7 @@ const requireRealCelebrityImages = async (panel = []) => {
       replacement = { ...original, ...candidate, ...photo, answer:null };
       break;
     }
-    for (const candidate of replacement ? [] : poolsFor(original.era)) {
+    for (const candidate of replacement ? [] : poolsFor(original.era).slice(0, 18)) {
       const key = String(candidate.name || '').toLowerCase();
       if (!key || used.has(key)) continue;
       const img = await fetchWikipediaHeadshot(candidate.name);
