@@ -125,8 +125,8 @@ const playIntroClip = (src, { volume = .42, loop = false, start = 0, fadeMs = 0 
   safePlayAudio(audio);
   if (fadeMs) {
     if (previous) {
-      // Let the full spoken call finish beneath the incoming music.
-      previous.addEventListener('ended', () => { if (introMusicAudio !== previous) previous.pause(); }, { once: true });
+      if (previous.loop) fadeAndStop(previous, fadeMs);
+      else previous.addEventListener('ended', () => previous.pause(), { once: true });
     }
     const steps = 12;
     let n = 0;
