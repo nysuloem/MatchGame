@@ -252,7 +252,8 @@ const migrateLegacyPromptHistory = () => {
 };
 migrateLegacyPromptHistory();
 
-const CELEB_IMAGE_FILE = path.join(DATA_DIR, 'celebrity-images.json');
+const CELEB_IMAGE_FILE = path.join(PERSIST_DIR, 'celebrity-images.json');
+let celebrityPhotoRetryAfter = 0;
 const loadCelebImageCache = () => {
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -328,7 +329,7 @@ const fetchWikipediaHeadshot = async (name) => {
   if (!key) return null;
   const cached = CELEB_IMAGE_CACHE[key];
   if (cached?.imageUrl && cached.approvedPortrait === true) return cached;
-  if (cached && !cached.imageUrl) return null;
+  if (Date.now() < celebrityPhotoRetryAfter) return null;
   let record = null;
   try {
     const search = await fetchJsonWithTimeout(`https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(name)}&limit=1&namespace=0&format=json`);
@@ -347,10 +348,18 @@ const fetchWikipediaHeadshot = async (name) => {
       };
     }
   } catch (err) {
-    console.warn(`Could not fetch Wikipedia image for ${name}:`, err.message);
+    if (/HTTP 429/.test(err.message)) {
+      celebrityPhotoRetryAfter = Date.now() + 5 * 60 * 1000;
+      console.warn('Wikipedia portrait lookup is rate limited; using avatar placeholders for this game.');
+    } else {
+      console.warn(`Could not fetch Wikipedia image for ${name}:`, err.message);
+    }
+    return null;
   }
-  CELEB_IMAGE_CACHE[key] = record;
-  saveCelebImageCache();
+  if (record) {
+    CELEB_IMAGE_CACHE[key] = record;
+    saveCelebImageCache();
+  }
   return record;
 };
 
@@ -392,6 +401,10 @@ const requireRealCelebrityImages = async (panel = []) => {
       continue;
     }
     let replacement = null;
+    if (Date.now() < celebrityPhotoRetryAfter) {
+      result.push(original);
+      continue;
+    }
     for (const candidate of poolsFor(original.era)) {
       const key = String(candidate.name || '').toLowerCase();
       if (!key || used.has(key)) continue;
@@ -402,15 +415,15 @@ const requireRealCelebrityImages = async (panel = []) => {
       replacement = { ...original, ...candidate, ...img, answer:null };
       break;
     }
-    if (!replacement) {
-      console.warn(`No real photo resolved for ${original.era || 'guest'} seat; retrying original once`);
+    if (!replacement && Date.now() >= celebrityPhotoRetryAfter) {
       const retry = await fetchWikipediaHeadshot(original.name);
       if (retry?.imageUrl) replacement = { ...original, ...retry, answer:null };
     }
     if (!replacement) {
-      const err = new Error(`PHOTO_LOOKUP_RETRY:${original.era || 'guest'}`);
-      err.retryablePhotoLookup = true;
-      throw err;
+      // Portraits are presentation assets, not a reason to abort a live game.
+      // Keep the chosen celebrity and render the existing avatar until lookup recovers.
+      result.push(original);
+      continue;
     }
     result.push(replacement);
   }
