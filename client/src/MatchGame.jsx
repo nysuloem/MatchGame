@@ -705,9 +705,9 @@ function DisplayView({ room, roomCode, setRoom }) {
     if (phase === 'cointoss' && prevPhase !== 'cointoss') {
       setCoinFlipping(true); setCoinResult(null);
       setTimeout(() => {
-        setCoinFlipping(false); setCoinResult(room.triangleSlot);
-        if (room.triangleSlot)
-          speakTTS({ text: `${room.players[room.triangleSlot]} wins the toss and plays first!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+        setCoinFlipping(false); setCoinResult(room.cointossWinner);
+        if (room.cointossWinner)
+          speakTTS({ text: `${room.players[room.cointossWinner]} wins the toss and plays first!`, isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
       }, 2500);
     }
     if (phase === 'pick_prompt') {
@@ -777,7 +777,7 @@ function DisplayView({ room, roomCode, setRoom }) {
     if (phase === 'finalMatch_generating_celeb') startThinkingMusic();
     else if (!['answering','generating_answers'].includes(phase)) stopThinkingMusic();
     if (phase === 'tiebreaker' && prevPhase !== 'tiebreaker') {
-      speakTTS({ text: "It's a tie! Scores reset — tiebreaker round!", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
+      speakTTS({ text: "We're tied, so we're going to erase the scores and do a tiebreaker round.", isAnnouncer: true, fallbackProfile: ANNOUNCER_PROFILE });
     }
     if (phase === 'round_end' && room.eliminatedSlot && room.eliminatedPartingGift && prevPhase !== 'round_end') {
       (async () => {
@@ -973,10 +973,10 @@ function DisplayView({ room, roomCode, setRoom }) {
   }
 
   return (
-    <div className={`mg-root display-mode ${(['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) || phase.startsWith('superMatch') || phase.startsWith('finalMatch') || (phase==='intro' && ['stage','host','contestant','finale'].includes(introStage))) ? 'stage-play' : ''} ${phase.startsWith('superMatch') ? 'super-stage' : ''} ${phase.startsWith('finalMatch') ? 'final-stage' : ''} ${phase==='lobby' ? 'lobby-stage' : ''}`}>
-      {(['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) || phase.startsWith('superMatch') || phase.startsWith('finalMatch')) &&
+    <div className={`mg-root display-mode ${(['cointoss','tiebreaker','pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) || phase.startsWith('superMatch') || phase.startsWith('finalMatch') || (phase==='intro' && ['stage','host','contestant','finale'].includes(introStage))) ? 'stage-play' : ''} ${phase.startsWith('superMatch') ? 'super-stage' : ''} ${phase.startsWith('finalMatch') ? 'final-stage' : ''} ${phase==='lobby' ? 'lobby-stage' : ''}`}>
+      {(['cointoss','tiebreaker','pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) || phase.startsWith('superMatch') || phase.startsWith('finalMatch')) &&
         <img className="mg-stage-gene" src="/images/gene-rayburn.webp" alt="" aria-hidden="true" />}
-      {['pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) && <div className="mg-stage-contestants">
+      {['cointoss','tiebreaker','pick_prompt','answering','revealing','generating_answers','round_end','generating'].includes(phase) && <div className="mg-stage-contestants">
         {[1,2].filter(slot => !room.soloTest || slot === 1).map(slot => {
           const photo = room.participantPhotos?.[room.playerIds?.[slot]];
           return <div key={slot} className={`mg-stage-contestant seat-${slot} ${room.activeSlot===slot?'active':''}`}>
@@ -1049,18 +1049,17 @@ function DisplayView({ room, roomCode, setRoom }) {
           </div>
         )}
         {phase==='cointoss' && (
-          <div className="mg-display-center-msg">
+          <div className="mg-display-center-msg mg-stage-coin-toss">
+            <DisplayPanelGrid room={room} revealIndex={-1} />
             <div className={`mg-coin ${coinFlipping?'flipping':''}`}>{coinFlipping||!coinResult?'?':(coinResult===room.triangleSlot?'▲':'●')}</div>
-            {!coinFlipping&&coinResult&&<p className="mg-status" style={{fontSize:24}}><strong>{room.players[coinResult]}</strong> wins the toss and plays first!</p>}
           </div>
         )}
-        {['generating','generating_answers','superMatch_generating','finalMatch_generating','finalMatch_generating_celeb','tiebreaker'].includes(phase) && (
+        {['generating','generating_answers','superMatch_generating','finalMatch_generating','finalMatch_generating_celeb'].includes(phase) && (
           <div className="mg-display-center-msg">
             <div className="mg-loading">
               {phase==='generating'&&'Preparing questions'}
               {phase==='generating_answers'&&'Waiting for panelists to write down their answers'}
               {phase==='round_end'&&'Calculating scores'}
-              {phase==='tiebreaker'&&"It's a tie — resetting scores"}
               {phase==='superMatch_generating'&&'Consulting the panel'}
               {phase==='superMatch_human_answering'&&'Waiting for the live stars'}
               {phase==='finalMatch_generating'&&'Preparing the Final Match'}
@@ -1069,6 +1068,7 @@ function DisplayView({ room, roomCode, setRoom }) {
             <DisplayPanelGrid room={room} revealIndex={-1}/>
           </div>
         )}
+        {phase==='tiebreaker' && <div className="mg-display-round-active"><DisplayPanelGrid room={room} revealIndex={-1}/></div>}
         {['pick_prompt','answering'].includes(phase) && <DisplayRoundActive room={room} promptVisible={room.promptRead || promptReadyFor === `${room.round}-${room.turnInRound}-${room.activeSlot}-${room.chosenPrompt}`}/>}
         {phase==='revealing' && <DisplayReveal room={room} revealIndex={revealIndex} roomCode={roomCode}/>}
         {phase==='round_end' && <DisplayReveal room={room} revealIndex={(room.panel?.length || 6)-1} />}

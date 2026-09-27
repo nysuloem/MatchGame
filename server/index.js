@@ -829,6 +829,18 @@ const FALLBACK_ROUND_PROMPTS = [
   { prompt: "The zookeeper said, \"The gorilla has been watching too much television. Yesterday he tried to __________ the banana\"", answers: ['change channels with','remote-control','answer'], category:'zoo' }
 ];
 
+// If fresh tiebreaker writing fails, use setups with a clear first completion.
+const FALLBACK_TIEBREAKER_PROMPTS = [
+  { prompt: "The magician reached into his hat and pulled out a __________", answers: ['rabbit','dove','snake'], category:'magic' },
+  { prompt: "At breakfast, the vampire asked the waiter for a glass of __________", answers: ['blood','tomato juice','orange juice'], category:'vampire' },
+  { prompt: "The pirate opened his treasure chest and found a pile of __________", answers: ['gold','coins','jewels'], category:'pirate' },
+  { prompt: "The cowboy's horse refused to move until it got a bag of __________", answers: ['oats','carrots','apples'], category:'cowboy' },
+  { prompt: "The dog begged the butcher for a juicy __________", answers: ['bone','shoe','hat'], category:'dog' },
+  { prompt: "The clown reached into his pocket and pulled out a rubber __________", answers: ['chicken','nose','duck'], category:'clown' },
+  { prompt: "The chef said his soup was so hot, it melted the __________", answers: ['spoon','bowl','table'], category:'chef' },
+  { prompt: "The witch stirred her cauldron with a giant __________", answers: ['spoon','broom','stick'], category:'witch' }
+];
+
 const FALLBACK_SUPER_PROMPTS = [
   { prompt:'Television ___', topAnswers:[{rank:1,answer:'Show',value:500},{rank:2,answer:'Set',value:250},{rank:3,answer:'Remote',value:100}] },
   { prompt:'___ Dog', topAnswers:[{rank:1,answer:'Hot',value:500},{rank:2,answer:'Guard',value:250},{rank:3,answer:'Big',value:100}] },
@@ -998,7 +1010,9 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], us
   const avoidList = localUsed.slice(-80).map(p => `- ${p}`).join('\n');
   const categories = shuffle(PROMPT_CATEGORIES.filter(c => allowDumbDora || !/dumb/i.test(c))).slice(0, 6).join(', ');
   const themeMenu = shuffle(ROUND_THEME_MENU).slice(0, 12).join(', ');
-  const roundSpecificGuidance = roundNum >= 2
+  const roundSpecificGuidance = roundNum > 2
+    ? 'TIEBREAKER: write a very simple, familiar setup with one unmistakably obvious everyday completion that most players and at least 4 celebrities would independently give. Keep the situation playful, but do not make the blank itself an obscure punchline, a strained pun, or a choice among many equally likely objects. The first answer must dominate the alternatives.'
+    : roundNum === 2
     ? 'ROUND 2 MUST BE MORE MATCHABLE: write prompts with a clearer, more definitive best answer. The #1 answer should be something an ordinary player and at least 4 celebrities could plausibly converge on. Still funny, but less ambiguous than Round 1.'
     : 'ROUND 1 can allow a little more variety, but it still needs a clear answer neighborhood with one best answer.';
 
@@ -1032,12 +1046,13 @@ CRITICAL PROMPT QUALITY RULES:
 - The prompt should allow funny panel variation, but all plausible answers must live in the same answer neighborhood.
 - Round 1: one clear best answer plus two plausible alternatives.
 - Round 2: a clearer, more definitive best answer so matching is likely.
+- Tiebreaker: one unmistakably obvious answer to the exact blank; the two alternatives must be much less likely. Prefer a familiar setup over a clever twist.
 - Use exactly one blank marker, written as __________. Never use [BLANK]. Never write the word blank in the prompt.
 - Keep the setup to one sentence, usually 10-20 words. For regular Round 1/Round 2 prompts, the blank MUST be the final thing on the screen: no words and no punctuation after __________.
 - Classic broadcast-style innuendo and double entendre are encouraged. Do not sanitize a naturally cheeky setup. Keep it playful and non-explicit.
 - No more than one call-and-response prompt per whole game, so only use that style when allowed.
 
-For each prompt return 3 likely answers in order. The #1 answer should be the answer the panel can cluster around. For Round 2, make the #1 answer especially strong and concrete.
+For each prompt return 3 likely answers in order. The #1 answer should be the answer the panel can cluster around. For Round 2, make the #1 answer especially strong and concrete. For a tiebreaker, it must be the answer most people say immediately.
 Return JSON exactly:
 {"prompts":[{"prompt":"short setup ending with __________","answers":["best","second","third"],"category":"...","character":"..."},{"prompt":"short setup ending with __________","answers":["best","second","third"],"category":"...","character":"..."}]}`,
         700, true
@@ -1076,14 +1091,15 @@ Return JSON exactly:
   }
 
   // Fallback only: curated bank still exists so the game never crashes if API generation fails.
-  let unused = FALLBACK_ROUND_PROMPTS
+  const fallbackPool = roundNum > 2 ? FALLBACK_TIEBREAKER_PROMPTS : FALLBACK_ROUND_PROMPTS;
+  let unused = fallbackPool
     .filter(p => allowDumbDora || !isCallbackPrompt(p.prompt))
     .filter(p => !promptAlreadyUsedOrSimilar(ROUND_PROMPT_KIND, p.prompt, localUsed));
-  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS
+  if (unused.length < 2) unused = fallbackPool
     .filter(p => allowDumbDora || !isCallbackPrompt(p.prompt))
     .filter(p => !localUsed.some(u => normalizePromptKey(u) === normalizePromptKey(p.prompt)));
-  if (unused.length < 2) unused = FALLBACK_ROUND_PROMPTS.filter(p => allowDumbDora || !isCallbackPrompt(p.prompt));
-  const [a, b] = pickDistinctRoundPromptPair(unused.length ? unused : FALLBACK_ROUND_PROMPTS, allowDumbDora);
+  if (unused.length < 2) unused = fallbackPool.filter(p => allowDumbDora || !isCallbackPrompt(p.prompt));
+  const [a, b] = pickDistinctRoundPromptPair(unused.length ? unused : fallbackPool, allowDumbDora);
   console.log(`[prompt-db] fallback pair A=${a.prompt} | B=${b.prompt}`);
   markPromptUsed(ROUND_PROMPT_KIND, a.prompt);
   markPromptUsed(ROUND_PROMPT_KIND, b.prompt);
