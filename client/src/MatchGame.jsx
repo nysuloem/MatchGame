@@ -26,7 +26,7 @@ const req = async (path, opts = {}) => {
 };
 
 const api = {
-  createRoom:   (playerName, playerCount=2, soloTest=false) => req('/api/room', { method:'POST', body:{playerName, playerCount, soloTest} }),
+  createRoom:   (playerName, playerCount=2, testMode='none') => req('/api/room', { method:'POST', body:{playerName, playerCount, soloTest:testMode!=='none', testMode} }),
   joinRoom:     (code, playerName, signMessage='', aboutMe='', rolePreference='surprise', selfieData='') => req(`/api/room/${code}/join`, { method:'POST', body:{playerName, signMessage, aboutMe, rolePreference, selfieData} }),
   getRoom:      (code) => req(`/api/room/${code}`),
   pickPrompt:   (code, slot, choice) => req(`/api/room/${code}/pick-prompt`, { method:'POST', body:{slot,choice} }),
@@ -409,7 +409,7 @@ export default function MatchGame() {
   const [loading, setLoading] = useState(false);
   const [joinFromQr, setJoinFromQr] = useState(false);
   const [playerCount, setPlayerCount] = useState(2);
-  const [soloTest, setSoloTest] = useState(false);
+  const [testMode, setTestMode] = useState('none');
   const pollRef = useRef(null);
   const lastVersionRef = useRef(null);
 
@@ -452,7 +452,7 @@ export default function MatchGame() {
       // The Start Display click is a user gesture, so use it to prime browser audio before the QR screen appears.
       try { const ctx = getAudioCtx(); if (ctx?.state === 'suspended') ctx.resume(); } catch {}
       // Create room with a placeholder name for the display device
-      const { room: r } = await api.createRoom('__display__', soloTest ? 1 : playerCount, soloTest);
+      const { room: r } = await api.createRoom('__display__', playerCount, testMode);
       lastVersionRef.current = r.version;
       setRoomCode(r.code);
       setRoom(r);
@@ -561,55 +561,24 @@ export default function MatchGame() {
             </div>
           </div>
         ) : (
-          <div className="mg-home-sections">
-            {/* TV DISPLAY */}
+          <div className="mg-home-sections mg-host-only">
             <div className="mg-home-section">
-              <div className="mg-home-section-title">📺 TV Screen (Laptop)</div>
-              <p className="mg-help">Open this on the laptop everyone can see. Everyone scans the QR code. The game randomly chooses 2 contestants and makes the rest celebrity panelists. Use Solo Test when you just want to test the flow alone.</p>
+              <div className="mg-home-section-title">Host on this Screen</div>
               <label className="mg-label">How many people are playing?</label>
               <select className="mg-input" value={playerCount} onChange={e=>setPlayerCount(Number(e.target.value))}>
                 {[2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}</option>)}
               </select>
-              <label className="mg-check" style={{marginTop:14}}><input type="checkbox" checked={soloTest} onChange={e=>setSoloTest(e.target.checked)} /> Solo test mode</label>
-              <div className="mg-row" style={{marginTop:24}}>
+              <label className="mg-label" htmlFor="mg-test-mode">Play mode</label>
+              <select id="mg-test-mode" className="mg-input" value={testMode} onChange={e=>setTestMode(e.target.value)}>
+                <option value="none">Play with everyone</option>
+                <option value="full">Full solo test game</option>
+                <option value="round">Test round play</option>
+                <option value="supermatch">Test Super Match</option>
+                <option value="finalmatch">Test Final Match</option>
+              </select>
+              <div className="mg-row">
                 <button className="mg-btn secondary" onClick={startAsDisplay} disabled={loading}>
                   {loading ? 'Starting…' : 'Start Display'}
-                </button>
-              </div>
-            </div>
-
-            <div className="mg-home-divider">or</div>
-
-            {/* CONTESTANT FALLBACK */}
-            <div className="mg-home-section">
-              <div className="mg-home-section-title">🎮 Contestant (Phone)</div>
-              <p className="mg-help">Normally you can scan the QR code on the TV. Use this fallback only if scanning is not working.</p>
-              <label className="mg-label">Your Name</label>
-              <input className="mg-input" value={playerName}
-                onChange={e=>setPlayerName(e.target.value)}
-                placeholder="e.g. Gene" maxLength={20} />
-              <label className="mg-label">Your intro card</label>
-              <input className="mg-input" value={signMessage}
-                onChange={e=>setSignMessage(e.target.value)}
-                placeholder="e.g. Hi Mom!" maxLength={32} />
-              <label className="mg-label">Tell us about yourself</label>
-              <textarea className="mg-input mg-about-me" value={aboutMe}
-                onChange={e=>setAboutMe(e.target.value)}
-                placeholder="A short line the host can read when you're introduced…" maxLength={180} rows={3} />
-              <label className="mg-label">What would you prefer?</label>
-              <select className="mg-input" value={rolePreference} onChange={e=>setRolePreference(e.target.value)}>
-                <option value="surprise">Surprise me</option>
-                <option value="contestant">I'd rather be a contestant</option>
-                <option value="celebrity">I'd rather be a celebrity</option>
-              </select>
-              <label className="mg-label">Room Code</label>
-              <input className="mg-input big" value={roomCode}
-                onChange={e=>setRoomCode(e.target.value.toUpperCase().slice(0,4))}
-                placeholder="ABCD" maxLength={4} />
-              <div className="mg-row">
-                <button className="mg-btn" onClick={joinAsContestant}
-                  disabled={loading || !playerName.trim() || roomCode.length !== 4}>
-                  Join Game
                 </button>
               </div>
             </div>
@@ -827,6 +796,9 @@ function DisplayView({ room, roomCode, setRoom }) {
           try { await api.finalMatchPickReady(roomCode); } catch {}
         })();
       }
+    }
+    if (phase === 'round_end' && room.testMode === 'round' && prevPhase !== 'round_end') {
+      setTimeout(() => api.roundEndDone(roomCode).catch(() => {}), 4500);
     }
     if (phase === 'finalMatch_answering' && prevPhase !== 'finalMatch_answering' && room.finalMatchPrompt) {
       const key = `${room.activeSlot}-${room.finalMatchCelebIndex}-${room.finalMatchPrompt}`;
@@ -1316,7 +1288,10 @@ function DisplaySuperMatchResult({ room, roomCode, onReveal }) {
       if (!cancelled && foundMatch && winnings > 0) {
         await delay(1800);
         if (!cancelled) {
-          try { await api.finalMatchStart(roomCode); } catch {}
+          try {
+            if (room.testMode === 'supermatch') await api.superMatchLostDone(roomCode);
+            else await api.finalMatchStart(roomCode);
+          } catch {}
         }
       }
       if (!cancelled && winnings <= 0) {
@@ -1878,7 +1853,7 @@ function PhoneView({ room, roomCode, playerSlot }) {
         {/* Super Match result */}
         {phase === 'superMatch_won' && (
           <div className="mg-phone-body">
-            <p className="mg-status">Watch the TV — the Final Match will start automatically!</p>
+            <p className="mg-status">{room.testMode === 'supermatch' ? 'Super Match test complete. Watch the TV for the reveal.' : 'Watch the TV — the Final Match will start automatically!'}</p>
           </div>
         )}
 

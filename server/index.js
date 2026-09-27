@@ -463,9 +463,9 @@ const promptIsUsable = (prompt, kind = 'round') => {
     const blankPos = t.indexOf(BLANK);
     const rawAfterBlank = t.slice(blankPos + BLANK.length);
     const afterBlank = rawAfterBlank.replace(/[\s.!?"'’”]+/g, '');
-    // Regular Round questions must end at the blank. If words follow the blank
-    // ("blank on", etc.), the host reading becomes confusing.
-    return t.length >= 28 && t.length <= 135 && words <= 24 && afterBlank.length === 0;
+    // Classic questions often put a short tag after the blank; the words after
+    // it can carry the joke and help players converge on the same answer.
+    return t.length >= 28 && t.length <= 220 && words <= 43 && afterBlank.length <= 45;
   }
   return t.length >= 5 && t.length <= 80 && !new RegExp(`${BLANK}[\\s\\.!,?;:]+$`).test(t);
 };
@@ -577,6 +577,8 @@ You are the head writer for a classic 1970s Match Game-style comedy show.
 THE CENTRAL RULE: THE BLANK IS THE PUNCHLINE.
 A good clue is a tiny joke setup, quotation, misunderstanding, complaint, or absurd situation that becomes funny when the missing word is supplied. It should not merely ask for a random noun.
 
+PERIOD RHYTHM: A real round often gives Gene a line of dialogue and a second character's reaction. The funny image arrives before or just after the blank. Let the host perform a beat, then leave a clear word or short phrase for six people to match. Use a small human predicament with a visual payoff, not a generic object-selection task. The joke can be saucy without spelling out the dirty reading. Original prompts only; do not reproduce archival questions.
+
 STYLE REFERENCE — learn the comic grammar, do not copy these verbatim:
 - Kate said, "My husband thinks he's a dog and I'm beginning to believe him. Last night he brought home a __________"
 - Gertrude asked the waiter, "Is this chicken fresh?" and the waiter said, "Lady, if it were any fresher, it would __________"
@@ -609,9 +611,9 @@ MATCHABILITY:
 - Do not write trivia or factual-definition questions.
 - Do not make the blank so wide open that almost any object/body part/food/place works.
 - Reject flat prompts like "The dog ate the __________", "Grandpa carved the turkey with a __________", or "The doctor found a __________". Those are fill-ins, not Match Game jokes.
-- Keep it short enough to read aloud smoothly.
+- One or two short spoken sentences, typically 14-35 words. Allow a brief tag after the blank if it makes the punchline land.
 - Use exactly one blank marker, written as __________.
-- Usually put the blank at the end.
+- The blank may be in the middle of a quoted punchline. Keep any following words short and meaningful.
 - Never write the word "blank" in the screen prompt.
 
 VARIETY:
@@ -973,12 +975,12 @@ const generateHostProfile = async () => {
 };
 
 const EMERGENCY_ROUND_PROMPTS = [
-  { prompt: "Airport Alan panicked at security when the scanner found a rubber __________", answers: ["chicken","duck","snake"] },
-  { prompt: "Bingo Brenda got excited and accidentally yelled out __________", answers: ["bingo","number","pants"] },
-  { prompt: "Mechanic Manny opened the hood and found a family of __________", answers: ["mice","raccoons","squirrels"] },
-  { prompt: "Museum Marty leaned on the exhibit and broke the ancient __________", answers: ["vase","statue","mummy"] },
-  { prompt: "Laundry Larry shrank his pants until they fit a __________", answers: ["doll","baby","hamster"] },
-  { prompt: "Hotel Hank complained because his pillow was stuffed with __________", answers: ["rocks","feathers","spaghetti"] }
+  { prompt: "The tailor said, 'Your pants are so tight, I had to use a __________ to get you out of them.'", answers: ["can opener","crowbar","shoehorn"] },
+  { prompt: "The dentist said, 'I know this isn't your mouth. There's a __________ in it.'", answers: ["zipper","mustache","fish hook"] },
+  { prompt: "The new bride said, 'My husband is so cheap, he put a __________ on our honeymoon bed.'", answers: ["parking meter","coin slot","price tag"] },
+  { prompt: "The magician's wife said, 'When I asked for a kiss, he pulled a __________ out of my blouse.'", answers: ["rabbit","dove","handkerchief"] },
+  { prompt: "The plumber said, 'I knew this wasn't an ordinary bathroom when the toilet had a __________.'", answers: ["seat belt","steering wheel","telephone"] },
+  { prompt: "The fortune teller said, 'I can see your future, but first take that __________ off my crystal ball.'", answers: ["bra","wig","hat"] }
 ];
 
 const pickDistinctRoundPromptPair = (pool = [], allowDumbDora = true) => {
@@ -1023,7 +1025,7 @@ const generateRoundPrompts = async (usedCharacters = [], usedCategories = [], us
       const text = await callLLM(
         `${REGULAR_ROUND_WRITER_STYLE}
 
-Generate TWO brand-new Match Game-style fill-in-the-blank comedy prompts for adults and older teens. Keep each prompt SHORT and punchy. The blank must function as the punchline, not merely an omitted noun. ${roundSpecificGuidance}
+Generate TWO brand-new Match Game-style fill-in-the-blank comedy prompts for adults and older teens. The blank must function as the punchline, not merely an omitted noun. ${roundSpecificGuidance}
 
 IMPORTANT: These must not repeat or closely resemble any prior prompt listed below.
 Avoid prior prompts:\n${avoidList || '(none)'}
@@ -1048,7 +1050,9 @@ CRITICAL PROMPT QUALITY RULES:
 - Round 2: a clearer, more definitive best answer so matching is likely.
 - Tiebreaker: one unmistakably obvious answer to the exact blank; the two alternatives must be much less likely. Prefer a familiar setup over a clever twist.
 - Use exactly one blank marker, written as __________. Never use [BLANK]. Never write the word blank in the prompt.
-- Keep the setup to one sentence, usually 10-20 words. For regular Round 1/Round 2 prompts, the blank MUST be the final thing on the screen: no words and no punctuation after __________.
+- Use a vivid, performable setup with a character, their predicament, and a comic payoff. A second short sentence or a short phrase after the blank is welcome when it makes the gag work. Aim for 14-35 words, never a long story.
+- Write the three likely answers first, then check that each completes the exact sentence grammatically and that the #1 answer is the most immediate funny response. If the clue works equally well with a dozen unrelated nouns, discard it.
+- At least one of the pair should have a clean surface reading and a playful second reading. The other can be absurd, a misunderstanding, or a character exchange. A mere mention of a bedroom, zipper, or buns is not itself a joke.
 - Classic broadcast-style innuendo and double entendre are encouraged. Do not sanitize a naturally cheeky setup. Keep it playful and non-explicit.
 - No more than one call-and-response prompt per whole game, so only use that style when allowed.
 
@@ -1885,6 +1889,22 @@ const assignRolesAndStart = async (room) => {
   room.panel = room.panel.map((p,i) => ({ ...p, showIntroSign: signSeats.has(i), signMessage: shortSign(p.signMessage || randomSign()) }));
   room.triangleSlot = 1;
   room.cointossWinner = Math.random() < 0.5 ? 1 : 2;
+  if (room.testMode === 'round') {
+    room.activeSlot = 1;
+    await startNewRound(room, 1);
+    return;
+  }
+  if (room.testMode === 'supermatch') {
+    room.activeSlot = 1;
+    await safeStartSuperMatch(room, 'direct-supermatch-test');
+    return;
+  }
+  if (room.testMode === 'finalmatch') {
+    room.activeSlot = 1;
+    room.superMatchWinnings = 500;
+    await startFinalMatch(room);
+    return;
+  }
   room.phase = 'intro';
   room.introStartedAt = Date.now();
   room.introCompleted = false;
@@ -2018,17 +2038,20 @@ app.post('/api/room/:code/microphone-ready', (req,res) => {
 
 app.post('/api/room', async (req, res) => {
   const { playerName, playerCount, soloTest } = req.body;
+  const testMode = ['full','round','supermatch','finalmatch'].includes(req.body?.testMode)
+    ? req.body.testMode : (soloTest ? 'full' : 'none');
   if (!playerName?.trim()) return res.status(400).json({ error: 'playerName required' });
   const isDisplay = playerName.trim() === '__display__';
   try {
     const code = makeRoomCode();
-    const isSoloTest = Boolean(soloTest);
+    const isSoloTest = testMode !== 'none';
     const maxPlayers = isSoloTest ? 1 : clampInt(playerCount || 2, 2, 8);
     const room = {
       code, version: 1, lastActivity: Date.now(),
       phase: 'lobby',
       maxPlayers,
       soloTest: isSoloTest,
+      testMode,
       participants: {},
       participantMessages: {},
       participantBios: {},
@@ -2370,6 +2393,7 @@ app.post('/api/room/:code/reveal-done', async (req, res) => {
     room.phase = 'round_end';
     bump(room);
     res.json({ room });
+    if (room.testMode === 'round') return;
     setTimeout(async () => {
       try {
         if (Number(room.round) < 2) await startNewRound(room, Number(room.round) + 1);
@@ -2654,15 +2678,9 @@ const completeFinalMatchReveal = async (room) => {
 };
 
 // ─── API: FINAL MATCH ─────────────────────────────────────────
-app.post('/api/room/:code/finalmatch-start', async (req, res) => {
-  const room = rooms.get(req.params.code.toUpperCase());
-  if (!room) return res.status(404).json({ error: 'Room not found' });
-  if (room.phase?.startsWith('finalMatch')) return res.json({ room });
-  if (room.phase !== 'superMatch_won') return res.status(400).json({ error: 'Final Match can only start after a Super Match win' });
+const startFinalMatch = async (room) => {
   room.phase = 'finalMatch_generating';
   bump(room);
-  res.json({ room });
-
   try {
     const fm = await generateFinalMatchPrompt(room.usedFinalPrompts || []);
     room.finalMatchPrompt = fm.prompt;
@@ -2682,6 +2700,15 @@ app.post('/api/room/:code/finalmatch-start', async (req, res) => {
     room.phase = 'error';
     bump(room);
   }
+};
+
+app.post('/api/room/:code/finalmatch-start', async (req, res) => {
+  const room = rooms.get(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.phase?.startsWith('finalMatch')) return res.json({ room });
+  if (room.phase !== 'superMatch_won') return res.status(400).json({ error: 'Final Match can only start after a Super Match win' });
+  res.json({ room });
+  await startFinalMatch(room);
 });
 
 app.post('/api/room/:code/finalmatch-pick', async (req, res) => {
@@ -2751,7 +2778,7 @@ app.post('/api/room/:code/finalmatch-celeb-answer', async (req, res) => {
 app.post('/api/room/:code/supermatch-lost-done', (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  if (room.phase !== 'superMatch_lost') return res.json({ room });
+  if (room.phase !== 'superMatch_lost' && !(room.testMode === 'supermatch' && room.phase === 'superMatch_won')) return res.json({ room });
   room.phase = 'gameOver';
   bump(room);
   res.json({ room });
@@ -2770,6 +2797,11 @@ app.post('/api/room/:code/finalmatch-done', (req, res) => {
 app.post('/api/room/:code/round-end-done', async (req, res) => {
   const room = rooms.get(req.params.code.toUpperCase());
   if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.testMode === 'round' && room.phase === 'round_end') {
+    room.phase = 'gameOver';
+    bump(room);
+    return res.json({ room });
+  }
   if (room.phase === 'round_end' && room.eliminatedSlot && Number(room.round) >= 2) {
     try { await safeStartSuperMatch(room, 'round-end-done'); }
     catch(e) { console.error('round-end-done start super:', e); room.phase = 'error'; bump(room); }

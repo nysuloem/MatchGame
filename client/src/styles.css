@@ -69,6 +69,11 @@ body { margin: 0; }
   margin-bottom: 8px;
   letter-spacing: 0.05em;
 }
+.mg-home-sections.mg-host-only { max-width: 480px; margin-inline: auto; }
+.mg-host-only .mg-home-section { flex-basis: 100%; padding: 24px; }
+.mg-host-only .mg-label { display: block; margin-top: 18px; }
+.mg-host-only .mg-row { margin-top: 26px; justify-content: center; }
+.mg-host-only .mg-btn { width: 100%; }
 .mg-home-divider {
   font-family: 'DM Serif Display', serif;
   font-style: italic;
