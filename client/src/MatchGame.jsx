@@ -73,8 +73,15 @@ let creditsMusicAudio = null;
 const THEME_TRACK = '/audio/match-game-73.mp3';
 const OPENING_CALL = '/audio/opening-archival.mp3';
 const OPENING_PRELUDE = '/audio/opening-get-ready-call.mp3';
-const OPENING_CONTESTANT_CUE = '/audio/opening-contestant-cue-trim.mp3';
+const OPENING_CONTESTANT_CUE = '/audio/opening-contestant-cue-clean.mp3';
 const REGULAR_TRACK = '/audio/regular-music.mp3';
+const SUPER_MATCH_MISS_DING = '/audio/super-match-ding-single.mp3';
+const SUPER_MATCH_HIT_DINGS = '/audio/super-match-dings-win.mp3';
+const playSuperMatchDing = (matched) => {
+  const audio = new Audio(matched ? SUPER_MATCH_HIT_DINGS : SUPER_MATCH_MISS_DING);
+  audio.volume = .68;
+  safePlayAudio(audio);
+};
 const safePlayAudio = (audio) => audio.play().catch(() => {});
 const fadeAndStop = (audio, ms = 450) => {
   if (!audio) return;
@@ -117,7 +124,10 @@ const playIntroClip = (src, { volume = .42, loop = false, start = 0, fadeMs = 0 
   introMusicAudio = audio;
   safePlayAudio(audio);
   if (fadeMs) {
-    if (previous) fadeAndStop(previous, fadeMs);
+    if (previous) {
+      // Let the full spoken call finish beneath the incoming music.
+      previous.addEventListener('ended', () => { if (introMusicAudio !== previous) previous.pause(); }, { once: true });
+    }
     const steps = 12;
     let n = 0;
     const id = setInterval(() => {
@@ -852,8 +862,8 @@ function DisplayView({ room, roomCode, setRoom }) {
     // The long recording starts with 'Get ready to match the stars'. The
     // theme carries the replacement celebrity roll call.
     playIntroClip(OPENING_PRELUDE, { volume: .55 });
-    await delay(3500);
-    playIntroClip(THEME_TRACK, { volume: .24, loop: true, fadeMs: 350 });
+    await delay(3450);
+    playIntroClip(THEME_TRACK, { volume: .24, loop: true, fadeMs: 450 });
     for (let i = 0; i < r.panel.length; i++) {
       setIntroStage('celeb');
       setIntroIndex(i);
@@ -977,12 +987,12 @@ function DisplayView({ room, roomCode, setRoom }) {
           className={`mg-stage-score seat-${slot} ${slot===room.triangleSlot?'triangle':'circle'}`}>{room.completedQuestionsBySlot?.[slot] ? (room.scores?.[slot] || 0) : ''}</div>)}
       </div>}
       {phase.startsWith('superMatch') && <div className="mg-super-board" aria-label="Super Match board">
-        <div className={`mg-super-board-blank ${room.superMatchPromptReady || superPromptReady ? 'revealed' : ''}`}>
+        <div className={`mg-super-board-blank ${room.superMatchPromptReady || superPromptReady || room.phase !== 'superMatch_pickCelebs' ? 'revealed' : ''}`}>
           <span>{room.superMatchPrompt}</span><div className="mg-super-board-cover" />
         </div>
         {[500,250,100].map((value, row) => {
           const revealed = [...(room.superMatchTopAnswers || [])].sort((a,b)=>(a.value||0)-(b.value||0)).slice(0,superBoardRevealCount).find(a => Number(a.value)===value);
-          return <div key={value} className={`mg-super-board-answer row-${row+1} ${revealed ? 'revealed' : ''}`}>{revealed?.answer || ''}</div>;
+          return <div key={value} className={`mg-super-board-answer row-${row+1} ${revealed ? 'revealed' : ''}`}><span>{revealed?.answer || ''}</span><div className="mg-super-board-answer-cover" /></div>;
         })}
       </div>}
       {phase.startsWith('superMatch') && <div className="mg-super-contestant">
@@ -1289,6 +1299,7 @@ function DisplaySuperMatchResult({ room, roomCode, onReveal }) {
         setVisibleCount(i + 1);
         onReveal?.(i + 1);
         const isMatch = winnings > 0 && ta.value === winnings;
+        playSuperMatchDing(isMatch);
         if (isMatch) {
           foundMatch = true;
           setMatchedValue(ta.value);
