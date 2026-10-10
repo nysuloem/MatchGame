@@ -73,11 +73,15 @@ const introWithPrefetch = `  room.phase = 'intro';\n  room.introStartedAt = Date
 const humanReadyAnchor = `  if (!allHumanReady) return;\n\n  if (!room.panelAnswersReady && !room.panelGenerationPending) {`;
 const humanReadyFastPath = `  if (!allHumanReady) return;\n\n  // When every active panelist is human, their submitted cards ARE the panel answers.\n  // Do not call OpenAI to invent six answers that will immediately be overwritten.\n  const activePanelCount = (room.panel || []).filter((p, i) => !inactiveCelebIndices.includes(i)).length;\n  const allActivePanelistsHuman = requiredHumanCelebs.length === activePanelCount;\n  if (allActivePanelistsHuman && !room.panelAnswersReady) {\n    const readyPanel = room.panel.map((p, i) => {\n      if (inactiveCelebIndices.includes(i)) return { ...p, answer: null, inactiveThisTurn: true };\n      return { ...p, answer: room.humanPanelAnswers?.[i] || '???', inactiveThisTurn: false };\n    });\n    pendingPanelByRoom.set(room, readyPanel);\n    room.panelAnswersReady = true;\n    room.panelGenerationPending = false;\n    console.log('[answers] all active panelists are human; skipped AI panel-answer generation');\n  }\n\n  if (!room.panelAnswersReady && !room.panelGenerationPending) {`;
 
+const introSignAssignment = `  room.panel = room.panel.map((p,i) => ({ ...p, showIntroSign: signSeats.has(i), signMessage: shortSign(p.signMessage || randomSign()) }));`;
+const introSignAssignmentFixed = `  room.panel = room.panel.map((p,i) => ({ ...p, showIntroSign: p.isHuman || signSeats.has(i), signMessage: shortSign(p.signMessage || randomSign()) }));`;
+
 for (const [needle, label] of [
   [roundLogicMarker, 'round logic marker'],
   [liveRoundGeneration, 'live round generation line'],
   [introBlock, 'intro block'],
   [humanReadyAnchor, 'all-human answer anchor'],
+  [introSignAssignment, 'celebrity info-card assignment'],
 ]) {
   if (!source.includes(needle)) {
     console.error(`Runtime patch failed: expected ${label} was not found.`);
@@ -94,6 +98,7 @@ const runtimeSource = source
   .replace(liveRoundGeneration, cachedRoundGeneration)
   .replace(introBlock, introWithPrefetch)
   .replace(humanReadyAnchor, humanReadyFastPath)
+  .replace(introSignAssignment, introSignAssignmentFixed)
   .replace(/\bmax_tokens\s*:/g, 'max_completion_tokens:');
 
 fs.writeFileSync(runtimePath, runtimeSource, 'utf8');
