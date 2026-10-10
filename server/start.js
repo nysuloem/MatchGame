@@ -61,5 +61,13 @@ if (!source.includes(oldBlock)) {
   process.exit(1);
 }
 
-fs.writeFileSync(runtimePath, source.replace(oldBlock, newBlock), 'utf8');
+// GPT-6-family chat completions use max_completion_tokens rather than max_tokens.
+// Apply this compatibility patch to every text-model request in the legacy server
+// so prompt generation, panel-answer generation, scoring, and portrait validation
+// all use the model we configured without failing mid-game.
+const runtimeSource = source
+  .replace(oldBlock, newBlock)
+  .replace(/\bmax_tokens\s*:/g, 'max_completion_tokens:');
+
+fs.writeFileSync(runtimePath, runtimeSource, 'utf8');
 await import(`./index.runtime.js?patched=${Date.now()}`);
