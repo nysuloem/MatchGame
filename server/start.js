@@ -61,12 +61,39 @@ if (!source.includes(oldBlock)) {
   process.exit(1);
 }
 
+const roundLogicMarker = '// ─── ROUND LOGIC ──────────────────────────────────────────────';
+const prefetchHelper = `// Prepare both regular-round prompt pairs during the intro so the live game never\n// pauses between rounds waiting for OpenAI. If generation fails, startNewRound still\n// has the existing curated fallback path.\nconst prepareRegularRoundPrompts = async (room) => {\n  if (!room) return;\n  room.prefetchedRegularRounds = room.prefetchedRegularRounds || {};\n  if (room.prefetchedRegularRoundsPromise) return room.prefetchedRegularRoundsPromise;\n  room.prefetchedRegularRoundsPromise = (async () => {\n    const usedCharacters = [...(room.usedCharacters || [])];\n    const usedCategories = [...(room.usedCategories || [])];\n    const usedRoundPrompts = [...(room.usedRoundPrompts || [])];\n    let allowDumbDora = !room.dumbDoraUsed;\n    const panelNames = (room.panel || []).map(p => p.name);\n    for (const roundNum of [1, 2]) {\n      if (room.prefetchedRegularRounds[roundNum]) continue;\n      const pack = await generateRoundPrompts(usedCharacters, usedCategories, usedRoundPrompts, allowDumbDora, roundNum, panelNames);\n      room.prefetchedRegularRounds[roundNum] = pack;\n      usedCharacters.push(pack.charA, pack.charB);\n      usedCategories.push(pack.categoryA, pack.categoryB);\n      usedRoundPrompts.push(pack.promptA, pack.promptB);\n      if (isCallbackPrompt(pack.promptA) || isCallbackPrompt(pack.promptB)) allowDumbDora = false;\n      console.log(\`[prefetch] regular round \${roundNum} ready\`);\n    }\n  })().catch(err => {\n    console.warn('[prefetch] regular-round preparation failed; live fallback remains available:', err.message || err);\n  }).finally(() => {\n    room.prefetchedRegularRoundsPromise = null;\n  });\n  return room.prefetchedRegularRoundsPromise;\n};\n\n`;
+
+const liveRoundGeneration = `    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = await generateRoundPrompts(room.usedCharacters, room.usedCategories || [], room.usedRoundPrompts || [], !room.dumbDoraUsed, roundNum, (room.panel || []).map(p => p.name));`;
+const cachedRoundGeneration = `    let preparedRound = room.prefetchedRegularRounds?.[roundNum] || null;\n    if (preparedRound) {\n      delete room.prefetchedRegularRounds[roundNum];\n      console.log(\`[prefetch] using prepared regular round \${roundNum}\`);\n    } else {\n      preparedRound = await generateRoundPrompts(room.usedCharacters, room.usedCategories || [], room.usedRoundPrompts || [], !room.dumbDoraUsed, roundNum, (room.panel || []).map(p => p.name));\n    }\n    const { promptA, promptB, answersA, answersB, categoryA, categoryB, charA, charB } = preparedRound;`;
+
+const introBlock = `  room.phase = 'intro';\n  room.introStartedAt = Date.now();\n  room.introCompleted = false;\n  bump(room);`;
+const introWithPrefetch = `  room.phase = 'intro';\n  room.introStartedAt = Date.now();\n  room.introCompleted = false;\n  bump(room);\n  // Use the intro animation/narration time to prepare both question pairs.\n  prepareRegularRoundPrompts(room);`;
+
+const humanReadyAnchor = `  if (!allHumanReady) return;\n\n  if (!room.panelAnswersReady && !room.panelGenerationPending) {`;
+const humanReadyFastPath = `  if (!allHumanReady) return;\n\n  // When every active panelist is human, their submitted cards ARE the panel answers.\n  // Do not call OpenAI to invent six answers that will immediately be overwritten.\n  const activePanelCount = (room.panel || []).filter((p, i) => !inactiveCelebIndices.includes(i)).length;\n  const allActivePanelistsHuman = requiredHumanCelebs.length === activePanelCount;\n  if (allActivePanelistsHuman && !room.panelAnswersReady) {\n    const readyPanel = room.panel.map((p, i) => {\n      if (inactiveCelebIndices.includes(i)) return { ...p, answer: null, inactiveThisTurn: true };\n      return { ...p, answer: room.humanPanelAnswers?.[i] || '???', inactiveThisTurn: false };\n    });\n    pendingPanelByRoom.set(room, readyPanel);\n    room.panelAnswersReady = true;\n    room.panelGenerationPending = false;\n    console.log('[answers] all active panelists are human; skipped AI panel-answer generation');\n  }\n\n  if (!room.panelAnswersReady && !room.panelGenerationPending) {`;
+
+for (const [needle, label] of [
+  [roundLogicMarker, 'round logic marker'],
+  [liveRoundGeneration, 'live round generation line'],
+  [introBlock, 'intro block'],
+  [humanReadyAnchor, 'all-human answer anchor'],
+]) {
+  if (!source.includes(needle)) {
+    console.error(`Runtime patch failed: expected ${label} was not found.`);
+    process.exit(1);
+  }
+}
+
 // GPT-6-family chat completions use max_completion_tokens rather than max_tokens.
-// Apply this compatibility patch to every text-model request in the legacy server
-// so prompt generation, panel-answer generation, scoring, and portrait validation
-// all use the model we configured without failing mid-game.
+// Apply compatibility and live-flow patches to the legacy server without making
+// gameplay wait on work that can be done during the intro.
 const runtimeSource = source
   .replace(oldBlock, newBlock)
+  .replace(roundLogicMarker, prefetchHelper + roundLogicMarker)
+  .replace(liveRoundGeneration, cachedRoundGeneration)
+  .replace(introBlock, introWithPrefetch)
+  .replace(humanReadyAnchor, humanReadyFastPath)
   .replace(/\bmax_tokens\s*:/g, 'max_completion_tokens:');
 
 fs.writeFileSync(runtimePath, runtimeSource, 'utf8');
