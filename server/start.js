@@ -76,12 +76,33 @@ const humanReadyFastPath = `  if (!allHumanReady) return;\n\n  // When every act
 const introSignAssignment = `  room.panel = room.panel.map((p,i) => ({ ...p, showIntroSign: signSeats.has(i), signMessage: shortSign(p.signMessage || randomSign()) }));`;
 const introSignAssignmentFixed = `  room.panel = room.panel.map((p,i) => ({ ...p, showIntroSign: p.isHuman || signSeats.has(i), signMessage: shortSign(p.signMessage || randomSign()) }));`;
 
+const oldSimilarity = `const promptsTooSimilar = (a, b) => {\n  const na = normalizePromptKey(a).replace(/[^a-z0-9 ]/g, ' ');\n  const nb = normalizePromptKey(b).replace(/[^a-z0-9 ]/g, ' ');\n  if (!na || !nb) return false;\n  if (na === nb) return true;\n  const wa = new Set(na.split(/\\s+/).filter(w => w.length > 3));\n  const wb = new Set(nb.split(/\\s+/).filter(w => w.length > 3));\n  if (!wa.size || !wb.size) return false;\n  const overlap = [...wa].filter(w => wb.has(w)).length;\n  return overlap / Math.min(wa.size, wb.size) >= 0.72;\n};`;
+
+const newSimilarity = `const ROUND_THEME_ALIASES = new Map([\n  ['husband','spouse'],['wife','spouse'],['spouse','spouse'],['bride','spouse'],['groom','spouse'],\n  ['dog','dog'],['dogs','dog'],['puppy','dog'],['puppies','dog'],['canine','dog'],['pet','dog'],\n  ['doctor','doctor'],['physician','doctor'],['nurse','doctor'],['dentist','doctor'],\n  ['restaurant','restaurant'],['waiter','restaurant'],['waitress','restaurant'],['diner','restaurant'],\n  ['wedding','wedding'],['honeymoon','wedding'],['marriage','wedding'],\n  ['karaoke','karaoke'],['singing','karaoke'],['singer','karaoke'],\n  ['alarm','alarm'],['clock','alarm'],['party','party'],['reception','party']\n]);\nconst ROUND_THEME_STOPWORDS = new Set([\n  'said','says','asked','asks','told','when','then','that','this','with','from','into','onto','about','after','before',\n  'there','their','they','them','your','have','has','had','just','really','very','because','would','could','should',\n  'blank','last','night','thought','think','thinks','home','came','come','went','going','made','make','looked','looks'\n]);\nconst roundThemeTokens = (prompt='') => normalizePromptKey(prompt)\n  .replace(/[^a-z0-9 ]/g, ' ')\n  .split(/\\s+/)\n  .filter(w => w.length > 3 && !ROUND_THEME_STOPWORDS.has(w))\n  .map(w => ROUND_THEME_ALIASES.get(w) || w);\nconst roundPromptHasBannedPremise = (prompt='') => {\n  const t = new Set(roundThemeTokens(prompt));\n  // This premise has already been overused in real play and should be retired,\n  // even if the model paraphrases husband/wife/pet/canine.\n  return t.has('spouse') && t.has('dog');\n};\nconst promptsTooSimilar = (a, b) => {\n  const na = normalizePromptKey(a).replace(/[^a-z0-9 ]/g, ' ');\n  const nb = normalizePromptKey(b).replace(/[^a-z0-9 ]/g, ' ');\n  if (!na || !nb) return false;\n  if (na === nb) return true;\n  const wa = new Set(na.split(/\\s+/).filter(w => w.length > 3));\n  const wb = new Set(nb.split(/\\s+/).filter(w => w.length > 3));\n  if (wa.size && wb.size) {\n    const overlap = [...wa].filter(w => wb.has(w)).length;\n    if (overlap / Math.min(wa.size, wb.size) >= 0.72) return true;\n  }\n  // Catch repeated premises, not merely repeated wording. Two clues that reuse\n  // the same pair of meaningful concepts are the same Match Game theme even\n  // when the sentence and character names are completely different.\n  const ta = new Set(roundThemeTokens(a));\n  const tb = new Set(roundThemeTokens(b));\n  const shared = [...ta].filter(w => tb.has(w));\n  const strong = new Set(['spouse','dog','doctor','restaurant','wedding','karaoke','alarm','party']);\n  return shared.length >= 3 || (shared.length >= 2 && shared.some(w => strong.has(w)));\n};`;
+
+const staleDogExample = `- Kate said, \"My husband thinks he's a dog and I'm beginning to believe him. Last night he brought home a __________\"`;
+const freshStyleExample = `- The magician groaned, \"My assistant quit halfway through the trick, so now I have to pull a __________ out of my own hat.\"`;
+
+const generatedPromptGuard = `        if (isDumb && callbackCountInPair >= 1) continue;\n        if (promptAlreadyUsedOrSimilar(ROUND_PROMPT_KIND, pr.prompt, [...localUsed, ...fresh.map(f => f.prompt)])) continue;`;
+const generatedPromptGuardFixed = `        if (isDumb && callbackCountInPair >= 1) continue;\n        if (roundPromptHasBannedPremise(pr.prompt)) continue;\n        if (promptAlreadyUsedOrSimilar(ROUND_PROMPT_KIND, pr.prompt, [...localUsed, ...fresh.map(f => f.prompt)])) continue;`;
+
+const diversityLine = `- DIVERSITY FIRST: choose a setting that feels different from the avoid list. Repeated karaoke/spilled drink/party/date prompts are failures.`;
+const diversityLineFixed = `- DIVERSITY FIRST: choose a setting AND comic premise that feel different from the avoid list. Paraphrasing an old premise with new names or wording is still a repeat and is a failure.\n- NEVER use or paraphrase the tired \"spouse/husband/wife behaves like a dog or pet\" premise. It has been retired from this game.\n- Repeated karaoke/spilled drink/party/date prompts are failures.`;
+
+const ttsRouteHead = `app.post('/api/speak', async (req, res) => {\n  const { code, slot, text, isAnnouncer } = req.body;\n  if (!text) return res.status(400).json({ error: 'text required' });`;
+const ttsRouteHeadFixed = `app.post('/api/speak', async (req, res) => {\n  let { code, slot, text, isAnnouncer } = req.body;\n  if (!text) return res.status(400).json({ error: 'text required' });\n\n  // The browser historically truncated sentence-style clues at the blank.\n  // Reconstruct the authoritative current clue here so Gene always reads any\n  // meaningful tag after the blank as well. Short Super/Final clues are left alone.\n  if (isAnnouncer && code && /\\bblank\\b/i.test(String(text))) {\n    const room = rooms.get(String(code).toUpperCase());\n    if (room?.chosenPrompt && ['answering','generating_answers'].includes(room.phase)) {\n      let fullPrompt = normalizePromptBlank(room.chosenPrompt);\n      if (isCallbackPrompt(fullPrompt)) {\n        const opening = getCallbackOpening(fullPrompt);\n        const pos = fullPrompt.toLowerCase().indexOf(opening.toLowerCase());\n        fullPrompt = fullPrompt.slice(pos + opening.length).replace(/^,?\\s*/, '').trim();\n      }\n      const parts = fullPrompt.split(BLANK);\n      if ((parts[1] || '').replace(/[\\s.!?\"'’”]+/g, '').length) {\n        text = fullPrompt.replace(BLANK, ' blank ').replace(/\\s+/g, ' ').trim();\n        console.log('[tts] restored words after regular-question blank');\n      }\n    }\n  }`;
+
 for (const [needle, label] of [
   [roundLogicMarker, 'round logic marker'],
   [liveRoundGeneration, 'live round generation line'],
   [introBlock, 'intro block'],
   [humanReadyAnchor, 'all-human answer anchor'],
   [introSignAssignment, 'celebrity info-card assignment'],
+  [oldSimilarity, 'prompt similarity logic'],
+  [staleDogExample, 'retired dog/spouse style example'],
+  [generatedPromptGuard, 'generated prompt repeat guard'],
+  [diversityLine, 'prompt diversity instruction'],
+  [ttsRouteHead, 'TTS route header'],
 ]) {
   if (!source.includes(needle)) {
     console.error(`Runtime patch failed: expected ${label} was not found.`);
@@ -89,7 +110,6 @@ for (const [needle, label] of [
   }
 }
 
-// GPT-6-family chat completions use max_completion_tokens rather than max_tokens.
 // Apply compatibility and live-flow patches to the legacy server without making
 // gameplay wait on work that can be done during the intro.
 const runtimeSource = source
@@ -99,6 +119,11 @@ const runtimeSource = source
   .replace(introBlock, introWithPrefetch)
   .replace(humanReadyAnchor, humanReadyFastPath)
   .replace(introSignAssignment, introSignAssignmentFixed)
+  .replace(oldSimilarity, newSimilarity)
+  .replace(staleDogExample, freshStyleExample)
+  .replace(generatedPromptGuard, generatedPromptGuardFixed)
+  .replace(diversityLine, diversityLineFixed)
+  .replace(ttsRouteHead, ttsRouteHeadFixed)
   .replace(/\bmax_tokens\s*:/g, 'max_completion_tokens:');
 
 fs.writeFileSync(runtimePath, runtimeSource, 'utf8');
